@@ -1,13 +1,14 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.1.0
+  version: 0.2.0
 servers:
   - url: http://commerce-backend:8080/api/v1
 paths:
   /orders:
     get:
       summary: List authenticated user's orders
+      description: Returns only orders owned by the authenticated customer principal.
       parameters:
         - in: query
           name: productQuery
@@ -23,6 +24,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/OrderSummary' }
+        '401': { $ref: '#/components/responses/Error' }
   /orders/{orderId}:
     get:
       summary: Get authoritative order snapshot
@@ -34,6 +36,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OrderSnapshot' }
+        '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
   /orders/{orderId}/logistics:
@@ -47,6 +50,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LogisticsSnapshot' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
   /after-sales/eligibility:
     post:
@@ -62,9 +67,12 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EligibilityDecision' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
   /refunds:
     post:
       summary: Create idempotent refund request
+      description: The backend revalidates authenticated ownership, current state, eligibility, amount, approval record, and idempotency immediately before commit.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -78,11 +86,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RefundResult' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/Error' }
   /returns:
     post:
       summary: Create idempotent return request
+      description: The backend revalidates authenticated ownership, current state, eligibility, approval record, and idempotency immediately before commit.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -96,6 +107,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReturnResult' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/Error' }
   /support-tickets:
@@ -112,9 +125,12 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TicketResult' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
   /approvals:
     post:
       summary: Create approval request
+      description: Creates a PENDING authoritative approval record. This endpoint never approves an action.
       requestBody:
         required: true
         content:
@@ -126,9 +142,30 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApprovalResult' }
+        '401': { $ref: '#/components/responses/Error' }
+    get:
+      summary: List approval requests visible to an authorized approver
+      description: Requires APPROVER role. Used by the Human-in-the-loop approval center.
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, DENIED, EXPIRED]
+      responses:
+        '200':
+          description: Approval requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApprovalResult' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
   /approvals/{approvalId}/decision:
     post:
       summary: Authorized human decides approval
+      description: Only an authenticated APPROVER may transition PENDING to APPROVED or DENIED.
       parameters:
         - in: path
           name: approvalId
@@ -151,6 +188,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApprovalResult' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /orders/{orderId}/after-sales:
     get:
       summary: Query current after-sales objects/status for verification and timeout recovery
@@ -165,6 +205,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AfterSalesStatus' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
 components:
   securitySchemes:
     bearerAuth:
@@ -251,7 +293,7 @@ components:
         orderId: { type: string }
         reasonCode: { type: string }
         requestedAmount: { type: [number, 'null'] }
-        approvalToken: { type: [string, 'null'] }
+        approvalRequestId: { type: [string, 'null'] }
         runId: { type: string }
     RefundResult:
       type: object
@@ -266,7 +308,7 @@ components:
         orderId: { type: string }
         reasonCode: { type: string }
         returnMethod: { type: [string, 'null'] }
-        approvalToken: { type: [string, 'null'] }
+        approvalRequestId: { type: [string, 'null'] }
         runId: { type: string }
     ReturnResult:
       type: object
@@ -298,9 +340,17 @@ components:
         riskReason: { type: string }
     ApprovalResult:
       type: object
+      required: [approvalRequestId, runId, orderId, actionType, status]
       properties:
         approvalRequestId: { type: string }
+        runId: { type: string }
+        orderId: { type: string }
+        actionType: { type: string }
+        amount: { type: [number, 'null'] }
+        riskReason: { type: [string, 'null'] }
         status: { type: string, enum: [PENDING, APPROVED, DENIED, EXPIRED] }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
     AfterSalesStatus:
       type: object
       properties:
