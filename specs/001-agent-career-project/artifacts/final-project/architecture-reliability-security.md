@@ -1,334 +1,232 @@
-# ProcurePilot Architecture, Reliability & Security
+# CommerceAgent Architecture, Reliability & Security
 
-## 1. Responsibility boundaries
+## 1. Responsibility split
 
-### Minimal Web UI
-Responsibilities:
-- submit/clarify purchase task;
-- show current Agent phase and requested human input;
-- show supplier/quote evidence and citations;
-- present approval action to authorized human;
-- show final verified business state and run trace summary.
-
-Non-responsibilities:
-- no business-rule authority;
-- no hidden tool permission logic;
-- no direct database writes.
+### UI
+- collect customer request and authentication context;
+- display clarification, action summary, approval/waiting state and final result;
+- provide a separate simple approval view for configured high-risk cases;
+- never decide eligibility or permissions.
 
 ### Python Agent Service
-Responsibilities:
-- normalize user intent into task state;
-- decide whether required information is missing;
-- plan/select the next allowed read/check/tool action;
-- use policy retrieval when unstructured knowledge is required;
-- compare acceptable alternatives after deterministic facts are gathered;
-- decide whether to ask user, stop, escalate or request approval;
-- maintain bounded Agent state and step budget;
-- emit model/tool/retrieval trace events.
+Owns:
+- intent understanding;
+- order-context resolution;
+- explicit Agent state graph;
+- evidence sufficiency checks;
+- dynamic Tool/API selection;
+- policy retrieval orchestration;
+- deciding clarification vs refund vs return vs escalation based on authoritative tool results;
+- bounded retry/stop logic;
+- final evidence-grounded response;
+- eval/trace emission.
 
-Non-responsibilities:
-- cannot authoritatively decide budget availability, supplier certification, approval outcome or transaction validity;
-- cannot bypass backend permissions/state transitions;
-- cannot write raw SQL to business state.
+Does not own:
+- order ownership;
+- refund amount;
+- legal state transition;
+- approval authority;
+- idempotent write guarantee.
 
-### Java Business Backend
-Responsibilities:
-- authoritative domain rules and validation;
-- typed Tool/API endpoints;
-- supplier/quote/budget/request/approval/PO state;
-- transactions and relational constraints;
-- authorization and least privilege;
-- request/approval/PO state machine;
-- idempotency and duplicate prevention;
-- audit trail and server-side policy invariants;
-- verify-after-write status reads.
+### Java After-sales Backend
+Owns:
+- User/Order/Shipment/AfterSales domain data;
+- authorization and ownership checks;
+- deterministic refund/return eligibility;
+- amount calculation and limits;
+- legal state transitions;
+- idempotency;
+- transactions;
+- approval validation;
+- refund/return/ticket persistence;
+- audit log;
+- eval-state reset fixture APIs used only in test profile.
 
 ### PostgreSQL
-Responsibilities:
-- persistent business state;
-- unique/idempotency constraints;
-- audit/event records;
-- Agent-run/tool/retrieval metadata if a single database is simplest;
-- optional policy vector embedding via pgvector.
+Stores business state, after-sales records, approval/audit data and optionally normalized trace metadata. Model-generated prose is never the source of truth for a financial/business state.
 
-## 2. Core business/domain model
+### Policy Retrieval
+Stores/version-controls unstructured policy/SOP documents. Retrieval is advisory/evidentiary; backend eligibility remains authoritative.
 
-### `user_account`
-- `user_id`
-- `role` (`requester`, `procurement`, `approver`, `admin_test_fixture`)
-- `cost_center_scope`
-- `active`
-
-### `supplier`
-- `supplier_id`
-- `name`
-- `status` (`certified`, `suspended`, `inactive`)
-- `categories`
-- `regions`
-- `certification_valid_until`
-
-### `quote`
-- `quote_id`
-- `supplier_id`
-- `item_or_category_id`
-- `quantity_min/max`
-- `unit_price`, `currency`
-- `promised_delivery_days/date`
-- `valid_from`, `valid_until`
-- `version`
-
-### `budget_account`
-- `cost_center_id`
-- `currency`
-- `available_amount`
-- `reserved_amount`
-- `version`
-
-### `purchase_request`
-- `request_id`
-- `requester_id`
-- normalized item/category requirements
-- `quantity`
-- `required_delivery_date`
-- `cost_center_id`
-- chosen `quote_id` or option set
-- `amount`
-- `status` (`draft`, `created`, `pending_approval`, `approved`, `rejected`, `po_drafted`, `cancelled`, `partial_failure`)
-- `version`
-- `idempotency_key`
-- timestamps
-
-### `approval`
-- `approval_id`
-- `request_id`
-- `required_role`
-- `status` (`pending`, `approved`, `rejected`)
-- `actor_id`
-- `reason`
-- timestamps/version
-
-### `purchase_order_draft`
-- `po_draft_id`
-- `request_id`
-- `quote_id`
-- `supplier_id`
-- `amount/currency`
-- `status`
-- `idempotency_key`
-
-### `policy_document`
-- `policy_id`
-- `version`
-- effective dates
-- category/type/access scope
-- source text/chunks/citations
-
-### `agent_run`
-- `run_id`
-- `user_id`
-- `task_id/session_id`
-- input hash/redacted input
-- model/config version
-- tool-contract version
-- start/end/status
-- token/latency totals
-- final request/result refs
-
-### `agent_step`
-- `step_id`, `run_id`, sequence
-- state/node name
-- normalized decision category (not hidden chain-of-thought)
-- tool/retrieval/model action ref
-- timing/status/error
-
-### `tool_execution`
-- `tool_execution_id`, `run_id`
-- tool/version
-- redacted normalized args
-- result/error class
-- attempt/retry count
-- idempotency key if applicable
-- latency
-- business-state refs
-
-### `audit_log`
-- actor/run/tool/request refs
-- action type
-- before/after state/version refs
-- policy/permission decision
-- timestamp
-
-## 3. Business state machine
+## 2. Suggested logical architecture
 
 ```text
-DRAFT
-  -> CREATED
-       -> PENDING_APPROVAL
-            -> APPROVED
-            -> REJECTED
-       -> APPROVED (only when policy explicitly allows no-human approval)
-APPROVED
-  -> PO_DRAFTED
-Any write with ambiguous outcome
-  -> verify authoritative state before retry
-Unrecoverable inconsistency
-  -> PARTIAL_FAILURE / manual review
+Customer UI
+    |
+    v
+Agent API (Python/FastAPI)
+    |
+    |-- State Graph / LLM
+    |-- Tool Adapter
+    |-- Policy Retrieval
+    |-- Trace + Eval hooks
+    |
+    v
+After-sales API (Java/Spring Boot)
+    |-- Order Service
+    |-- Logistics Projection
+    |-- Eligibility Service
+    |-- Refund/Return Service
+    |-- Ticket Service
+    |-- Approval Service
+    |-- Audit Service
+    |
+    v
+PostgreSQL
 ```
 
-Invalid transitions are rejected server-side even if the Agent requests them.
+HTTP/JSON is the MVP Tool transport. MCP may be layered later without changing business semantics.
 
-## 4. Agent state and graph
-
-Minimal task state:
-- user identity/scope;
-- raw task + normalized requirements;
-- missing blocking fields;
-- gathered supplier/quote/budget/policy evidence refs;
-- candidate acceptable options;
-- current business request/approval/PO IDs;
-- allowed tools;
-- retry/step budgets;
-- pending human input/approval;
-- terminal status and verified output.
+## 3. Agent state machine
 
 Recommended nodes:
+1. `parse_request`
+2. `resolve_order`
+3. `gather_evidence`
+4. `decide_next_step`
+5. `execute_read_tool`
+6. `validate_tool_result`
+7. `check_evidence_sufficiency`
+8. `check_eligibility`
+9. `choose_after_sales_action`
+10. `risk_check`
+11. `wait_for_approval` (conditional)
+12. `execute_write`
+13. `verify_business_state`
+14. `finalize_response`
+15. `escalate_or_fail_safe`
 
-```text
-START
- -> NormalizeRequest
- -> ValidateRequiredFields
-    -> NeedClarification? -> WAIT_USER -> NormalizeRequest
- -> DecideNextEvidence
- -> ExecuteReadTool / RetrievePolicy
- -> ValidateEvidence
- -> EnoughEvidence?
-    -> no -> DecideNextEvidence
- -> CompareAcceptableOptions
- -> DeterministicPreflightChecks
- -> NeedHumanApproval?
-    -> yes -> CreateRequest -> RequestApproval -> WAIT_APPROVAL
-    -> no  -> CreateRequest
- -> ApprovedAndPORequired?
-    -> yes -> CreatePODraft
- -> VerifyBusinessState
- -> ComposeEvidenceBackedResult
- -> END
-```
+Looping is allowed only between evidence/decision/read-tool nodes with a bounded step count.
 
-### Stop conditions
-- terminal business state reached;
-- explicit user cancellation;
-- required information unavailable after clarification budget;
-- tool retry budget exhausted;
-- max Agent steps reached;
-- security/policy denial requiring manual handling.
+## 4. Stop and circuit-breaker rules
 
-Initial target max steps: a configurable small bound such as 12–16; exact number must be determined from dev eval rather than treated as a resume achievement.
+Stop safely when:
+- max Agent steps exceeded;
+- same tool/parameter combination repeats without new evidence;
+- required system remains unavailable after bounded retries;
+- order identity remains ambiguous;
+- deterministic eligibility denies automatic action;
+- policy versions cannot be resolved and backend cannot supply an authoritative result;
+- approval is denied/expired;
+- post-write state cannot be verified.
 
-## 5. Retry and idempotency
+A safe stop may create a support ticket if that is permitted and useful; otherwise return a transparent handoff response.
 
-- Safe read calls: at most one automatic transient retry in core.
-- Write calls: never blind-retry after an unknown outcome; call status verification first.
-- Every write tool requires an idempotency key generated from stable intent/run/action semantics.
-- Database unique constraints enforce effective single write even if client/service retries.
-- Agent retry counters live in explicit state and trace.
+## 5. Retry strategy
 
-## 6. Checkpoints and Human-in-the-loop
+### Read tools
+Allow short bounded retries for transient network/service errors.
 
-Checkpoint/pause before:
-- waiting for missing blocking user information;
-- any policy-required approval;
-- optional reviewer confirmation for high-risk PO draft if chosen in implementation.
+### Write tools
+Never blindly retry after timeout. Use:
+1. stable idempotency key;
+2. query `get_after_sales_status`;
+3. if state confirms success, return existing result;
+4. if state confirms no write and retry is safe, retry with same key;
+5. if ambiguous remains, escalate instead of risking duplicate refund.
 
-Resume uses authoritative business state, not only serialized model memory. After resume, revalidate quote freshness and request/approval version before write.
+## 6. Human-in-the-loop
 
-## 7. Retrieval boundary
+HITL is required for configured high-risk conditions such as:
+- amount above threshold;
+- exceptional/manual-review eligibility;
+- unusual policy override request;
+- other risk rule defined by the backend.
 
-RAG corpus is restricted to unstructured procurement policy/standard operating procedure material.
+The Agent creates an approval request and enters `WAITING_APPROVAL`. It cannot self-approve or synthesize an approval token.
 
-Structured authoritative facts stay outside RAG:
-- supplier certification;
-- quote price/expiry/delivery;
-- budget balance;
-- request/approval/PO status;
-- user permissions.
+## 7. Security boundaries
 
-Retrieval requirements:
-- policy/version/effective-date metadata;
-- access filtering;
-- chunk citation/source location;
-- top-k candidates recorded in trace;
-- conflicting-version detection;
-- eval for recall and citation correctness.
+### Authentication / authorization
+- UI/session establishes authenticated user.
+- Tool adapter never trusts a user id/order id solely because the model emitted it.
+- Java backend validates ownership for every user-scoped operation.
 
-## 8. Security model
+### Prompt Injection
+Untrusted user/policy/product/logistics text cannot change:
+- tool allowlist;
+- authenticated principal;
+- approval threshold;
+- refund amount;
+- backend policy rules.
 
-### Prompt injection
-- user/supplier/policy text is untrusted content;
-- system/tool authorization is out-of-band and server-side;
-- retrieved text cannot create permissions or change tool schemas;
-- explicit adversarial eval cases.
-
-### Authorization
-- authenticated user identity passed separately from model-generated arguments;
-- backend derives allowed cost center/role scope;
-- requester cannot self-approve;
-- procurement-only tools reject requester role;
-- tool allowlist can be narrowed per run/state.
+Instructions embedded in retrieved content are treated as data, not executable authority.
 
 ### Parameter validation
-- schema/type/range/date/ID validation;
-- quantity > 0;
-- valid currency/cost center;
-- quote belongs to supplier/request and is unexpired;
-- amount recomputed from authoritative quote rather than trusted from model.
+Use strict schemas/enums/ranges. The backend recomputes sensitive fields such as amount and eligibility rather than accepting model-calculated authority.
 
-### Data minimization
-- traces redact secrets and unnecessary personal/sensitive fields;
-- model prompt receives only fields necessary for current decision;
-- no credentials in model context.
+### Read/write separation
+Write tools are distinct, visibly risk-labeled and guarded by preconditions. A read tool can never be promoted to arbitrary execution through free-form arguments.
 
-### High-risk writes
-- deterministic preconditions;
-- least privilege;
-- HITL where policy requires;
-- idempotency;
-- verify-after-write;
-- immutable audit record.
+### Least privilege
+Agent service gets only APIs needed for the after-sales workflow. No database superuser or arbitrary SQL tool in core.
+
+### Sensitive data
+Expose only fields necessary for after-sales handling. Avoid full payment credentials or unnecessary PII in prompts/traces.
+
+## 8. Idempotency model
+
+Every logical refund/return write uses a stable idempotency key derived from the logical action context, not regenerated on every retry.
+
+Backend uniqueness and state checks guarantee:
+- repeated identical request returns prior result;
+- conflicting duplicate action fails explicitly;
+- a timeout cannot silently create two refunds.
 
 ## 9. Observability
 
-One `run_id` must reconstruct:
-- initial request and normalized task facts;
-- model/provider/config identifier;
-- graph nodes visited;
-- tool names, normalized args, results/errors, retries and latency;
-- retrieved policy IDs/versions/chunks/scores;
-- approvals and human events;
-- token usage/cost estimate;
-- business-state transitions;
-- final verified outcome.
+Per `run_id`, record:
+- request metadata;
+- resolved intent/order id;
+- state-node transitions;
+- model name/config and token usage;
+- tool name and sanitized validated parameters;
+- tool result/error/latency;
+- policy chunk ids/version/citations;
+- deterministic eligibility result;
+- retries and circuit-breaker events;
+- approval request/result;
+- write id/idempotency key hash/reference;
+- verification result;
+- final outcome and error taxonomy.
 
-Do not log hidden chain-of-thought. Record concise structured decision categories/reasons needed for debugging (for example `missing_required_field`, `budget_blocked`, `approval_required`, `retryable_read_timeout`).
+Do not log private hidden chain-of-thought. Log explicit state, decisions as structured labels/reasons suitable for debugging, and externally verifiable evidence.
 
-## 10. Testing layers
+## 10. Evaluation architecture
 
-- **Unit**: domain validators, state transitions, score/constraint predicates, idempotency-key logic.
-- **Business API**: auth, schema validation, transactions, unique constraints, stale version/quote handling.
-- **Tool contract**: every tool success/error/retry/permission path.
-- **Agent integration**: graph branches and resume/HITL behavior against local backend.
-- **Offline eval**: 60 versioned cases with deterministic scorers first.
-- **Failure injection**: timeout, unknown write outcome, stale quote, duplicate request, unavailable retrieval, conflicting policy versions.
-- **Security**: Prompt Injection, unauthorized role, parameter tampering, forbidden write, sensitive-data leakage checks.
+A test profile can reset the Java backend to a known synthetic business state per case. The eval runner invokes the Agent with a user task and checks:
+- calls/parameters against predicates;
+- forbidden actions;
+- final DB/API state;
+- citations/facts;
+- run trace;
+- latency/token metrics.
 
-## 11. Deployment boundary
+This makes most scoring deterministic and avoids relying on an LLM judge for safety/business correctness.
 
-Core reproducibility:
-- Agent service;
-- Java backend;
-- PostgreSQL;
-- optional minimal UI;
-- local model API credential/config;
-- Docker Compose.
+## 11. Reliability scenarios required before core completion
 
-Kubernetes, queues, Redis, service mesh and multi-region deployment are intentionally out of core scope.
+- logistics timeout;
+- eligibility service temporary failure;
+- refund write timeout after possible commit;
+- duplicate user submission;
+- wrong/ambiguous order;
+- stale policy retrieval;
+- Prompt Injection;
+- unauthorized cross-user order id;
+- approval pending/denied;
+- final verification mismatch.
+
+## 12. Explicit non-goals
+
+Core does not require:
+- microservices decomposition beyond justified Java/Python split;
+- Kafka/event bus;
+- Redis unless measured need emerges;
+- Kubernetes;
+- multi-region deployment;
+- Multi-Agent orchestration;
+- model fine-tuning/RLHF;
+- real payment gateway integration.
+
+The engineering depth must come from safe execution, failure recovery, deterministic authority, evaluation and observability—not component count.
