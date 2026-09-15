@@ -1,32 +1,30 @@
 # Contract 2 / Candidate Gate Report
 
-## Required outputs
+## Current verdict
+
+**PASS — CommerceAgent (C6) is the current recommended candidate.**
+
+The earlier close-ranking validation around procurement is no longer the current decision basis. After the business-value challenge, C6 was rescored and passed all six fatal gates.
+
+## C6 checks
 
 | Requirement | Result |
 |---|---|
-| 4–6 business-distinct candidates | PASS — 6 |
-| Each candidate has business system, Agent necessity, real action, eval path, vertical slice and 6–8 week scope | PASS |
-| Six fatal gates applied before scoring | PASS |
-| Fatal-gate failures not compensated by score | PASS |
-| Fixed 25/20/20/15/10/10 scoring used | PASS |
-| Scores include rationale/evidence grade/defensible interval/change trigger | PASS |
-| Weighted totals recomputable | PASS |
-| Sensitivity analysis present | PASS |
-| Top-score close/overlap rule checked | PASS — triggered |
-| Bounded validation executed before recommendation | PASS |
-| Recommendation uncertainty disclosed | PASS — C1 is conditional, not certain |
+| Real enterprise task | PASS — cross-system after-sales execution |
+| Genuine Agent judgment | PASS — evidence determines next tool/path |
+| Observable business state change | PASS — refund/return/ticket/approval objects |
+| Two-week vertical slice | PASS by design — local order/logistics/eligibility/refund stack |
+| No inaccessible core dependency | PASS — synthetic/local contract-realistic systems are sufficient |
+| Offline evaluation feasible | PASS — resettable business state and deterministic oracles |
+| Reliability/security fit in 8 weeks | PASS with after-sales-only scope |
+| 60-second business explanation | PASS |
+| Fixed six-dimension scoring recomputable | PASS — `scoring.csv` |
+| Scope/buzzword controls | PASS — broad customer service, Multi-Agent, K8s and training excluded |
 
-## Important interpretation
+## Critical condition
 
-The post-validation ordering is close:
-- C1 Procurement: 8.94
-- C2 DevOps/R&D Incident: 8.765
-- C5 Financial Operations: 8.75
+C6 remains valid only if implementation proves evidence-dependent branching. A fixed `intent → refund API` implementation fails the Agent-value gate regardless of how many frameworks are added.
 
-The validation did **not** produce evidence strong enough to claim an unambiguous market winner. Contract 2 permits progression because the uncertainty procedure was executed and the first recommendation is explicitly conditional with switch triggers.
+## Final Contract 2 status
 
-## Gate verdict
-
-**Contract 2: PASS WITH EXPLICIT UNCERTAINTY.**
-
-US3 is authorized to red-team C1. C2 and C5 must remain active alternatives and may replace C1 without requiring a new candidate-generation cycle.
+**PASS.** Proceed with CommerceAgent as the only current first recommendation.
