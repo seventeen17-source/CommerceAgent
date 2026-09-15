@@ -4,6 +4,27 @@
 
 当前状态：**方案已收缩，可开始 M0 编码；应用尚未实现。** 本分支不是可运行 Demo，也没有已实测的模型成功率、性能或安全结论。
 
+## Git 分支约定
+
+正式长期开发主线：`dev/002-commerce-after-sales-mvp`。
+
+历史研究归档：`archive/001-career-research-project-selection`，只用于查看岗位研究、选题和旧设计依据，不继续开发。
+
+旧名称 `speckit-tasks-001-agent-career-project` 和 `002-commerce-after-sales-agent` 仅作为历史 legacy ref 保留，不再作为新的编码入口。
+
+每个阶段只有在对应 Gate **真实通过**后，才从通过的精确 commit 创建一个不可随意移动的快照分支：
+
+```text
+milestone/m0-foundation-risk-probes
+milestone/m1-refund-request-e2e
+milestone/m2-return-and-order-clarification
+milestone/m3-approval-and-recovery
+milestone/m4-policy-reference-safe-stop
+milestone/m5-evaluation-release
+```
+
+这些 milestone 是历史锚点，不是新的长期开发线。后续开发始终继续在 `dev/002-commerce-after-sales-mvp`。如果较早 milestone 后来发现问题，后面的 milestone **仍然保留**；从最后确认正确的阶段新建 `fix/<阶段>-<问题>` 修复，再明确迁移后续改动，禁止为了回退直接覆盖或删除后面的阶段快照。完整规则见 [AGENTS.md](AGENTS.md)。
+
 ## 只做什么
 
 用户用自然语言请求售后；Python Agent 理解、澄清并选择证据；Java 验证归属、资格、金额与审批，创建退款/退货退款申请；系统查询权威结果后返回申请编号和轨迹。高金额等待人工审批，证据不足或非法请求安全停止。
@@ -52,7 +73,7 @@ Flyway 管自定义 commerce/agent 表；官方 saver 管独立 checkpoint schem
 
 首版删除向量检索/pgvector、独立 Trace/Eval 看板、完整工单运营、完整退款/退货生命周期和额外基础设施。保留有限重试、安全停止、审批、恢复、对照评测，不通过删安全约束制造“轻量”。
 
-原始岗位表原样移至 [docs/evidence](docs/evidence/README.md)。`.agents` 和 `.specify` 工具保留，宪章升级至 2.0.0。旧内容仍可在 Git 历史/原研究分支找回，不重写历史，也不把它们放在活跃目录干扰 coding。
+原始岗位表原样移至 [docs/evidence](docs/evidence/README.md)。`.agents` 和 `.specify` 工具保留，宪章升级至 2.0.0。旧内容仍可在 Git 历史/归档分支找回，不重写历史，也不把它们放在活跃目录干扰 coding。
 
 ## 验证记录
 
