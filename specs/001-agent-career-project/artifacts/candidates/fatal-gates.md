@@ -1,34 +1,28 @@
-# Candidate Fatal Gates
+# Candidate Fatal Gates — Final Decision
 
-A weighted score cannot compensate for any failed gate.
+The historical candidate set was useful for comparison, but only the current selected candidate matters for the implementation handoff.
 
-| Candidate | 2-week vertical slice | No inaccessible core dependency | Genuine Agent judgment | Offline eval feasible | Reliability/security/obs in 8 weeks | 60-sec business value | Verdict |
-|---|---|---|---|---|---|---|---|
-| C1 Procurement & Supplier Execution | PASS — one category, 4–6 local tools | PASS — synthetic suppliers/quotes/budgets/policies | PASS — incomplete requirements, dynamic information gathering, tradeoff/approval decision | PASS — deterministic business state + policy oracles | PASS if real ERP/SaaS and Multi-Agent are cut | PASS | **PASS** |
-| C2 DevOps/R&D Incident Agent | PASS — simulated service + injected fault + one safe action | PASS — local service/log/deployment simulator | PASS — hypothesis/evidence/tool/remediation choice | PASS — golden root cause + expected post-health state | PASS only if cluster/K8s/general Code Agent scope is cut | PASS | **PASS with scope constraint** |
-| C3 Data/BI Decision-to-Action | PASS — one domain DB + metric/query/action tools | PASS — synthetic relational dataset | PASS — ambiguous metric intent, query/validation/action choice | PASS — fixed DB state + query/result/action predicates | PASS — policy + tool safety + trace are compact | PASS | **PASS** |
-| C4 Email/Internal Workflow Agent | PASS — synthetic inbox + task/policy tools | PASS — no Gmail/Outlook OAuth required | PASS — intent/context/workflow/approval choice | PASS — message/task golden states | PASS — permissions, injection and duplicate writes can be tested locally | PASS | **PASS** |
-| C5 Financial Operations/Policy Compliance | PASS — one synthetic exception workflow | PASS — no real bank API or confidential data | PASS — evidence gathering, policy interpretation, risk/escalation choice | PASS — synthetic transactions + explicit policies | PASS if restricted to operational workflow and allowlisted writes | PASS | **PASS with domain constraint** |
-| C6 Merchant/E-commerce Operations | PASS — one merchant issue + 5 tools | PASS — synthetic catalog/inventory/campaign data | PASS — signal gathering, diagnosis and action choice | PASS — seeded issue/action pairs | PASS if recommendation/ads/training subsystems are excluded | PASS | **PASS with scope constraint** |
+## C6 — CommerceAgent: E-commerce After-sales Execution & Exception Handling Agent
 
-## Gate notes
+| Gate | Verdict | Reason |
+|---|---|---|
+| Two-week vertical slice | PASS | A local order/logistics/eligibility/refund stack can demonstrate a happy path and controlled failure by Week 2 |
+| No inaccessible core dependency | PASS | Synthetic/local business systems are sufficient; no production e-commerce or payment credentials are required |
+| Genuine Agent judgment | PASS with hard condition | Ambiguous intent, order resolution and evidence-dependent next-tool/path choice must be demonstrated |
+| Offline eval feasible | PASS | Resettable order/logistics/policy state supports deterministic tool/action/final-state oracles |
+| Reliability/security/observability in 8 weeks | PASS | Scope is restricted to after-sales; idempotency, auth, HITL, timeout recovery and trace are core |
+| 60-second business value | PASS | “Not tell the user how to refund; diagnose the case and safely execute or escalate the after-sales process” |
 
-### C1
-The main risk is not feasibility but evidence specificity: strict-core hiring evidence supports enterprise execution, supply-chain/operations and business-system integration, but not a broad claim that procurement Agent roles are common. This affects demand score, not fatal feasibility.
+## Fatal condition
 
-### C2
-Infrastructure is a scope trap. The candidate remains eligible only if “incident Agent” is implemented against a small deterministic service simulator instead of requiring a real Kubernetes/observability platform.
+If implementation collapses into `intent → fixed refund API`, **Genuine Agent judgment = FAIL** and the project must be redesigned before any optional technology is added.
 
-### C3
-To remain eligible, it must demonstrate an action/decision layer; a read-only NL2SQL chatbot would fail the Agent Value Gate.
+## Rejected alternatives
 
-### C4
-Real email-provider integration is explicitly non-core. The hiring signal is enterprise workflow execution, permission and evaluation, not OAuth plumbing.
+- C1 Procurement: rejected as primary project because too much headline value can be implemented as deterministic ERP/workflow logic.
+- C2 DevOps/R&D Incident: technically strong but overlaps materially with the existing OpsPilot_Agent portfolio direction.
+- C3 Data/BI: credible but risks looking like Text-to-SQL unless action depth is unusually strong.
+- C4 Internal Workflow: feasible but less differentiated.
+- C5 Financial Operations: strong hiring evidence but higher domain/safety explanation burden for this project budget.
 
-### C5
-The project must avoid investment advice, credit decisions or claims of regulatory compliance. It remains a synthetic internal operations/policy workflow with explicit approval and audit.
-
-### C6
-Commerce breadth is explicitly rejected. One workflow only; no recommender training, ad bidding, customer-service suite, logistics suite or broad merchant platform.
-
-**Fatal-gate outcome**: all six candidates are eligible for scoring, with the documented scope constraints treated as binding conditions.
+**Final fatal-gate outcome: CommerceAgent PASS; implementation handoff authorized.**
