@@ -23,7 +23,8 @@ Global rules:
 - read/write tools are separately registered and risk-labelled;
 - every write carries `run_id` and stable idempotency context;
 - write timeout recovery queries authoritative business state before any retry;
-- validated parameters/results are traced with sensitive data minimized.
+- validated parameters/results are traced with sensitive data minimized;
+- approval is represented by an authoritative backend `approvalRequestId`; the Agent cannot mint or assert an approved token/state.
 
 ## T1 `list_user_orders`
 
@@ -137,7 +138,7 @@ Input:
 - `reason_code`
 - requested amount (must be bounded by server decision)
 - `idempotency_key`
-- optional approval reference/token
+- optional `approval_request_id`
 
 Output:
 - refund request id
@@ -151,12 +152,12 @@ Preconditions:
 - current order state valid;
 - eligibility revalidated;
 - amount valid;
-- approval valid if required;
+- if approval is required, `approval_request_id` resolves to an authoritative `APPROVED` record bound to the same run/order/action/amount;
 - no conflicting after-sales state.
 
 Retry: never blind. Query status after ambiguous timeout; reuse same idempotency key only if safe.
 
-Forbidden: cross-user refund, amount escalation, approval bypass.
+Forbidden: cross-user refund, amount escalation, approval bypass, model-generated approval state/token.
 
 ## T7 `create_return_request`
 
@@ -167,7 +168,7 @@ Input:
 - `reason_code`
 - return method if applicable
 - `idempotency_key`
-- optional approval reference/token
+- optional `approval_request_id`
 
 Output:
 - return request id
@@ -176,7 +177,7 @@ Output:
 
 Risk: write.
 
-Preconditions: deterministic return eligibility, ownership, current state and window checks.
+Preconditions: deterministic return eligibility, ownership, current state/window checks, and authoritative approval-record validation when required.
 
 ## T8 `create_support_ticket`
 
@@ -211,12 +212,12 @@ Input:
 - evidence refs
 
 Output:
-- approval request id
-- `PENDING`/`WAITING_APPROVAL` state
+- `approval_request_id`
+- authoritative status `PENDING`
 
 Risk: workflow write.
 
-Forbidden: Agent self-approval or synthetic approval token.
+Forbidden: Agent self-approval, fabricated approval status, synthetic approval token, or direct decision endpoint access as a customer tool.
 
 ## T10 `get_after_sales_status`
 
