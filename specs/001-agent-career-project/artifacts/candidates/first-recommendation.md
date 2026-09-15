@@ -1,36 +1,38 @@
-# First Recommendation — Historical Record
+# First Recommendation — Current
 
-> **Status: SUPERSEDED**
->
-> This file preserves the first recommendation produced at the end of the original Contract 2 scoring pass. It is intentionally not the current final project decision. See `../decisions/final-selection.md` for the authoritative selection.
+## Recommendation
 
-## Original first recommendation
+**C6 — CommerceAgent: E-commerce After-sales Execution & Exception Handling Agent**
 
-**C1 — ProcurePilot: Enterprise Procurement & Supplier Execution Agent**
+This is the current and authoritative project recommendation.
 
-The original scoring/validation phase favored C1 because it provided a compact enterprise workflow with Tool/API execution, structured business state, backend transactions, approval, idempotency and strong evaluation feasibility.
+## Why
 
-At that point, the principal known risk was already recorded: procurement might become a glorified deterministic rules/workflow system if the Agent judgment boundary was not strong enough.
+CommerceAgent has the clearest combination of:
+- real and easily explained business pain;
+- genuine evidence-dependent Agent decisions;
+- strong Java/backend business-state depth;
+- deterministic safety boundaries for money/state changes;
+- offline evaluation with reproducible business-state oracles;
+- failure cases that are meaningful rather than decorative: timeout ambiguity, duplicate writes, authorization, Prompt Injection and Human-in-the-loop;
+- good portfolio differentiation from the existing OpsPilot_Agent direction.
 
-## Why this recommendation was later superseded
+## Core MVP
 
-A subsequent P0 business-value challenge made the risk decisive: too much of the project's headline value could be explained by ordinary ERP/workflow automation, while the Agent-specific value was concentrated in requirement clarification and evidence selection.
+`customer request → resolve order → inspect order/logistics → retrieve policy when useful → deterministic eligibility → choose refund/return/clarification/escalation/approval → guarded business write → verify state → result + trace`
 
-The decision process was therefore reopened rather than defending the original ranking.
+## Maximum risk
 
-The revised candidate **C6 — CommerceAgent: E-commerce After-sales Execution & Exception Handling Agent** provides a stronger combination of:
-- recognizable operational pain;
-- ambiguous user intent;
-- evidence-dependent next-tool decisions across order/logistics/policy systems;
-- deterministic Java authority for eligibility, money and state changes;
-- naturally meaningful timeout/idempotency/HITL/security cases;
-- deterministic offline evaluation.
+The project fails its thesis if the implementation reduces to `intent → fixed refund API`.
 
-## Audit value
+Week 2 must therefore prove that different intermediate evidence changes the next tool or business action.
 
-This file remains in the repository to show that:
-1. the first recommendation was not treated as irreversible;
-2. red-team/user challenge could change the answer;
-3. the current final selection is evidence/argument driven rather than anchored to an early choice.
+## What would change this recommendation
 
-**Current authoritative recommendation: CommerceAgent — E-commerce After-sales Execution & Exception Handling Agent.**
+Reopen selection if:
+- realistic synthetic order/logistics/after-sales state cannot be built inside the Week-2 boundary;
+- the Agent cannot demonstrate evidence-dependent branching beyond a simple rule router;
+- deterministic evaluation cannot distinguish the Agent from a basic workflow baseline;
+- new hiring evidence materially weakens the after-sales/commerce mapping while another candidate becomes clearly superior.
+
+Procurement, finance, Data Agent, internal workflow and DevOps remain rejected alternatives for this portfolio decision; they are not co-equal current recommendations.
