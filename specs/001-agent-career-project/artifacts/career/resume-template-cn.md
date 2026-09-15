@@ -1,39 +1,35 @@
-# ProcurePilot 中文简历项目经历模板
+# CommerceAgent 中文简历项目模板
 
-> 当前状态：**设计模板**。项目尚未实现与实测，所有性能/准确率数字只能保持 `[待实测]` 或目标值，禁止写成已完成成果。
+> 注意：以下所有数字均为占位符。只有真实实现并完成可复现实验后，才允许替换为 measured/approved 结果。
 
 ## 项目名称
 
-**ProcurePilot｜企业采购与供应商执行 Agent**
+**CommerceAgent — 企业电商售后执行与异常处置 Agent**
 
-## 一句话定位
+## 一句话描述
 
-面向企业采购流程的可执行 Agent：将自然语言采购需求转化为经过供应商、报价、预算、政策与审批校验的业务请求，并通过确定性后端约束高风险写操作。
+面向电商售后场景构建可执行 Agent，将自然语言投诉转化为跨订单、物流、售后规则和退款/退货系统的多步业务处置流程；Agent 负责动态取证与工具编排，Java 后端负责权限、退款资格、金额、幂等和状态安全。
 
-## 简历项目描述模板
+## 简历要点模板
 
-- 设计并实现（实现后再改为过去式）一套企业采购执行 Agent，将“需求补全 → 动态工具调用 → 供应商/报价比较 → 预算/政策校验 → Human-in-the-loop 审批 → 采购单草稿”组织为显式状态工作流，避免将确定性业务规则交给 LLM 自由判断。
-- 构建 Java 业务后端与 Agent Tool 契约，覆盖供应商、报价、预算、采购申请、审批与 PO 草稿等持久化状态，并通过服务端参数校验、权限、状态机、事务与幂等机制约束 Agent 写操作。
-- 针对 Tool 超时、错误参数、重复调用、Prompt Injection、越权写入和未知写结果等失败模式设计受控恢复与审计路径；高风险操作要求人工审批并在写后读取权威状态进行验证。
-- 建立 `[60 条目标，实际值待实现后填写]` 版本化离线评估集，对任务成功、工具选择、参数正确、策略合规、不安全操作、检索引用、工具调用数、延迟和 Token 成本进行可复现实验；最终数字仅从已批准评估运行填入。
+- 设计并实现企业级电商售后执行 Agent，覆盖订单识别、物流异常分析、售后政策检索、退款/退货资格校验、人工审批与业务写入，避免将系统退化为 FAQ ChatBot。
+- 将不确定 Agent 决策与确定性业务规则分离：Python Agent 负责意图理解、证据收集和 Tool Calling，Java/Spring Boot 负责订单权限、退款资格、金额计算、状态机、事务、幂等与审计。
+- 针对退款 API 超时、重复调用、Prompt Injection、越权订单访问和高风险退款设计安全机制，通过 idempotency key、Server-side Policy、Human-in-the-loop 和写后状态验证保证业务安全。
+- 构建约 **[待实测样本数]** 条版本化离线评估集，覆盖正常退款、退货、物流异常、工具选择、参数、超时、权限、注入与审批；对比 Baseline / V1 / Optimized 的任务成功率、工具准确率、安全率、延迟和 Token 成本。
+- 建立 Agent Run 全链路 Trace，记录状态流转、Tool 参数/结果、检索引用、重试、审批和最终业务状态，使失败 case 可复现、可定位。
 
-## 可量化 bullet 模板
+## 后续可填写的真实成果
 
-只有存在真实评估运行后，才能把占位符替换为数字：
+只能在实际评估后填写，例如：
+- 任务成功率：[待实测]
+- Tool Selection Accuracy：[待实测]
+- Unsafe Action Rate：[待实测]
+- Duplicate Write Rate：[待实测]
+- p50 / p95 latency：[待实测]
+- Token cost：[待实测]
 
-- 在 `dataset=[版本]`、`n=[样本数]`、`model=[模型/版本]` 条件下，将任务成功率从 `[Baseline a/b]` 提升至 `[Optimized c/d]`，同时不安全有效写入保持 `[x/y]`；优化针对 `[错误类别]`，完整结果可由 `[评估运行/commit]` 复现。
-- 通过 `[机制，例如 typed tool + idempotency + verify-after-write]` 将重复有效写入从 `[待测]` 降至 `[待测]`，并在 `[n]` 条故障注入样本中验证超时/未知写结果的恢复行为。
-- 在 `[n]` 条政策检索样本上达到 Recall@K `[待测]`、引用正确率 `[待测]`；若未实测，不得保留这句话的数字形式。
+禁止在实现前写“提升 X%”“成功率达到 X%”等成果数字。
 
-## 推荐关键词（只保留实际实现项）
+## 面试关键词
 
-`Agent Workflow` / `Tool Calling` / `Context & State` / `Human-in-the-loop` / `RAG` / `Evaluation` / `Observability` / `Idempotency` / `Prompt Injection Defense` / `Java Spring Boot` / `Python` / `PostgreSQL` / `Docker Compose`
-
-MCP 只有在真正实现适配器后才加入。Multi-Agent、Kubernetes、RLHF 默认不应出现在该项目关键词中。
-
-## 面试说明边界
-
-必须主动说明：
-- 企业业务系统和数据为本地/合成的契约真实实现，除非后续确实接入真实外部系统；
-- 未运行的指标是目标，不是成果；
-- Agent 只负责不确定判断与工具编排，金额、权限、预算、状态转换和写入安全由确定性后端负责。
+Agent State Graph / Tool Calling / Function Calling / Java Spring Boot / Python / FastAPI / RAG / Policy Retrieval / Human-in-the-loop / Idempotency / Prompt Injection / Authorization / Offline Eval / Observability / Trace / PostgreSQL / Docker Compose / MCP（可选扩展）
