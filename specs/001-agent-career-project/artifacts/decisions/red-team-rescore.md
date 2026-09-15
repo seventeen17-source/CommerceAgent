@@ -1,54 +1,48 @@
-# Red-Team Rescore
+# Red-team Rescore — Selection Reopened
 
-This rescore applies the dispositions in `red-team-resolution.md`. It evaluates both standalone project quality and marginal portfolio value for the user, who already has an OpsPilot-style operations/incident Agent direction.
+## Why this file changed
 
-## Revised scores
+The original three-role review did not fully eliminate a P0 concern against C1: the procurement project could still be summarized as “ERP/workflow automation with an LLM wrapper.” The user's direct challenge triggered a legitimate reopen under the existing decision rules.
 
-| Candidate | Demand 25% | Agent depth 20% | Interview 20% | Feasibility 15% | Background fit 10% | Differentiation 10% | Revised total |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| C1 Procurement & Supplier Execution | 7.8 | 8.8 | 9.2 | 9.3 | 9.2 | 9.0 | **8.765** |
-| C2 DevOps/R&D Incident | 8.7 | 9.2 | 9.3 | 8.2 | 8.8 | 6.8 | **8.690** |
-| C5 Financial Operations/Policy | 9.1 | 8.9 | 8.8 | 7.9 | 8.2 | 8.5 | **8.670** |
-| C3 Data/BI Decision-to-Action | 8.8 | 8.4 | 8.8 | 8.9 | 9.0 | 7.8 | **8.655** |
-| C4 Email/Internal Workflow | 8.4 | 8.3 | 8.5 | 9.2 | 9.1 | 7.5 | **8.500** |
-| C6 Merchant/E-commerce Operations | 7.6 | 8.6 | 8.7 | 8.4 | 9.1 | 7.6 | **8.290** |
+## Reassessment
 
-## Why C1 changed
+### C1 Procurement
+- Demand: 8.0
+- Agent depth: **7.6** after P0 downgrade
+- Interview value: **8.4**
+- Feasibility: 9.2
+- Background fit: 9.2
+- Differentiation: **8.0**
+- Revised center: **8.30**
 
-- Demand 8.0 → **7.8**: procurement-specific hiring evidence is less direct than general enterprise execution evidence.
-- Agent depth 9.0 → **8.8**: the Agent-vs-deterministic boundary is credible but must later be demonstrated in evaluation rather than assumed.
-- Feasibility 9.4 → **9.3**: a persistent transaction/idempotency-capable business system adds real work.
-- Interview 9.4 → **9.2**: strong story, but it must avoid overclaiming procurement market prevalence.
-- Differentiation remains high because it complements rather than duplicates the existing OpsPilot direction.
+Reason: deterministic budget/eligibility/approval/state logic dominates the core; Agent value exists but is not the strongest headline.
 
-## Why C2 changed
+### C6 CommerceAgent — After-sales Execution
+- Demand: 9.4
+- Agent depth: 9.3
+- Interview value: 9.5
+- Feasibility: 9.3
+- Background fit: 9.3
+- Differentiation: 8.8
+- Center: **9.29**
 
-- Feasibility 7.8 → **8.2** after reducing the project to a deterministic service simulator rather than a real cluster/platform.
-- Differentiation 8.4 → **6.8** because a second incident/operations Agent would overlap the user's existing OpsPilot_Agent project and add less new evidence to the portfolio.
-- If OpsPilot is abandoned or not used for recruiting, C2's differentiation should be restored and the selection revisited.
+Reason: ambiguous customer request + order resolution + logistics evidence + policy context + deterministic eligibility + safe state-changing actions create a naturally branching task. It is also straightforward to build deterministic eval oracles.
 
-## Why C5 changed
+## Fatal-gate recheck for C6
 
-- Interview value 9.0 → **8.8** and background fit 8.6 → **8.2** because the finance domain/safety explanation burden is real for a general backend/Agent candidate.
-- It remains the strongest domain-specific hiring-evidence alternative.
+1. **Two-week vertical slice** — PASS: order/logistics/eligibility/refund local stack is bounded.
+2. **No inaccessible private dependency** — PASS: synthetic/local contract-realistic systems are sufficient.
+3. **Real Agent judgment** — PASS with condition: Week 2 must show evidence-dependent next-tool/action decisions, not fixed routing.
+4. **Offline evaluability** — PASS: resettable order/logistics/policy state and exact write predicates.
+5. **Reliability/security/observability in 8 weeks** — PASS with strict after-sales-only scope.
+6. **60-second business clarity** — PASS: “not answer how to refund; actually diagnose and safely execute after-sales.”
 
-## Fatal-gate recheck
+## Portfolio check
 
-- C1: PASS, conditional on preserving genuine dynamic Agent decisions and deterministic safety boundaries.
-- C2: PASS, conditional on local simulator scope and no infrastructure sprawl.
-- C5: PASS, conditional on synthetic internal operations and no investment/regulatory claims.
-
-## P0 review
-
-The sole P0, “C1 is only CRUD + LLM,” is treated as **resolved for design** but remains a future implementation/evaluation gate. The final specification must include multiple cases in which different missing information or evidence causes different next-tool decisions. If it cannot, the project must be reopened rather than patched with more features.
+C2 remains technically strong, but the user's existing OpsPilot_Agent makes another incident/DevOps Agent less valuable as a second portfolio anchor. C6 complements it with customer-facing commerce, Java transactional backend, money/state safety and deterministic evaluation.
 
 ## Result
 
-C1 remains first after independent red-team review, but the margin is intentionally small. The selection is based on the combined evidence of:
-- sufficient market relevance;
-- clean Agent/deterministic boundary;
-- strong Week-2 feasibility;
-- interview depth;
-- complementarity with the existing portfolio.
+**C6 becomes SELECTED. C1 becomes SUPERSEDED.**
 
-This is a “best project for this user's portfolio under current constraints” decision, not a claim that procurement is the largest Agent hiring category.
+This is not a cosmetic rename; downstream A–Q, Tool contracts, scenarios, eval and roadmap must all use after-sales semantics.
