@@ -1,46 +1,24 @@
 # Contract 4 / Final Specification Gate Report
 
-## Coverage
+Selected project: **CommerceAgent — E-commerce After-sales Execution & Exception Handling Agent**
 
-| Check | Result |
-|---|---|
-| A–Q sections present | PASS — 17/17 |
-| 5–10 Agent scenarios | PASS — 10 |
-| Required failure/security classes covered | PASS — timeout/retry, wrong tool/parameter, duplicate/idempotency, injection, authorization, high-risk approval, partial failure |
-| Tool risk contracts complete | PASS — 8 tools with read/write, risk, auth, approval, timeout, retry, idempotency and audit semantics |
-| Agent vs deterministic logic boundary explicit | PASS |
-| Structured facts kept out of RAG | PASS |
-| Technology three-question/value tradeoffs recorded | PASS |
-| Must/Should/Nice/Reject scope explicit | PASS |
-| 50–100 eval design | PASS — 60 cases |
-| Required 10 metrics defined | PASS |
-| Baseline/V1/Optimized comparability and leakage controls | PASS |
-| Run-level observability reconstructable | PASS |
-| Security boundary covers prompt injection, permission, validation, read/write isolation, approval, audit, least privilege | PASS |
-| Deployment prioritizes simple reproducibility | PASS — Docker Compose; K8s rejected |
-| No ornamental service/database/Agent/framework | PASS with explicit simplification trigger if Java/Python split becomes empty-wrapper architecture |
+## Gate results
 
-## Red-team P0 recheck
+- **A–Q coverage**: PASS — `specification-a-q.md` covers positioning, scenario, architecture, technology, Agent design, tools, RAG, backend, data, eval, observability, testing, deployment, security, roadmap, interview map and career outputs.
+- **5–10 Agent scenarios**: PASS — 10 scenarios in `scenarios.md`.
+- **Failure/security coverage**: PASS — timeout/retry, wrong tool, ambiguous order, duplicate/idempotency, Prompt Injection, unauthorized access, high-risk approval, partial dependency failure and policy conflict are covered.
+- **Tool-risk definitions**: PASS — `tool-contracts.md` defines read/write property, validation, authorization, retry, idempotency and forbidden behavior.
+- **Agent/deterministic boundary**: PASS — Agent selects evidence/tools/path; Java backend controls ownership, eligibility, amount, state transition and writes.
+- **RAG necessity/boundary**: PASS — only policy/SOP retrieval; structured order/logistics/eligibility facts use APIs.
+- **50–100 eval design**: PASS — target 74 cases with deterministic business-state oracles.
+- **Technology three-question test**: PASS — important choices are Must/Should/Nice/Reject in `technology-decisions.md`.
+- **No ornamental infrastructure**: PASS — Multi-Agent, Kubernetes, Kafka/Redis without measured need and training are excluded from core.
+- **Business clarity**: PASS — project solves cross-system after-sales execution rather than FAQ response.
 
-The P0 “this is only CRUD + LLM” is **PASS at design stage** because multiple scenarios require independently testable dynamic choices:
-- S02 determines which blocking information to request;
-- S03 chooses evidence and acceptable supplier option under conflicting hard constraints;
-- S04 decides whether alternate evidence/action exists or the task must stop under budget/policy block;
-- S05 routes to Human-in-the-loop based on authoritative policy/state.
+## Critical implementation gate
 
-The future implementation must preserve this variability. A fixed linear wizard that simply calls all tools in one sequence would invalidate the design and trigger project reconsideration.
+The design remains valid only if Week 2 demonstrates that different intermediate evidence leads to different next tools/actions. If all cases reduce to `intent → fixed refund endpoint`, the Agent-value gate fails and the project selection must be revisited.
 
-## Complexity check
+## Verdict
 
-Core architecture contains exactly three persistent/runtime boundaries with clear responsibilities:
-1. Agent orchestration service;
-2. deterministic business backend;
-3. relational database.
-
-The UI is optional/Should and no separate vector DB, queue, cache, Kubernetes cluster, or Multi-Agent runtime is required.
-
-## Gate verdict
-
-**Contract 4: PASS.**
-
-The selected project now has a sufficiently complete design to generate the 6+2 week implementation/interview roadmap. Actual application coding remains outside this feature.
+**PASS.** Contract 4 is ready to feed a separate implementation feature.
