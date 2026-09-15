@@ -2,7 +2,7 @@
 
 **Input**: Design documents from `specs/002-commerce-after-sales-agent/`
 
-**Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
+**Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`, `.specify/memory/constitution.md`
 
 **Organization**: Tasks are grouped by user story so each increment is independently testable. Tests are included because this feature explicitly requires deterministic business correctness, Agent Value Gate validation, safety evaluation, idempotency verification, and a versioned offline eval set.
 
@@ -22,7 +22,7 @@
 - [ ] T002 Initialize Java 21 Spring Boot 3.5.x Maven project with Spring Web, Security, Validation, Data JPA, PostgreSQL, Flyway and Testcontainers dependencies in `commerce-backend/pom.xml`
 - [ ] T003 [P] Initialize Python 3.13 project with FastAPI, LangGraph, Pydantic, httpx, PostgreSQL checkpoint support, pytest and pytest-asyncio in `agent-service/pyproject.toml`
 - [ ] T004 [P] Initialize React + TypeScript application and API client dependencies in `web/package.json` and `web/src/`
-- [ ] T005 Configure PostgreSQL with pgvector and local services in `infra/docker-compose.yml` plus non-secret examples in `.env.example`
+- [ ] T005 Configure PostgreSQL with pgvector and logical `commerce`, `agent`, `policy`, and optional `eval` schemas in `infra/docker-compose.yml` plus non-secret examples in `.env.example`; Flyway in `commerce-backend` is the single V1 migration runner
 - [ ] T006 [P] Configure Java formatting/static-analysis/test plugins in `commerce-backend/pom.xml` and Python lint/type-check settings in `agent-service/pyproject.toml`
 - [ ] T007 [P] Add application configuration skeletons for dev/test/eval profiles in `commerce-backend/src/main/resources/application.yml`, `commerce-backend/src/test/resources/application-test.yml`, and `agent-service/app/config/settings.py`
 
@@ -36,19 +36,19 @@
 
 **CRITICAL**: No user-story business flow begins until this phase is complete.
 
-- [ ] T008 Create initial Flyway schema for `users`, `orders`, `order_items`, `shipments`, `logistics_events`, `after_sales_rules`, `agent_runs`, `tool_executions`, and `audit_logs` in `commerce-backend/src/main/resources/db/migration/V001__core_schema.sql`
+- [ ] T008 Create initial Flyway schema for `commerce.users`, `commerce.orders`, `commerce.order_items`, `commerce.shipments`, `commerce.logistics_events`, `commerce.after_sales_rules`, `agent.agent_runs`, `agent.tool_executions`, and `commerce.audit_logs` in `commerce-backend/src/main/resources/db/migration/V001__core_schema.sql`; preserve schema/service ownership rules from `data-model.md`
 - [ ] T009 [P] Implement shared JPA entities/repositories for User, Order, OrderItem, Shipment and LogisticsEvent in `commerce-backend/src/main/java/com/seventeen17/commerceagent/order/` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/logistics/`; preserve immutable order ownership, optimistic `version`, and authoritative stored price/state rules from `data-model.md`
 - [ ] T010 [P] Implement `AfterSalesRule` persistence with unique `rule_code`, version/effective dates, nullable logistics/return/amount/approval thresholds, `allowed_action`, and `active` fields in `commerce-backend/src/main/java/com/seventeen17/commerceagent/eligibility/`
 - [ ] T011 Implement local JWT authentication and role-aware principal resolution in `commerce-backend/src/main/java/com/seventeen17/commerceagent/security/`; customer APIs MUST derive ownership from the authenticated principal and MUST NOT trust model-supplied user ids
 - [ ] T012 [P] Implement stable API error envelope and error-code mapping matching `contracts/error-contracts.md` in `commerce-backend/src/main/java/com/seventeen17/commerceagent/common/error/`
 - [ ] T013 [P] Implement business/security audit writer for structured events only—no hidden chain-of-thought and no raw auth token—in `commerce-backend/src/main/java/com/seventeen17/commerceagent/audit/`
-- [ ] T014 Create dev/eval fixture loader with `customer-001`, `customer-002`, `approver-001`, deterministic orders/logistics/rules, and an eval-only reset endpoint disabled outside test/eval profiles in `commerce-backend/src/main/java/com/seventeen17/commerceagent/fixture/`
+- [ ] T014 Create dev/eval fixture loader with `customer-001`, `customer-002`, `approver-001`, deterministic orders/logistics/rules, and the reset endpoint defined by `contracts/eval-internal-api.md` in `commerce-backend/src/main/java/com/seventeen17/commerceagent/fixture/`; endpoint MUST be absent outside test/eval profiles
 - [ ] T015 [P] Define explicit `AgentState` with run id, authenticated user context, intent, candidate/resolved order, evidence, eligibility, approval state, tool history, step/retry budgets, write/verification result and terminal status in `agent-service/app/agent/state.py`
 - [ ] T016 [P] Implement typed Java API client base, auth-context propagation, timeout handling and common response validation in `agent-service/app/clients/commerce_client.py`; auth tokens/principal data MUST never be inserted into model prompts
 - [ ] T017 Implement persistent Agent run/checkpoint repository and structured tool trace writer in `agent-service/app/trace/`; support `RUNNING`, `WAITING_USER`, `WAITING_APPROVAL`, `COMPLETED`, `ESCALATED`, `FAILED`, and `SAFE_STOP`
-- [ ] T018 Create FastAPI run/status/event skeleton endpoints from `contracts/agent-api.openapi.yaml` in `agent-service/app/api/runs.py` and register them in `agent-service/app/main.py`
+- [ ] T018 Implement FastAPI JWT verification, authenticated principal context, run-ownership authorization, and the run/status/event skeleton endpoints from `contracts/agent-api.openapi.yaml` in `agent-service/app/security/`, `agent-service/app/api/runs.py`, and `agent-service/app/main.py`; customers MUST NOT read/resume another user's run
 
-**Checkpoint**: Foundation is ready; authenticated synthetic business state and resumable Agent runs can be created and traced without any refund/return action yet.
+**Checkpoint**: Foundation is ready; authenticated synthetic business state and resumable, owner-scoped Agent runs can be created and traced without any refund/return action yet.
 
 ---
 
@@ -70,8 +70,8 @@
 - [ ] T023 [P] [US1] Implement customer-scoped order list/detail endpoints from `commerce-api.openapi.yaml` in `commerce-backend/src/main/java/com/seventeen17/commerceagent/order/OrderController.java` and `OrderService.java`
 - [ ] T024 [P] [US1] Implement order logistics endpoint and authoritative stall calculation in `commerce-backend/src/main/java/com/seventeen17/commerceagent/logistics/LogisticsController.java` and `LogisticsService.java`
 - [ ] T025 [US1] Implement deterministic `EligibilityDecision` service returning `eligible`, `allowed_action`, `max_refund_amount`, `approval_required`, rule code/version and reason codes in `commerce-backend/src/main/java/com/seventeen17/commerceagent/eligibility/EligibilityService.java`
-- [ ] T026 [US1] Add `refund_requests` schema with unique logical idempotency key per write scope and implement `RefundRequest` entity/repository in `commerce-backend/src/main/resources/db/migration/V002__refund_schema.sql` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/refund/`
-- [ ] T027 [US1] Implement transactional refund creation and status lookup in `commerce-backend/src/main/java/com/seventeen17/commerceagent/refund/RefundService.java`; revalidate ownership, current state, eligibility, amount and approval before every sensitive write
+- [ ] T026 [US1] Add `commerce.refund_requests` schema with unique logical idempotency key per write scope and implement `RefundRequest` entity/repository in `commerce-backend/src/main/resources/db/migration/V002__refund_schema.sql` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/refund/`
+- [ ] T027 [US1] Implement transactional refund creation and status lookup in `commerce-backend/src/main/java/com/seventeen17/commerceagent/refund/RefundService.java`; revalidate ownership, current state, eligibility, amount and, when required, authoritative `approvalRequestId` binding/status immediately before every sensitive write
 - [ ] T028 [US1] Expose refund and after-sales status endpoints with `Idempotency-Key` semantics from `commerce-api.openapi.yaml` in `commerce-backend/src/main/java/com/seventeen17/commerceagent/refund/RefundController.java`
 - [ ] T029 [P] [US1] Implement typed tools `list_user_orders`, `get_order`, `get_logistics`, `check_after_sales_eligibility`, `create_refund_request`, and `get_after_sales_status` in `agent-service/app/tools/` with the common success/data/error_code/retryable/latency/trace envelope
 - [ ] T030 [US1] Implement `understand_request`, unique-order resolution for the single-candidate path, `decide_next_evidence`, read-tool execution, evidence validation and `check_eligibility` nodes in `agent-service/app/agent/nodes/`
@@ -98,9 +98,9 @@
 
 ### Implementation for User Story 2
 
-- [ ] T038 [US2] Add `return_requests` schema with idempotency and allowed lifecycle states and implement entity/repository in `commerce-backend/src/main/resources/db/migration/V003__return_schema.sql` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/returns/`
+- [ ] T038 [US2] Add `commerce.return_requests` schema with idempotency and allowed lifecycle states and implement entity/repository in `commerce-backend/src/main/resources/db/migration/V003__return_schema.sql` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/returns/`
 - [ ] T039 [US2] Extend deterministic eligibility rules for return window and `RETURN`/`RETURN_REFUND` actions in `commerce-backend/src/main/java/com/seventeen17/commerceagent/eligibility/EligibilityService.java`
-- [ ] T040 [US2] Implement guarded return creation/status endpoints from the commerce contract in `commerce-backend/src/main/java/com/seventeen17/commerceagent/returns/ReturnService.java` and `ReturnController.java`
+- [ ] T040 [US2] Implement guarded return creation/status endpoints from the commerce contract in `commerce-backend/src/main/java/com/seventeen17/commerceagent/returns/ReturnService.java` and `ReturnController.java`; when approval is required, validate authoritative `approvalRequestId` exactly as refund writes do
 - [ ] T041 [US2] Add `create_return_request` tool and route delivered evidence through return eligibility/write/verification in `agent-service/app/tools/return_tools.py`, `agent-service/app/agent/routing.py`, and `agent-service/app/agent/graph.py`
 - [ ] T042 [US2] Add delivered/return-path eval cases and forbidden-direct-refund assertions in `eval/datasets/v1/dev/us2_delivered_return.yaml`
 
@@ -112,21 +112,21 @@
 
 **Goal**: The Agent must stop and ask the user when multiple plausible orders exist; no write occurs before explicit resolution.
 
-**Independent Test**: Seed two plausible earphone orders. The run enters `WAITING_USER`, refund/return write count remains 0, and the user can resume the same run by selecting an order.
+**Independent Test**: Seed two plausible earphone orders. The run enters `WAITING_USER`, refund/return write count remains 0, and the authenticated owner can resume the same run by selecting an order.
 
 ### Tests for User Story 3
 
-- [ ] T043 [P] [US3] Write Python tests for multi-order ambiguity, zero writes before clarification, invalid clarification input, and resume-on-valid-order in `agent-service/tests/integration/test_us3_clarification.py`
+- [ ] T043 [P] [US3] Write Python tests for multi-order ambiguity, zero writes before clarification, invalid clarification input, cross-user run-input denial, and resume-on-valid-order in `agent-service/tests/integration/test_us3_clarification.py`
 
 ### Implementation for User Story 3
 
 - [ ] T044 [US3] Implement candidate-order scoring that can return `AMBIGUOUS_ORDER` without guessing and persist candidate ids in `agent-service/app/agent/nodes/resolve_order.py`
 - [ ] T045 [US3] Implement LangGraph interrupt/checkpoint transition to `WAITING_USER` and resume validation in `agent-service/app/agent/nodes/ask_clarification.py` and `agent-service/app/agent/graph.py`
-- [ ] T046 [US3] Implement `POST /api/v1/agent/runs/{runId}/input` with ownership/run-state validation in `agent-service/app/api/runs.py`
+- [ ] T046 [US3] Implement `POST /api/v1/agent/runs/{runId}/input` with authenticated ownership and run-state validation in `agent-service/app/api/runs.py`
 - [ ] T047 [US3] Add order-selection clarification UI and resume flow in `web/src/features/chat/ClarificationPanel.tsx`
 - [ ] T048 [US3] Add ambiguity/clarification eval cases with explicit `max_write_count: 0` before resolution in `eval/datasets/v1/dev/us3_clarification.yaml`
 
-**Checkpoint**: Ambiguous business objects are never guessed and the exact same run can resume after user clarification.
+**Checkpoint**: Ambiguous business objects are never guessed and only the authorized owner can resume the exact run after clarification.
 
 ---
 
@@ -138,17 +138,17 @@
 
 ### Tests for User Story 4
 
-- [ ] T049 [P] [US4] Write Java approval transition/auth tests covering `PENDING → APPROVED|DENIED|EXPIRED`, terminal-state immutability and non-approver denial in `commerce-backend/src/test/java/com/seventeen17/commerceagent/approval/ApprovalIntegrationTest.java`
-- [ ] T050 [P] [US4] Write Python pause/resume tests proving the Agent cannot self-approve or fabricate approval state in `agent-service/tests/integration/test_us4_human_approval.py`
+- [ ] T049 [P] [US4] Write Java approval transition/auth tests covering `PENDING → APPROVED|DENIED|EXPIRED`, terminal-state immutability, approval run/order/action/amount binding and non-approver denial in `commerce-backend/src/test/java/com/seventeen17/commerceagent/approval/ApprovalIntegrationTest.java`
+- [ ] T050 [P] [US4] Write Python pause/resume tests proving the Agent cannot self-approve, fabricate approval state, or resume using another run's approval id in `agent-service/tests/integration/test_us4_human_approval.py`
 
 ### Implementation for User Story 4
 
-- [ ] T051 [US4] Add `approval_requests` schema and implement ApprovalRequest entity/repository with terminal-state constraints in `commerce-backend/src/main/resources/db/migration/V004__approval_schema.sql` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/approval/`
-- [ ] T052 [US4] Implement create/list/decision approval endpoints with `APPROVER` authorization and audit events in `commerce-backend/src/main/java/com/seventeen17/commerceagent/approval/ApprovalService.java` and `ApprovalController.java`
-- [ ] T053 [US4] Implement `request_human_approval` tool and WAITING_APPROVAL checkpoint/resume routing in `agent-service/app/tools/approval_tools.py` and `agent-service/app/agent/nodes/risk_gate.py`
-- [ ] T054 [US4] Implement Agent resume endpoint that verifies authoritative approval state before continuing in `agent-service/app/api/runs.py`
+- [ ] T051 [US4] Add `commerce.approval_requests` schema and implement ApprovalRequest entity/repository with terminal-state and run/order/action/amount binding fields in `commerce-backend/src/main/resources/db/migration/V004__approval_schema.sql` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/approval/`
+- [ ] T052 [US4] Implement create/list/decision approval endpoints from `commerce-api.openapi.yaml` with `APPROVER` authorization for list/decision and audit events in `commerce-backend/src/main/java/com/seventeen17/commerceagent/approval/ApprovalService.java` and `ApprovalController.java`
+- [ ] T053 [US4] Implement `request_human_approval` tool returning authoritative `approvalRequestId` plus WAITING_APPROVAL checkpoint routing in `agent-service/app/tools/approval_tools.py` and `agent-service/app/agent/nodes/risk_gate.py`; Agent MUST NOT create or assert approval tokens/status
+- [ ] T054 [US4] Implement owner-authorized Agent resume endpoint that re-reads authoritative Java approval state and verifies run/order/action/amount binding before continuing in `agent-service/app/api/runs.py`
 - [ ] T055 [US4] Build Approval Center showing order/action/amount/risk reason/evidence and Approve/Deny controls in `web/src/features/approvals/`
-- [ ] T056 [US4] Add high-risk approval, denied approval and attempted self-approval eval cases in `eval/datasets/v1/dev/us4_approval.yaml`
+- [ ] T056 [US4] Add high-risk approval, denied approval, cross-bound approval id and attempted self-approval eval cases in `eval/datasets/v1/dev/us4_approval.yaml`
 
 **Checkpoint**: No model or user prompt can turn a pending approval into an accepted business write.
 
@@ -167,7 +167,7 @@
 
 ### Implementation for User Story 5
 
-- [ ] T059 [US5] Add `support_tickets` schema and implement SupportTicket entity/repository storing structured reason codes and evidence summaries but no hidden chain-of-thought in `commerce-backend/src/main/resources/db/migration/V005__support_ticket_schema.sql` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/ticket/`
+- [ ] T059 [US5] Add `commerce.support_tickets` schema and implement SupportTicket entity/repository storing structured reason codes and evidence summaries but no hidden chain-of-thought in `commerce-backend/src/main/resources/db/migration/V005__support_ticket_schema.sql` and `commerce-backend/src/main/java/com/seventeen17/commerceagent/ticket/`
 - [ ] T060 [US5] Implement guarded support-ticket creation endpoint in `commerce-backend/src/main/java/com/seventeen17/commerceagent/ticket/SupportTicketService.java` and `SupportTicketController.java`
 - [ ] T061 [US5] Implement normalized retryability/error handling from `error-contracts.md`, no-new-evidence detection, max-step enforcement and `escalate_or_safe_stop` node in `agent-service/app/agent/nodes/` and `agent-service/app/tools/base.py`
 - [ ] T062 [US5] Implement `create_support_ticket` tool and attach already-collected structured evidence/run id in `agent-service/app/tools/ticket_tools.py`
@@ -189,8 +189,8 @@
 
 ### Implementation for User Story 6
 
-- [ ] T065 [US6] Add pgvector extension plus `policy_documents`/`policy_chunks` schema with document code, version, effective dates, section, checksum and embedding in `commerce-backend/src/main/resources/db/migration/V006__policy_rag_schema.sql`
-- [ ] T066 [P] [US6] Create versioned synthetic policy documents for general refund, logistics exception, electronics return and digital-goods/manual-review examples in `knowledge/policies/`
+- [ ] T065 [US6] Add pgvector extension plus `policy.policy_documents`/`policy.policy_chunks` schema with document code, version, effective dates, section, checksum and embedding in `commerce-backend/src/main/resources/db/migration/V006__policy_rag_schema.sql`; Flyway creates schema, Python owns retrieval semantics/data access
+- [ ] T066 [P] [US6] Create versioned synthetic AfterSalesPolicy documents for general refund, logistics exception, electronics return and digital-goods/manual-review examples in `knowledge/policies/`
 - [ ] T067 [US6] Implement policy ingestion/chunking/embedding pipeline with deterministic document metadata in `agent-service/app/rag/ingest.py`
 - [ ] T068 [US6] Implement metadata-filtered policy retrieval returning document code/version/effective date/section/score and conflict flags in `agent-service/app/rag/retriever.py`
 - [ ] T069 [US6] Implement `policy_search` tool and final answer citation rendering while explicitly preventing retrieved text from modifying tool allowlists, auth, eligibility, amount or approval state in `agent-service/app/tools/policy_tools.py` and `agent-service/app/agent/nodes/finalize.py`
@@ -204,15 +204,15 @@
 
 **Purpose**: Finish the evaluation, observability, reproducibility, UI and evidence needed for a job-ready project without widening product scope.
 
-- [ ] T071 Build the versioned eval runner that resets each case, executes a run, captures final business state/tool trace/latency/token usage and emits machine-readable results in `eval/runner/run_eval.py`
+- [ ] T071 Build the CLI/file-first versioned eval runner that calls the reset contract in `contracts/eval-internal-api.md`, executes a run, captures final business state/tool trace/latency/token usage and emits machine-readable JSON results in `eval/runner/run_eval.py`
 - [ ] T072 [P] Implement scorers for task success, tool selection, parameter correctness, policy compliance, unsafe actions, duplicate writes, retrieval recall/citation accuracy, average tool calls and latency/token summaries in `eval/scorers/`
 - [ ] T073 Create the honest fixed-workflow baseline from the same tool contracts and permissions in `eval/baselines/fixed_workflow.py`; do not intentionally cripple it
 - [ ] T074 Expand and freeze the dataset to at least 60 cases and target ~74 cases with separate dev/test manifests in `eval/datasets/v1/dev/`, `eval/datasets/v1/test/`, and `eval/datasets/v1/manifest.yaml`
 - [ ] T075 Run Baseline and V1 on the same frozen configuration, generate error taxonomy and store raw/versioned reports in `eval/reports/`; do not publish improvement claims before these artifacts exist
 - [ ] T076 Apply exactly one attributable optimization to the largest dev-set error category, rerun the comparable test set, and record before/after evidence in `eval/reports/optimization-1.md`
-- [ ] T077 Build Run Trace and Eval Dashboard pages without hidden chain-of-thought exposure in `web/src/features/runs/` and `web/src/features/eval/`
-- [ ] T078 Add cross-service contract validation for both OpenAPI files and tool mappings in `agent-service/tests/contract/` and `commerce-backend/src/test/java/com/seventeen17/commerceagent/contract/`
-- [ ] T079 Add adversarial end-to-end tests for cross-user access, prompt injection, approval bypass, duplicate write, stale/unknown write result and invalid arbitrary tool/URL attempts in `eval/datasets/v1/test/security_regression.yaml`
+- [ ] T077 Build Run Trace and Eval Dashboard pages without hidden chain-of-thought exposure in `web/src/features/runs/` and `web/src/features/eval/`; Eval Dashboard reads generated machine-readable report artifacts from `eval/reports/` through a simple static/dev adapter rather than requiring a dedicated Eval HTTP service
+- [ ] T078 Add cross-service contract validation for both OpenAPI files, `eval-internal-api.md`, and tool mappings in `agent-service/tests/contract/` and `commerce-backend/src/test/java/com/seventeen17/commerceagent/contract/`
+- [ ] T079 Add adversarial end-to-end tests for cross-user commerce access, cross-user Agent run access, prompt injection, approval bypass/cross-binding, duplicate write, stale/unknown write result and invalid arbitrary tool/URL attempts in `eval/datasets/v1/test/security_regression.yaml`
 - [ ] T080 Add CI workflow running Java tests, Python tests, frontend build and contract checks in `.github/workflows/ci.yml`
 - [ ] T081 Complete Docker Compose clean-environment startup and seed/health checks in `infra/docker-compose.yml`, `commerce-backend/Dockerfile`, `agent-service/Dockerfile`, and `web/Dockerfile`
 - [ ] T082 Execute every scenario in `specs/002-commerce-after-sales-agent/quickstart.md`, record pass/fail evidence and fix blockers before declaring the feature implementation-ready
@@ -340,6 +340,7 @@ The following are intentionally absent from this task list unless a later measur
 
 ## Notes
 
+- `.specify/memory/constitution.md` is authoritative; tasks that conflict with a MUST rule require design correction before implementation.
 - Every state-changing task must preserve the deterministic Agent/backend authority boundary defined in `plan.md`.
 - Do not expose raw SQL, arbitrary URLs/internal endpoints or database credentials as Agent tools.
 - Do not persist or display hidden chain-of-thought; trace structured decisions, evidence references, tool inputs/outputs, reason codes and state transitions only.
