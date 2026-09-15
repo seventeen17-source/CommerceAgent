@@ -1,168 +1,151 @@
-# ProcurePilot 6+2 Week Roadmap
+# CommerceAgent 6+2 Week Roadmap
 
-Core budget: **6 weeks / roughly 90–150 focused hours**. Weeks 7–8 are buffer/polish and never required for the core demo.
+Core duration: 6 weeks. Weeks 7–8 are buffer/depth/packaging, never dependencies for the core demo.
 
-## Week 1 — Domain, tool and eval contracts
+## Week 1 — Business domain, contracts and eval skeleton
 
 ### Runnable deliverable
-- Java business backend skeleton with persistent supplier/quote/budget/request fixtures and one read API/tool contract.
-- Agent service can call one typed read tool against the local backend.
-- 10–15 initial dev eval cases represented in the future implementation's evaluation format.
+Java backend exposes synthetic but contract-realistic order/logistics/eligibility APIs; Python service can call one read tool.
 
-### Acceptance
-- Purchase-request state and authoritative business facts are defined.
-- Tool inputs/outputs and permission boundaries match `tool-contracts.md`.
-- Agent/deterministic boundary is frozen.
-- Must scope is frozen; after Week 2 no new Must items are added.
+### Build
+- domain entities: User, Order, OrderItem, Shipment, RefundRequest, ReturnRequest, SupportTicket, ApprovalRequest, AuditLog;
+- deterministic order ownership and after-sales eligibility rules;
+- tool schemas for `get_order`, `get_logistics`, `check_after_sales_eligibility`;
+- initial 10–15 eval cases covering refund, return, ambiguous order and denial.
 
-### Learn / personally understand
-- Agent vs deterministic authority.
-- HTTP/tool contracts and schema validation.
-- relational constraints, transactions and idempotency concept.
-- evaluation-case oracle design.
+### Must understand/reproduce
+- Spring transaction/state boundaries;
+- Tool schema validation;
+- why eligibility belongs in backend rather than prompt/RAG.
 
-### Risk / cut
-If dual-service setup is too expensive, simplify framework/UI first; do not remove persistent business state or eval format.
+### Exit gate
+Business outcome, Agent/backend boundary, tool contracts, eval case schema and scope-cut rules are frozen.
 
 ## Week 2 — First vertical slice
 
 ### Runnable deliverable
-Normal path:
-`user request → Agent → supplier/quote/budget tools → create_purchase_request → verified result`.
+One normal logistics-anomaly refund and one controlled failure complete:
 
-Controlled failure path:
-- missing blocking requirement **or** budget/policy block causes clarification/safe stop without write.
+`User → Agent → Tool → Java Business System → Write/No-write → Verification → Result + Trace`
 
-### Acceptance
-- Real end-to-end `User → Agent → Tool → Business System → Result` works.
-- One effective idempotent write.
-- Same run has structured trace with tool args/results and final business state.
-- No real ERP/SaaS dependency.
+### Build
+- explicit Agent state graph;
+- order resolution;
+- dynamic choice to inspect logistics;
+- deterministic eligibility call;
+- idempotent refund request;
+- post-write verification;
+- trace for the whole run.
 
-### Learn / personally understand
-- explicit state graph;
-- conditional routing;
-- model structured output/tool choice;
-- write preconditions and state verification.
+### Controlled failure
+Use ambiguous order or unavailable logistics; Agent must clarify/escalate without unsafe write.
 
-### Circuit breaker
-If Week 2 slice is not working, delete UI polish, RAG sophistication and MCP before extending the deadline.
+### Exit gate
+If Week 2 cannot demonstrate evidence-dependent branching, stop feature growth and fix Agent necessity before continuing.
 
 ## Week 3 — Reliability, safety and HITL
 
 ### Runnable deliverable
 Demonstrate:
-- tool timeout + bounded retry;
-- stale quote or invalid parameter;
-- duplicate request/idempotency;
-- unauthorized/high-risk write blocked;
-- Human-in-the-loop approval pause/resume;
-- Prompt Injection in untrusted supplier/policy text;
-- unknown write outcome followed by status verification.
+- read timeout + bounded retry;
+- refund-write timeout + idempotency/status recovery;
+- wrong tool/parameter prevention;
+- Prompt Injection attempt;
+- cross-user order access denial;
+- high-value refund entering `WAITING_APPROVAL`;
+- return path for delivered goods.
 
-### Acceptance
-- unsafe effective writes = 0 in the Week-3 safety cases.
-- write retries use the same idempotency key and verify ambiguous outcomes.
-- requester cannot self-approve.
-- retrieved content cannot alter permissions.
+### Must understand/reproduce
+- idempotency-key semantics;
+- ambiguous completion recovery;
+- server-side auth/permission checks;
+- Human-in-the-loop state/resume.
 
-### Learn / personally understand
-- retry semantics;
-- at-least-once request risk and idempotency;
-- approval/checkpoint state;
-- injection threat model and least privilege.
-
-### Cut
-Second business scenario, external APIs, Multi-Agent, queue/cache/K8s remain cut.
-
-## Week 4 — Freeze evaluation and run Baseline vs V1
+## Week 4 — Freeze 60–80 case evaluation
 
 ### Runnable deliverable
-- complete 60-case dataset version;
-- frozen test split;
-- deterministic scorers;
-- Baseline and V1 run under same model/tool/budget conditions;
-- failure taxonomy report.
+Versioned dataset and Baseline vs V1 results on identical conditions.
 
-### Acceptance
-- dataset version/hash recorded;
-- test answers are frozen before optimization;
-- required metrics compute with explicit denominators;
-- every failed case has a failure category;
-- p50/p95 latency includes retries.
+### Build
+- target 74 cases;
+- dev/test split;
+- resettable backend fixtures;
+- deterministic scorers for tool/parameter/state/unsafe/duplicate-write;
+- retrieval/citation scorer for policy cases;
+- error taxonomy dashboard/table.
 
-### Learn / personally understand
-- eval validity and leakage;
-- deterministic vs model judges;
-- error analysis;
-- experiment comparability.
-
-### Cut
-Do not add new features because a metric looks weak. First classify failures.
+### Exit gate
+No manual cherry-picking; test answers remain frozen during optimization.
 
 ## Week 5 — One attributable optimization
 
 ### Runnable deliverable
-Choose the largest high-value dev-set failure class and make **one** focused change, for example:
-- missing-field decision policy;
-- tool schema/routing;
-- retrieval fusion/reranking;
-- stale-evidence validation.
+Identify the largest V1 error category and make exactly one focused improvement.
 
-Rerun Baseline/V1/Optimized under comparable conditions and check regressions, cost and latency.
+Examples:
+- better order disambiguation;
+- better evidence-sufficiency state transition;
+- better tool-selection context;
+- better policy retrieval version filtering.
 
-### Acceptance
-- the changed mechanism has a clear causal hypothesis;
-- same evaluation conditions are used or incompatibility is disclosed;
-- gains in one metric do not silently create safety/policy regressions;
-- no cherry-picked run is reported.
+Rerun the same evaluation and report regressions, latency and token change alongside success metrics.
 
-### Learn / personally understand
-- data-driven iteration rather than prompt guessing;
-- tradeoffs among success, calls, latency and cost.
-
-## Week 6 — Reproducible core and evidence ledger
+## Week 6 — Reproducible core and evidence package
 
 ### Runnable deliverable
-- Docker Compose local stack on a clean environment;
-- happy path plus at least two failure/safety demo paths;
-- stable run trace and eval report;
-- architecture and limitation documentation;
-- raw evidence required for future resume claims.
+Fresh-environment startup and complete demo with:
+- normal refund;
+- return path;
+- failure recovery;
+- Prompt Injection/authorization defense;
+- HITL;
+- trace;
+- eval report.
 
-### Acceptance
-- another developer can start the core from documented steps;
-- no core feature depends on Week 7/8 work;
-- selected metrics are reproducible from raw run artifacts;
-- synthetic/local enterprise boundary is clearly disclosed.
+### Evidence package
+- architecture diagram;
+- actual measured eval report;
+- known limitations;
+- reproducible quickstart;
+- resume claim ledger linking any number to run/dataset/metric.
 
-### Learn / personally understand
-- full-system debugging;
-- reproducibility;
-- explaining architecture tradeoffs under interview questioning.
+## Week 7 — Optional depth
 
-## Week 7 — Optional depth / buffer
+Choose at most one:
+- add MCP adapter over the same tool contracts;
+- add a second after-sales subdomain using the same core;
+- deeper fault/adversarial testing;
+- stronger observability visualization.
 
-Choose at most one after Week 6 PASS:
-- MCP adapter for the existing tool contracts;
-- deeper adversarial/failure injection;
-- one low-risk real external adapter;
-- hybrid retrieval improvement justified by eval.
+Do not add Multi-Agent/Kubernetes merely for keywords.
 
-Do not start a second procurement suite or Multi-Agent architecture.
+## Week 8 — Packaging and interview replay
 
-## Week 8 — Recruiting package and rehearsal
+- README polish;
+- 60–90 second demo video;
+- interviewer question rehearsal;
+- manually reimplement simplified state graph, idempotent write and eval scorer without relying on generated code;
+- final evidence/metric audit.
 
-Optional polish:
-- README cleanup and architecture diagram;
-- 60–90 second demo recording;
-- Chinese resume bullets populated only with approved measured claims;
-- interview whiteboard/reimplementation practice;
-- final evidence audit.
+## Scope cut order
 
-## Scope protection rules
+If delayed, cut in this order:
+1. polished frontend;
+2. MCP;
+3. second after-sales sub-scenario;
+4. cloud deployment;
+5. advanced retrieval/reranking;
+6. observability UI.
 
-1. Week 1 freezes Must.
-2. After Week 2, no new Must without deleting an equal-or-larger scope item.
-3. Delay causes deletion in this order: decorative UI → external adapter → MCP → second scenario/depth → retrieval sophistication.
-4. Never delete core business-state change, Agent dynamic decision, failure handling, safety, evaluation or trace to make the schedule look green.
+Do **not** cut:
+- Agent-vs-deterministic boundary;
+- dynamic evidence/tool branch;
+- idempotent safe write;
+- permission/Prompt Injection defense;
+- one HITL path;
+- evaluation;
+- per-run trace.
+
+## Time budget
+
+Assume roughly 15–25 hours/week. The plan intentionally favors one deep after-sales workflow over a broad “all-in-one customer-service platform”.
