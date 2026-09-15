@@ -1,0 +1,323 @@
+openapi: 3.1.0
+info:
+  title: CommerceAgent Business Backend API
+  version: 0.1.0
+servers:
+  - url: http://commerce-backend:8080/api/v1
+paths:
+  /orders:
+    get:
+      summary: List authenticated user's orders
+      parameters:
+        - in: query
+          name: productQuery
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string }
+      responses:
+        '200':
+          description: Order summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrderSummary' }
+  /orders/{orderId}:
+    get:
+      summary: Get authoritative order snapshot
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderSnapshot' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /orders/{orderId}/logistics:
+    get:
+      summary: Get authoritative logistics snapshot
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Logistics snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LogisticsSnapshot' }
+        '503': { $ref: '#/components/responses/Error' }
+  /after-sales/eligibility:
+    post:
+      summary: Deterministically evaluate refund/return eligibility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EligibilityRequest' }
+      responses:
+        '200':
+          description: Eligibility decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EligibilityDecision' }
+  /refunds:
+    post:
+      summary: Create idempotent refund request
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRefundRequest' }
+      responses:
+        '200':
+          description: Existing or newly created logical refund
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundResult' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /returns:
+    post:
+      summary: Create idempotent return request
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReturnRequest' }
+      responses:
+        '200':
+          description: Existing or newly created logical return
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReturnResult' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /support-tickets:
+    post:
+      summary: Create after-sales escalation ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTicketRequest' }
+      responses:
+        '201':
+          description: Ticket created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResult' }
+  /approvals:
+    post:
+      summary: Create approval request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateApprovalRequest' }
+      responses:
+        '201':
+          description: Approval request created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalResult' }
+  /approvals/{approvalId}/decision:
+    post:
+      summary: Authorized human decides approval
+      parameters:
+        - in: path
+          name: approvalId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [APPROVE, DENY]
+      responses:
+        '200':
+          description: Approval updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalResult' }
+  /orders/{orderId}/after-sales:
+    get:
+      summary: Query current after-sales objects/status for verification and timeout recovery
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - in: query
+          name: idempotencyKey
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current after-sales status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AfterSalesStatus' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    OrderId:
+      in: path
+      name: orderId
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema: { type: string, minLength: 8 }
+  responses:
+    Error:
+      description: Machine-readable error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+  schemas:
+    OrderSummary:
+      type: object
+      required: [orderId, productSummary, status, createdAt]
+      properties:
+        orderId: { type: string }
+        productSummary: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+    OrderSnapshot:
+      type: object
+      required: [orderId, status, totalAmount, currency, items]
+      properties:
+        orderId: { type: string }
+        status: { type: string }
+        totalAmount: { type: number }
+        currency: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              productId: { type: string }
+              productName: { type: string }
+              productCategory: { type: string }
+              quantity: { type: integer }
+        afterSalesStatus: { type: string }
+    LogisticsSnapshot:
+      type: object
+      required: [status, signed]
+      properties:
+        status: { type: string }
+        signed: { type: boolean }
+        lastMeaningfulEventAt: { type: [string, 'null'], format: date-time }
+        stalledHours: { type: [integer, 'null'] }
+    EligibilityRequest:
+      type: object
+      required: [orderId, reasonCode]
+      properties:
+        orderId: { type: string }
+        reasonCode: { type: string }
+    EligibilityDecision:
+      type: object
+      required: [eligible, allowedAction, approvalRequired, ruleCode]
+      properties:
+        eligible: { type: boolean }
+        allowedAction:
+          type: string
+          enum: [REFUND_ONLY, RETURN, RETURN_REFUND, MANUAL_REVIEW, DENY]
+        maxRefundAmount: { type: [number, 'null'] }
+        approvalRequired: { type: boolean }
+        ruleCode: { type: string }
+        ruleVersion: { type: string }
+        reasonCodes:
+          type: array
+          items: { type: string }
+    CreateRefundRequest:
+      type: object
+      required: [orderId, reasonCode, runId]
+      properties:
+        orderId: { type: string }
+        reasonCode: { type: string }
+        requestedAmount: { type: [number, 'null'] }
+        approvalToken: { type: [string, 'null'] }
+        runId: { type: string }
+    RefundResult:
+      type: object
+      properties:
+        refundRequestId: { type: string }
+        status: { type: string }
+        acceptedAmount: { type: number }
+    CreateReturnRequest:
+      type: object
+      required: [orderId, reasonCode, runId]
+      properties:
+        orderId: { type: string }
+        reasonCode: { type: string }
+        returnMethod: { type: [string, 'null'] }
+        approvalToken: { type: [string, 'null'] }
+        runId: { type: string }
+    ReturnResult:
+      type: object
+      properties:
+        returnRequestId: { type: string }
+        status: { type: string }
+        returnDeadline: { type: [string, 'null'], format: date-time }
+    CreateTicketRequest:
+      type: object
+      required: [category, evidenceSummary, runId]
+      properties:
+        orderId: { type: [string, 'null'] }
+        category: { type: string }
+        evidenceSummary: { type: string }
+        runId: { type: string }
+    TicketResult:
+      type: object
+      properties:
+        ticketId: { type: string }
+        status: { type: string }
+    CreateApprovalRequest:
+      type: object
+      required: [runId, orderId, actionType, riskReason]
+      properties:
+        runId: { type: string }
+        orderId: { type: string }
+        actionType: { type: string }
+        amount: { type: [number, 'null'] }
+        riskReason: { type: string }
+    ApprovalResult:
+      type: object
+      properties:
+        approvalRequestId: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, DENIED, EXPIRED] }
+    AfterSalesStatus:
+      type: object
+      properties:
+        refunds:
+          type: array
+          items: { $ref: '#/components/schemas/RefundResult' }
+        returns:
+          type: array
+          items: { $ref: '#/components/schemas/ReturnResult' }
+    ErrorResponse:
+      type: object
+      required: [errorCode, message, retryable, traceId]
+      properties:
+        errorCode: { type: string }
+        message: { type: string }
+        retryable: { type: boolean }
+        traceId: { type: string }
+        details: { type: object, additionalProperties: true }
+security:
+  - bearerAuth: []
