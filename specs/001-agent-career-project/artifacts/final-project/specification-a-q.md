@@ -1,357 +1,279 @@
-# ProcurePilot — A–Q Final Project Specification
+# CommerceAgent — E-commerce After-sales Execution & Exception Handling Agent
 
-**Selected candidate**: C1 — Enterprise Procurement & Supplier Execution Agent  
-**Selection source**: `../decisions/final-selection.md`  
-**Status**: current design specification for the future implementation feature  
-**Scope**: one procurement category, one request-to-approval/PO-draft workflow, stateful local enterprise system, controlled tool execution, evaluation-first reliability.  
+## A. Project positioning
 
-## A. Project Positioning
+CommerceAgent is an enterprise-style e-commerce after-sales execution Agent. It is not a FAQ chatbot. It receives an ambiguous customer goal, gathers evidence across order/logistics/policy systems, chooses the correct after-sales path, executes an allowlisted business action when permitted, escalates high-risk/uncertain cases, and returns an auditable result.
 
-ProcurePilot is an **enterprise execution Agent**, not a procurement chatbot. It turns an incomplete natural-language purchase need into a policy-checked, budget-aware, supplier-comparable, approval-ready business transaction while keeping deterministic business rules and risky writes outside model authority.
+Primary demo task: “我买的耳机几天没收到，不想要了，帮我退款。”
 
-The project is designed to demonstrate the hiring signals most consistently supported by the 2026 early-career market sample: Tool/API integration, stateful workflow, backend engineering, enterprise-system integration, retrieval where justified, evaluation/observability, failure handling and safe writes.
+## B. Enterprise scenario and target users
 
-## B. Enterprise Scenario
+Target users:
+- consumer requesting after-sales service;
+- customer-service/after-sales operator reviewing exceptional cases;
+- approver for high-risk refunds.
 
-Primary user: employee/requester.  
-Secondary users: procurement specialist and approver.
+Pain point: after-sales handling often requires repeated cross-system checks and manual routing. The Agent reduces the orchestration burden, not the deterministic authority of the business system.
 
-Core workflow:
-1. requester describes a purchase need;
-2. Agent detects missing blocking constraints;
-3. Agent dynamically chooses supplier/quote/budget/policy evidence;
-4. deterministic backend validates supplier eligibility, quote freshness, budget, permissions and state;
-5. Agent compares only acceptable alternatives and explains tradeoffs;
-6. backend creates one idempotent purchase request;
-7. high-risk/high-value flow pauses for human approval;
-8. approved flow may create one PO draft;
-9. Agent verifies authoritative state before reporting success.
+Core scope: refund, return, logistics anomaly and exception escalation only.
 
-Detailed normal/failure cases: `scenarios.md`.
+Out of scope: product recommendation, pre-sales QA, marketing, merchant operations, procurement, real payment rails, broad omnichannel support.
 
-## C. Overall Architecture
+## C. Overall architecture
 
-```text
-Minimal Web UI
-      |
-      v
-Python Agent Service
-(explicit state graph, model decisions, tool orchestration, eval hooks)
-      |
-      | typed HTTP tool calls first
-      | optional MCP adapter later
-      v
-Java Spring Boot Business Backend
-(domain rules, auth, transactions, idempotency, state machine)
-      |
-      v
-PostgreSQL
-(business state + audit + optional pgvector policy retrieval)
-```
+`Web/Chat UI → Python Agent Service → Tool Adapter → Java After-sales Backend → PostgreSQL`
 
-The two-service split is valid only because both sides have real responsibilities. If either becomes an empty wrapper, implementation should simplify rather than preserve architecture for resume keywords.
+Supporting capabilities:
+- policy retrieval/RAG for unstructured policy knowledge;
+- per-run Trace/Observability;
+- offline Eval runner;
+- Human-in-the-loop approval endpoint.
 
-## D. Technology Selection and Tradeoffs
+The Java backend is the source of truth for orders, logistics projections, eligibility, permissions, amounts, state transitions, idempotency and writes.
 
-Full decision table: `technology-decisions.md`.
+## D. Technology choices and tradeoffs
 
-### Must
-- Java + Spring Boot authoritative business backend.
-- Python Agent service.
-- Explicit state graph capability; LangGraph recommended but replaceable.
-- Configurable LLM API.
-- PostgreSQL.
-- Small policy retrieval/RAG capability with citations.
-- Structured Agent/tool/audit trace.
-- Docker Compose reproducibility.
+Recommended implementation baseline:
+- **Java + Spring Boot — Must**: business domain, REST APIs, deterministic policy/eligibility, transactions, idempotency, audit.
+- **Python + FastAPI — Must**: Agent orchestration, model SDK integration, eval runner.
+- **State graph / explicit workflow — Must**: bounded, inspectable state transitions rather than open-ended ReAct loops.
+- **PostgreSQL — Must**: deterministic business state and audit records.
+- **RAG — Should, narrow use**: policy/SOP retrieval only.
+- **MCP — Should after HTTP tools work**: demonstrate protocol standardization without making it an MVP dependency.
+- **React/simple UI — Should**: enough to demo customer request, approval and trace; not a design-heavy frontend.
+- **Docker Compose — Should**: reproducible local demo.
+- **Redis/Kafka/Kubernetes/Multi-Agent/training — Reject for core** unless later evidence requires them.
 
-### Should
-- minimal web UI;
-- MCP adapter after base Tool/API contracts are proven;
-- pgvector and/or hybrid retrieval if eval justifies it;
-- CI and optional cloud deployment.
+## E. Agent architecture
 
-### Nice
-- hosted tracing UI such as Langfuse/LangSmith only if trivial to add and data handling is acceptable.
+State:
+- `request_id`, `user_id`, `conversation_context`;
+- resolved/ambiguous `order_id`;
+- intent and reason;
+- order snapshot;
+- logistics snapshot;
+- retrieved policy evidence;
+- deterministic eligibility result;
+- proposed action;
+- risk/approval state;
+- write result;
+- verification result;
+- step count, retries, errors and trace ids.
 
-### Reject from core
-- Multi-Agent by default;
-- Kubernetes;
-- Kafka/message queue;
-- Redis/cache without measured need;
-- SFT/RLHF/Agentic RL;
-- multiple real enterprise SaaS integrations;
-- full admin/RBAC suite and decorative dashboards.
+Core graph:
 
-## E. Agent Architecture
+`START → ParseIntent → ResolveOrder → GatherEvidence → DecideNextStep → ToolCall → ValidateToolResult → EnoughEvidence? → EligibilityCheck → ChooseAction → RiskCheck → Approval? → CommitAction → VerifyBusinessState → FinalResponse → END`
 
-State/graph details: `architecture-reliability-security.md`.
+Branches may return to `GatherEvidence`, ask the user for clarification, or terminate with escalation.
 
-Core nodes:
-`NormalizeRequest → ValidateRequiredFields → DecideNextEvidence → ExecuteReadTool/RetrievePolicy → ValidateEvidence → CompareAcceptableOptions → DeterministicPreflightChecks → CreateRequest → [RequestApproval/WAIT] → [CreatePODraft] → VerifyBusinessState → ComposeResult`.
+Hard limits:
+- bounded max steps;
+- bounded retries;
+- no model-controlled arbitrary endpoint/URL;
+- write tools only after deterministic authorization/eligibility checks;
+- approval token required for configured high-risk writes.
 
-Key rules:
-- missing blocking fields cause clarification, not hallucinated defaults;
-- next evidence/tool is chosen dynamically from task state;
-- hard constraints are never delegated to free-form model judgment;
-- all loops have a max-step/retry budget;
-- read retries are bounded;
-- ambiguous write outcomes are verified before retry;
-- approval creates a pause/resume checkpoint;
-- authoritative business state is re-read on resume;
-- task/session state is sufficient; long-term user memory is not required.
+## F. Tool inventory
 
-The design preserves the red-team Agent-value gate because S02–S05 require different next actions based on different missing evidence, policy and approval conditions.
+Core tools:
+1. `list_user_orders` — identify candidate orders.
+2. `get_order` — fetch order/item/payment/fulfilment state.
+3. `get_logistics` — fetch shipment events and anomaly projection.
+4. `policy_search` — retrieve cited after-sales policy/SOP.
+5. `check_after_sales_eligibility` — deterministic refund/return type, max amount and required approval.
+6. `create_refund_request` — idempotent write.
+7. `create_return_request` — idempotent write.
+8. `create_support_ticket` — escalation/exception write.
+9. `request_human_approval` — optional approval flow for high-risk cases.
+10. `get_after_sales_status` — post-write verification/recovery.
 
-## F. Tools
+## G. RAG decision
 
-Authoritative contracts: `tool-contracts.md`.
+RAG is used only where the source is unstructured enterprise knowledge such as after-sales policy, category exceptions or SOP text.
 
-Core tool set:
-1. `supplier_search`
-2. `quote_query`
-3. `budget_check`
-4. `policy_search`
-5. `create_purchase_request`
-6. `request_approval`
-7. `create_po_draft`
-8. `get_request_status`
+RAG must not be used for:
+- order state;
+- logistics events;
+- refundable amount;
+- permissions;
+- refund/return eligibility;
+- after-sales state.
 
-Every write tool has server-side authorization, validation, state-transition checks and idempotency. Model/retrieval text never changes permission.
+Those come from structured APIs/database-backed deterministic services.
 
-## G. RAG — Whether and Why
+If RAG is implemented:
+- preserve document/version metadata;
+- hybrid retrieval is preferred only if the corpus justifies it;
+- return citations/source ids;
+- evaluate retrieval recall and citation correctness separately from business-action success.
 
-RAG is **used narrowly for unstructured procurement policy/SOP knowledge**.
+## H. Java/business-backend responsibilities
 
-Use retrieval for:
-- approval policy passages;
-- category restrictions;
-- purchasing SOPs;
-- supplier-policy text that needs citation/version awareness.
+Java owns:
+- user/order ownership and authorization;
+- Order / Logistics / AfterSales domain models;
+- refund/return eligibility rules;
+- amount and threshold calculations;
+- legal state transitions;
+- idempotency keys and duplicate-write handling;
+- approval validation;
+- transaction boundaries;
+- audit events;
+- resettable synthetic state for eval cases.
 
-Do **not** use RAG for:
-- supplier certification state;
-- quote price/expiry/delivery date;
-- budget balance;
-- purchase-request status;
-- approval status;
-- user permission.
+The backend must be useful even if the LLM is removed; it is not an empty service created to display Java.
 
-Those are structured authoritative facts returned through backend APIs/tools.
-
-Retrieval records policy ID/version/effective date/chunk/citation and is evaluated for recall and citation correctness. Hybrid lexical+semantic retrieval is Should, not automatic Must.
-
-## H. Java / Business Backend Responsibilities
-
-The Java backend is not an empty language showcase. It owns:
-- supplier and quotation domain state;
-- budget checks/reservations if needed;
-- purchase-request state machine;
-- approval state;
-- PO draft creation;
-- authorization;
-- parameter/schema validation;
-- transactions and optimistic/version checks;
-- idempotency and duplicate prevention;
-- authoritative policy invariants that must never depend on prompt behavior;
-- audit records and status verification.
-
-The later implementation feature must define concrete REST/tool endpoints from these responsibilities.
-
-## I. Database / Domain Model
+## I. Database/domain model
 
 Core entities:
-- `user_account`
-- `supplier`
-- `quote`
-- `budget_account`
-- `purchase_request`
-- `approval`
-- `purchase_order_draft`
-- `policy_document`
-- `agent_run`
-- `agent_step`
-- `tool_execution`
-- `audit_log`
-
-Relationships and key fields are specified in `architecture-reliability-security.md`.
+- `User`
+- `Order`
+- `OrderItem`
+- `Shipment`
+- `LogisticsEvent`
+- `AfterSalesPolicyRef`
+- `RefundRequest`
+- `ReturnRequest`
+- `SupportTicket`
+- `ApprovalRequest`
+- `AgentRun`
+- `ToolExecution`
+- `AuditLog`
 
 Important constraints:
-- unique effective idempotency key per write intent;
-- quote must be active and belong to selected supplier/item context;
-- request/approval/PO transitions are state-machine checked;
-- amount is recomputed from authoritative quote/business rules, not trusted from model text;
-- requester cannot self-approve;
-- write outcome is verified against authoritative state when response is uncertain.
+- after-sales writes reference a stable `order_id` and authenticated `user_id`;
+- refund amount cannot exceed deterministic backend result;
+- idempotency key is unique per logical write;
+- illegal state transitions are rejected server-side;
+- every write has an audit event.
 
 ## J. Evaluation
 
-Full design: `evaluation-design.md`.
+Design 60–80 versioned cases. Initial target distribution:
+- 12 normal refund cases;
+- 10 return/return-refund cases;
+- 10 logistics-anomaly cases;
+- 8 tool-selection cases;
+- 6 parameter/identity/order-resolution cases;
+- 6 timeout/retry/idempotency cases;
+- 6 permission/Prompt-Injection/unsafe-action cases;
+- 5 Human-in-the-loop/high-risk cases;
+- 5 policy retrieval/citation cases;
+- 6 mixed/partial-failure regression cases.
 
-Core dataset target: **60 versioned cases**, initially planned as 40 dev / 20 frozen test.
-
-Required metrics:
+Metrics:
 - task success rate;
 - tool selection accuracy;
-- parameter accuracy;
+- tool parameter accuracy;
+- business-state correctness;
 - policy compliance rate;
-- unsafe effective action rate;
-- retrieval recall;
-- citation accuracy;
+- unsafe action rate;
+- duplicate write rate;
+- retrieval recall/citation accuracy where applicable;
 - average tool calls;
 - p50/p95 end-to-end latency;
-- token usage/cost.
+- Token cost.
 
-Experiment sequence:
-1. Baseline simple tool-calling loop;
-2. V1 explicit state graph + typed tools + safety/retrieval/trace;
-3. Optimized version changing one largest dev-set failure category at a time.
-
-No metric in the resume may be written as achieved until a reproducible evaluation run exists.
+Run Baseline, V1 and one Optimized version on comparable data/tool permissions/budgets. No measured number may appear in resume materials until a real eval run exists.
 
 ## K. Observability
 
-A `run_id` must reconstruct:
-- user/task input and normalized facts;
-- model/provider/config version;
-- graph nodes visited;
-- concise structured decision categories;
-- each tool and normalized/redacted arguments;
-- tool results/errors/retries/latency;
-- retrieval policy IDs/versions/chunks/scores;
-- token usage/cost estimate;
-- human approval events;
-- business-state transitions;
-- final verified outcome.
-
-Do not store or expose hidden chain-of-thought. Store only structured decision metadata needed for debugging and evaluation.
+A single `run_id` must reconstruct:
+- user request;
+- parsed intent/order resolution;
+- Agent state transitions;
+- model calls and summarized rationale artifacts (not hidden chain-of-thought);
+- tool name + validated parameters;
+- tool response/error;
+- retrieved policy chunk ids/citations;
+- retries/timeouts;
+- eligibility result;
+- approval state;
+- write result and post-write verification;
+- latency, Token counts and final outcome.
 
 ## L. Testing
 
-Required layers:
-- unit tests for domain validators/state transitions/idempotency;
-- business API tests for auth, schema, transactions and stale versions;
-- tool contract tests for success/error/retry/permission semantics;
-- Agent integration tests for graph branches and HITL resume;
-- offline evaluation over versioned cases;
-- failure injection for timeout/unknown write/stale quote/retrieval failure;
-- security tests for Prompt Injection, unauthorized action, parameter tampering and sensitive-data exposure.
-
-High-risk writes receive independent safety acceptance criteria.
+- Java unit tests for eligibility/state/idempotency rules.
+- API tests for order/logistics/after-sales endpoints.
+- Tool-contract tests for schema, auth and error mapping.
+- Agent integration tests for state transitions and branching.
+- Offline eval for full task cases.
+- Fault injection for timeout, ambiguous completion, duplicate request, unavailable policy retrieval and stale logistics.
+- Independent security tests for unauthorized refund and Prompt Injection.
 
 ## M. Deployment
 
-Core deployment target: local reproducible Docker Compose stack containing:
-- Python Agent service;
-- Java backend;
-- PostgreSQL;
-- optional minimal web UI;
-- model API configuration.
+Core target: local reproducible Docker Compose or equivalent simple process orchestration.
 
-Cloud deployment is Should after the local stack and eval are stable. Kubernetes is explicitly rejected for the core portfolio build.
+Suggested services:
+- `commerce-backend`
+- `agent-service`
+- `postgres`
+- optional simple UI
+
+Cloud deployment is Should if time remains. Kubernetes is not core.
 
 ## N. Security
 
-Security boundary details: `architecture-reliability-security.md`.
+Threats and controls:
+- **Prompt Injection** → tool allowlist, untrusted text treated as data, server-side permission/policy enforcement.
+- **IDOR/order theft** → backend verifies order belongs to authenticated user.
+- **Amount tampering** → refund amount computed/capped server-side.
+- **Duplicate refund** → idempotency key + status recovery before retry.
+- **Write timeout ambiguity** → query status before reissuing write.
+- **High-risk refund** → explicit approval token.
+- **Sensitive data** → minimize fields exposed to model/trace.
+- **Unsafe tool choice** → deterministic preconditions and forbidden-action eval cases.
 
-Must cover:
-- Prompt Injection in user/supplier/retrieved content;
-- least-privilege tool allowlists;
-- authenticated user identity separate from model-generated arguments;
-- schema/range/ID/date validation;
-- server-side policy and state-machine enforcement;
-- no raw DB credentials/SQL for Agent;
-- read/write tool separation;
+## O. 6+2 week roadmap
+
+Week 1: domain/backend/tool contracts + first 10–15 eval cases.
+
+Week 2: one happy path and one controlled failure complete `User → Agent → Tool → Business System → Result + Trace`.
+
+Week 3: timeout, bounded retry, wrong tool/parameter, idempotency, injection/authorization, approval.
+
+Week 4: freeze 60–80 versioned eval set; run Baseline and V1.
+
+Week 5: optimize the largest measured error category only; rerun the same eval.
+
+Week 6: reproducible full demo, failure recovery, trace/eval report, evidence ledger.
+
+Week 7 optional: MCP adapter or second after-sales sub-scenario using the same core.
+
+Week 8 optional: README, demo video, interview replay, resume evidence audit.
+
+## P. Interview mapping
+
+The user must be able to explain and simplified-reimplement:
+- explicit Agent state graph and stop conditions;
+- Tool Calling and parameter validation;
+- why structured facts do not belong in RAG;
+- deterministic eligibility vs LLM reasoning boundary;
+- Java transaction/state-machine/idempotency design;
+- timeout ambiguity recovery;
 - Human-in-the-loop approval;
-- idempotent writes and verify-after-write;
-- audit trail;
-- trace redaction and data minimization.
+- Prompt Injection and authorization boundary;
+- offline eval scorers and leakage controls;
+- per-run tracing and error taxonomy.
 
-Target unsafe **effective** write count in final safety test is zero; this is a target/acceptance threshold, not an achieved metric before implementation.
+## Q. Resume / README / Demo outputs
 
-## O. 6–8 Week Roadmap
+README should show:
+1. business problem;
+2. architecture and responsibility boundary;
+3. one normal after-sales run;
+4. one failure/unsafe run;
+5. Trace screenshot/data;
+6. Eval methodology and actual measured results when available;
+7. synthetic-system boundary and limitations;
+8. quickstart.
 
-Detailed weekly plan is produced in US5 (`weekly-roadmap.md`). Required shape is already frozen:
-- Week 1: domain/tool/eval contracts and thin fixtures;
-- Week 2: one happy path + one controlled failure end-to-end;
-- Week 3: reliability/security/idempotency/HITL;
-- Week 4: 60-case dataset + Baseline/V1 comparable runs;
-- Week 5: one attributable optimization from error analysis;
-- Week 6: reproducible core demo/evidence ledger;
-- Week 7: optional MCP/extra adversarial depth/one external adapter;
-- Week 8: README/demo/interview rehearsal/final evidence audit.
+Demo target: 60–90 seconds. Start with a customer complaint, show dynamic evidence/tool choice, deterministic eligibility, safe write/approval, post-write verification and trace/eval evidence.
 
-Weeks 7–8 are never required to make the core demo work.
+Resume claims remain templates until actual implementation and eval runs produce reproducible numbers.
 
-## P. Interview Knowledge Mapping
+## Final scope statement
 
-Detailed map is produced in US5 (`interview-map.md`). Must-have interview topics:
-- why Agent rather than deterministic workflow;
-- state graph / context / stop conditions;
-- Tool contract design;
-- Agent vs business-backend responsibility split;
-- transaction/idempotency semantics;
-- Human-in-the-loop;
-- Prompt Injection and least privilege;
-- RAG boundary and citations;
-- offline eval design and leakage controls;
-- trace/observability;
-- retries and partial failure;
-- why Multi-Agent/MCP/K8s are not automatic Musts.
-
-The user must personally be able to reproduce simplified core state/tool/idempotency/eval logic without delegating conceptual understanding to AI coding.
-
-## Q. Resume / README / Demo Outputs
-
-US6 produces templates. Final implementation should eventually provide:
-- Chinese resume project experience;
-- evidence-backed bullet points only;
-- architecture diagram;
-- README with business problem, boundaries, quickstart, eval design/results and limitations;
-- 60–90 second demo showing one normal flow and one controlled failure;
-- trace/eval screenshots or tables tied to reproducible runs;
-- explicit disclosure that enterprise data/system integration is local/synthetic unless a real adapter is actually connected.
-
-No invented “accuracy improved X%”, latency reduction or production deployment claim is permitted.
-
----
-
-## Core vs Deferred Scope
-
-### Core / Must
-- one purchase workflow;
-- real persistent business state;
-- Agent dynamic next-action/tool choice;
-- deterministic backend authority;
-- 8 tool contracts;
-- approval/idempotency/verification;
-- policy retrieval with citations;
-- 60-case eval design;
-- trace and failure/security coverage;
-- reproducible local deployment.
-
-### Deferred / Should
-- minimal polished UI;
-- MCP adapter;
-- pgvector/hybrid retrieval refinement;
-- one external adapter;
-- cloud deployment/CI polish.
-
-### Explicitly Not Doing
-- broad procurement suite;
-- Multi-Agent without measured need;
-- long-term memory;
-- RLHF/SFT;
-- K8s/queue/cache architecture theater;
-- multiple SaaS integrations;
-- complete RBAC/admin UI;
-- fabricated metrics.
-
-## Design Acceptance
-
-This specification is valid only while:
-1. at least S02–S05 remain independently testable dynamic Agent decisions;
-2. deterministic business authority remains outside the model;
-3. Week-2 vertical slice requires no real ERP/vendor credential;
-4. safety/eval/trace remain core rather than end-of-project polish;
-5. the six-week core remains viable after deleting all Should/Nice work.
+The project succeeds only if it demonstrates that **the Agent chooses what to investigate and what business path to take, while the backend alone controls whether a money/state-changing action is legal**. If implementation becomes a fixed intent router calling one refund endpoint, the project fails its Agent-value gate and the design must be revisited.
