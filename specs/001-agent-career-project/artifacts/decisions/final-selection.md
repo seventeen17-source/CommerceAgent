@@ -2,96 +2,123 @@
 
 ## Selected candidate
 
-**C1 — ProcurePilot: Enterprise Procurement & Supplier Execution Agent**
+**C6 — CommerceAgent: E-commerce After-sales Execution & Exception Handling Agent**
 
-Status: **SELECTED after Contract 3 red-team review**.
+Status: **SELECTED after decision reopen and red-team challenge**.
 
-This selection is frozen for the remainder of `001-agent-career-project` unless a stated revisit trigger is hit. It does not authorize application code in this feature; it authorizes the A–Q design phase.
+The previous C1 ProcurePilot selection is **SUPERSEDED**, not deleted. The change was triggered by a P0 challenge: procurement could be explained too easily as deterministic ERP/workflow automation with an LLM wrapper, making the Agent necessity and business pain less convincing than required for the user's primary portfolio project.
 
-## Why selected
+## Decision change
 
-C1 survives all six fatal gates, the close-ranking bounded validation, and three independent red-team reviews. Its strongest advantage is not that procurement is the most common Agent job title; it is that procurement provides a compact enterprise task where the portfolio can demonstrate the capabilities most consistently supported by the market evidence:
+### Previous selection
+C1 — ProcurePilot: Enterprise Procurement & Supplier Execution Agent.
 
-- ambiguous task interpretation;
-- stateful multi-step workflow;
-- Tool/API execution;
-- structured business-system state;
-- RAG for non-structured policy knowledge only;
-- approval and safe writes;
-- idempotency and failure recovery;
-- offline evaluation and run tracing.
+### Reopen trigger
+The user challenged the central value proposition: “这个解决不了什么”. Re-evaluation confirmed that the procurement design's strongest mechanics—budget checks, supplier eligibility, approval thresholds, PO state transitions—are predominantly deterministic. The Agent still adds value for requirement clarification and evidence selection, but that value is too thin for the project's headline.
 
-It also adds more portfolio diversity than C2 because the user already has an OpsPilot-style incident/operations Agent direction.
+### New selection
+C6 — CommerceAgent: E-commerce After-sales Execution & Exception Handling Agent.
 
-## Explicit positioning
+The new problem is sharper: a customer presents an ambiguous after-sales goal, while resolution requires dynamic evidence gathering across order state, logistics, after-sales policy, eligibility, risk/approval and write systems. The correct next tool and business path vary by evidence.
 
-Do **not** present the project as evidence that “procurement Agent is the hottest hiring direction.”
+## Core business problem
 
-Present it as:
+Human after-sales agents repeatedly perform this cross-system loop:
 
-> an enterprise execution Agent that converts an incomplete purchase request into a policy-checked, budget-aware, supplier-comparable, approval-ready business transaction while keeping deterministic business rules and risky writes outside model authority.
+`understand complaint → identify order → inspect order state → inspect logistics → retrieve relevant policy → determine refund/return/escalation path → execute or route approval → verify result`
 
-## Scope frozen as core
+CommerceAgent automates that orchestration while keeping money, permissions and state transitions under deterministic backend authority.
 
-- One procurement category/domain.
-- One requester-to-approval/PO-draft workflow.
-- Persistent supplier, quotation, budget, purchase-request, approval and audit state.
-- Several read tools plus controlled idempotent writes.
-- Dynamic Agent decisions for missing information, evidence/tool selection, constrained comparison and escalation.
-- Server-side validation for price/budget/policy/permissions/state transitions.
-- Policy retrieval with citations if retrieval adds value.
-- Human approval for high-risk writes.
-- Versioned offline eval set and reconstructable trace.
-- Failure scenarios: timeout, invalid tool/parameter, stale quote, duplicate call, prompt injection, unauthorized write, partial failure.
+Example task:
 
-## Deleted / downgraded after red team
+> “我 9 月 10 日买的耳机到现在没收到，我不要了，帮我退款。”
 
-### Reject from core
-- Multi-Agent unless a measured single-Agent limitation appears.
-- Kubernetes.
-- Message queue/event infrastructure.
-- Redis/cache unless a measured bottleneck appears.
-- Broad supplier lifecycle/contract/logistics/inventory suite.
-- Recommendation-model training, SFT/RLHF.
-- Multiple real SaaS/ERP integrations.
-- Decorative admin dashboard.
+A valid Agent run must not simply answer with instructions. It must identify the relevant order, inspect delivery/logistics state, obtain applicable policy evidence when necessary, call deterministic refund-eligibility logic, choose refund/return/escalation, execute an allowed write or request approval, then verify the resulting business state.
 
-### Should, not Must
-- MCP adapter after simple tool contracts work.
-- One real external adapter if authentication/data access is easy and does not become a dependency.
-- Minimal web UI for task progress/approval.
-- Cloud deployment after local reproducibility.
+## Why Agent is necessary
 
-## Strongest rejected alternatives
+The Agent owns uncertainty and orchestration:
+- infer the after-sales intent and resolve ambiguous order references;
+- decide which evidence is still missing;
+- choose the next Tool/API dynamically;
+- distinguish logistics anomaly, delivered-return, non-refundable item and exceptional case;
+- decide whether clarification, policy retrieval, write execution, human approval or escalation is the next step;
+- synthesize an auditable explanation from the evidence actually used.
 
-### C2 DevOps/R&D Incident Agent
-Technically excellent and directly aligned with AI backend/platform/R&D-efficiency hiring. Rejected here primarily because of portfolio overlap with the user's existing OpsPilot_Agent direction and higher infrastructure-sprawl risk. Revisit if OpsPilot is abandoned or not used for recruiting.
+The Agent does **not** own deterministic authority.
 
-### C5 Financial Operations / Policy Compliance Agent
-Strongest direct domain-specific hiring evidence in the strict sample. Rejected because the finance/safety communication burden is higher, the user's background fit is weaker, and procurement offers a cleaner general-enterprise explanation without sacrificing Tool/safety/eval depth.
+## Deterministic backend boundary
 
-## Residual risks
+The business backend remains authoritative for:
+- user/order ownership and permissions;
+- refund/return eligibility;
+- refundable amount and financial limits;
+- legal state transitions;
+- idempotency and duplicate-write protection;
+- high-risk approval thresholds;
+- actual creation of refund/return/work-order records;
+- audit log integrity.
 
-1. **Agent necessity risk**: if implementation turns into a fixed linear form workflow, C1 loses its main justification.
-2. **Hiring specificity risk**: procurement itself is not a universally named target role; hiring narrative must remain capability- and enterprise-execution-oriented.
-3. **Synthetic-system risk**: local business data must be stateful and contract-realistic rather than a stateless mock.
-4. **Evaluation risk**: supplier choice cannot be judged solely by one “correct” answer; deterministic constraints and acceptable-choice predicates are required.
+**RAG retrieves/explains policy; it does not authorize a refund.**
+**The LLM may propose an action; the backend decides whether that action is legal.**
+
+## Core vertical slice
+
+`User complaint → Agent → identify_order → get_order → get_logistics → policy_search (conditional) → check_after_sales_eligibility → choose refund/return/escalation → approval (conditional) → create_refund/create_return/create_ticket → verify_business_state → Result + Trace`
+
+## Why this beats C1 now
+
+1. **Harder business pain**: cross-system after-sales exception handling is a recognizable high-volume operational problem, not merely a convenience layer.
+2. **Stronger Agent necessity**: the next action genuinely depends on intermediate evidence rather than a mostly fixed workflow.
+3. **Cleaner Agent/backend separation**: LLM handles ambiguity and orchestration; deterministic services handle money, permissions and state safety.
+4. **Better evaluation**: order/logistics/policy states permit deterministic oracles for expected tools, parameters, forbidden actions and final state.
+5. **Stronger interview story**: timeout + idempotency, Prompt Injection, high-risk approval, wrong-tool prevention and post-write verification naturally arise from the business problem.
+6. **Better portfolio differentiation**: unlike C2, it does not duplicate the user's existing OpsPilot_Agent theme.
+
+## Revised ranking
+
+| Rank | Candidate | Center score | Decision |
+|---:|---|---:|---|
+| 1 | C6 E-commerce After-sales Execution & Exception Handling | **9.29** | SELECTED |
+| 2 | C5 Financial Operations / Policy Compliance | 8.86 | Alternative; higher domain/safety burden |
+| 3 | C3 Data/BI Decision-to-Action | 8.655 | Alternative; risk of looking like Text-to-SQL |
+| 4 | C2 DevOps/R&D Incident Agent | 8.625 | Strong but portfolio-overlap penalty |
+| 5 | C4 Enterprise Workflow | 8.50 | Feasible but less distinctive |
+| 6 | C1 Procurement & Supplier Execution | 8.30 | Superseded due weak headline Agent necessity |
+
+Scores are planning judgments, not measured product outcomes.
+
+## MVP boundary
+
+Core version includes only after-sales execution:
+- order identification and lookup;
+- logistics status/anomaly lookup;
+- policy retrieval with citations where non-structured policy is needed;
+- deterministic refund/return eligibility;
+- refund/return/work-order writes;
+- one high-risk Human-in-the-loop approval path;
+- retries, idempotency, authorization, Prompt Injection resistance;
+- per-run trace and 60–80 offline evaluation cases.
+
+Explicitly excluded from core:
+- product recommendation;
+- pre-sales FAQ;
+- generic shopping assistant;
+- merchant marketing/ads;
+- procurement;
+- real payment gateway;
+- broad omni-channel customer service;
+- Multi-Agent;
+- Kubernetes/complex infrastructure.
 
 ## Revisit triggers
 
-Reopen selection if any of the following occurs during A–Q design or later implementation:
-- fewer than three independently testable scenarios require genuinely dynamic next-action/tool/evidence choice;
-- the Week-2 vertical slice cannot be implemented without real ERP/vendor credentials;
-- reliable evaluation requires subjective manual grading for most cases;
-- persistent business-state/idempotency requirements expand beyond the six-week core;
-- the user decides not to use OpsPilot for recruiting, materially increasing C2 portfolio value.
+Reopen this decision if any of the following occurs:
+- the implemented flow collapses into `intent → fixed refund API` with no meaningful evidence-dependent next-step decisions;
+- deterministic eval cases cannot distinguish Agent behavior from a simple rules router;
+- obtaining a realistic synthetic order/logistics/after-sales backend proves infeasible within Week 2;
+- new hiring evidence materially favors another candidate while C6 loses its Agent-depth advantage.
 
 ## Contract 3 verdict
 
-- Three independent red-team memos: PASS.
-- Every identified issue has a disposition: PASS.
-- No unresolved P0 at design stage: PASS, with Agent-necessity implementation gate preserved.
-- Alternatives compared and switch allowed: PASS.
-- Recommendation consistent with evidence, constraints and existing portfolio: PASS.
-
-**Contract 3: PASS. Proceed to A–Q final project specification.**
+**PASS after reopen.** The original recommendation was challenged, the challenge changed the decision, and the final selection now has a clearer business problem, stronger Agent necessity, bounded deterministic authority and an independently testable two-month scope.
