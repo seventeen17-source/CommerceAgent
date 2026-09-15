@@ -1,103 +1,86 @@
 # Final Integrity Audit
 
-Audit date: 2026-09-15
+## Current final selection
 
-## 1. Evidence integrity
+**CommerceAgent — E-commerce After-sales Execution & Exception Handling Agent**
 
-- Final core job sample contains 30 deduplicated records from 20 employers.
-- Core denominator uses only operational A/C sources; discovery-only aggregator records were removed from the final core and recorded in `market/exclusions.csv`.
-- The two raw core batches were corrected to the same strict source standard so no stale “aggregator=C” contradiction remains.
-- 20% source audit is recorded.
-- Senior/production trend roles are separate from the core denominator.
-- Four current early-career records lack an explicit `2027` title label; uncertainty is disclosed rather than silently promoted to 2027-specific evidence.
+The earlier ProcurePilot selection is retained only as a superseded decision in the audit chain. All authoritative downstream final-project and career artifacts have been rewritten for CommerceAgent.
 
-**Verdict: PASS.**
+## Sequence integrity
 
-## 2. Fact / inference / recommendation separation
+- Market evidence completed before candidate scoring: PASS.
+- Fatal gates applied before recommendation: PASS.
+- Close-ranking validation performed: PASS.
+- Red-team review performed: PASS.
+- Selection was reopened when a later P0 business-value challenge emerged: PASS; the process allowed the recommendation to change instead of defending the old answer.
+- A–Q specification follows the revised final selection: PASS.
+- Implementation roadmap follows revised A–Q: PASS.
 
-- Job pages and extracted responsibilities are evidence facts.
-- Capability-map conclusions are coded inferences with job-ID support.
-- Candidate scores are recommendations/decision aids with uncertainty intervals, not market facts.
-- ProcurePilot selection is explicitly framed as the best current portfolio choice under the user's constraints, not a claim that procurement is the dominant Agent job category.
-- Future implementation metrics are targets/placeholders.
+## Evidence integrity
 
-**Verdict: PASS.**
+- Strict core market sample remains the existing 30-posting evidence pack; it is not rewritten merely to force the new conclusion.
+- E-commerce/customer-service-specific descriptions may support context but are not silently promoted into the strict core denominator.
+- Revised C6 scoring is a decision judgment supported by both core capability signals and supplementary scenario-specific evidence.
+- Facts, design judgments and future targets remain distinguishable.
 
-## 3. Candidate decision integrity
+## Agent-value integrity
 
-- Six candidates were generated after Gate 1.
-- All candidates passed non-compensatory fatal-gate review before scoring.
-- Fixed 25/20/20/15/10/10 weights were used.
-- Top candidates overlapped; bounded validation was executed instead of forcing a winner.
-- Interviewer, hiring-manager and developer red teams were independent and produced actual score/scope changes.
-- C2 and C5 remained active alternatives through final rescore.
-- Existing OpsPilot portfolio overlap was treated as a user-specific differentiation penalty for C2 rather than ignored.
+PASS with implementation-time circuit breaker.
 
-**Verdict: PASS.**
+CommerceAgent's Agent responsibility is limited to ambiguity resolution, evidence sufficiency, next-tool/path selection and escalation. Backend services own permissions, refund/return eligibility, amount, legal state transition, idempotency and write authority.
 
-## 4. Unresolved red-team risks
+Implementation fails this gate if it becomes a fixed `intent → refund API` router.
 
-No design-stage P0 remains unresolved.
+## RAG integrity
 
-The former P0 “ProcurePilot is CRUD + LLM” is conditionally resolved by requiring independently testable dynamic Agent decisions (especially S02–S05) and deterministic business authority outside the model.
+PASS.
+- policy/SOP: retrieval allowed;
+- order/logistics/amount/eligibility/authorization: structured authoritative APIs;
+- retrieval content cannot override backend rules.
 
-**Reopen trigger**: if the implementation becomes a fixed linear form/workflow that always calls the same tools, selection must be reconsidered rather than defended by adding more components.
+## Safety integrity
 
-**Verdict: PASS with implementation revisit trigger.**
+Designed coverage includes:
+- Prompt Injection;
+- cross-user order access;
+- amount tampering;
+- high-risk approval;
+- write timeout ambiguity;
+- duplicate refund prevention;
+- wrong tool/parameter;
+- missing evidence and safe escalation.
 
-## 5. Technology-timing integrity
+Actual safety results remain unmeasured until implementation/eval.
 
-- Final language/framework/storage decisions were not frozen before market evidence, candidate comparison and red-team selection.
-- Java/Python split is justified by real deterministic-backend vs Agent-orchestration responsibilities and includes an explicit simplification trigger.
-- MCP is Should, Multi-Agent/Kubernetes/queue/cache are Reject by default.
-- RAG is limited to unstructured policy knowledge; structured facts remain API/database authority.
+## Evaluation integrity
 
-**Verdict: PASS.**
+- target dataset: 74 versioned cases;
+- dev/test split defined;
+- Baseline/V1/Optimized comparable-run rules defined;
+- deterministic business-state oracle prioritized over model judge;
+- actual performance metrics are not yet claimed.
 
-## 6. Scope / two-month integrity
+PASS as design; measurement pending implementation.
 
-- Six-week evidence core plus two optional/buffer weeks.
-- Week 2 requires happy + controlled-failure end-to-end slice.
-- Safety, idempotency, HITL, evaluation and observability appear before polish.
-- Cut order removes UI/external integrations/protocol sophistication before core evidence.
-- Weeks 7–8 are not required for the core demo.
+## Career-claim integrity
 
-**Verdict: PASS at planning level.**
+PASS.
+All quantitative outputs remain `[待实测]` / `target`. No fabricated success rate, latency reduction, token saving or safety result is stated as achieved.
 
-## 7. Resume/evaluation integrity
+## Scope integrity
 
-- No measured Agent performance exists yet and none is claimed.
-- Numeric claims remain `target` / `[待实测]`.
-- Promotion to measured/approved requires run refs, dataset version/hash, metric definition, raw results and limitations.
-- Synthetic/local enterprise-system boundary must remain visible in README/demo/resume explanations.
+Core explicitly excludes broad customer-service, recommendation, merchant marketing, procurement, real payment integration, Multi-Agent, Kubernetes, Kafka/Redis without measured need and model training.
 
-**Verdict: PASS.**
+PASS for a solo 6-week core + 2-week buffer plan.
 
-## 8. Application-coding scope integrity
+## Repository/workflow caveat
 
-This feature produced research, decision, specification and roadmap artifacts only. It did not create the ProcurePilot Java/Python/frontend/database implementation.
+`.specify/feature.json` is not present in the GitHub repository. The quickstart active-feature-pointer check therefore remains PARTIAL for the remote repository. Before creating the next implementation feature locally, Spec Kit must create/select the active feature in the actual Git worktree.
 
-**Verdict: PASS.**
+## Go / no-go
 
-## 9. Quickstart/environment issue
+**GO for creating a new implementation feature for CommerceAgent.**
 
-`.specify/feature.json` is absent from the GitHub repository, so Quickstart Scenario 1 is PARTIAL. The explicit feature path is valid for this branch, but before running the next local Spec Kit workflow the local workspace must select/create the implementation feature through the installed Spec Kit tooling so the active-feature pointer is correct.
+Recommended next feature name: `002-commerce-after-sales-agent` or equivalent.
 
-Do not fabricate or commit an assumed `feature.json` merely to make the check green without verifying local CLI behavior.
-
-**Verdict: ACTION REQUIRED BEFORE NEXT LOCAL SPEC-KIT COMMAND, not a research/decision artifact failure.**
-
-## 10. Final decision
-
-### Current feature
-**GO FOR REVIEW / MERGE.** The `001-agent-career-project` research-and-design package is materially complete and internally traceable.
-
-### Next implementation feature
-**CONDITIONAL GO.** Before creating/running the next local Spec Kit workflow:
-1. merge/review this branch;
-2. ensure the local repo is a real Git worktree and synchronized;
-3. create/select a new implementation feature (suggested logical name: `002-procurepilot-implementation`) with Spec Kit so the active-feature pointer is valid;
-4. feed the selected project specification, scenarios, tools, evaluation design and roadmap into the new feature;
-5. only then generate implementation tasks and application code.
-
-No application code should be added to `001-agent-career-project`.
+Do not implement the application inside `001-agent-career-project`; this feature remains the evidence/decision/design record.
