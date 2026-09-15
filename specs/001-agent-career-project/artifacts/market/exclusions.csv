@@ -1,0 +1,11 @@
+record_id,title_or_group,company_or_source,reason,disposition,notes
+EX001,Nowcoder Agent/AI完整JD线索批次,多家公司/Nowcoder,source_tier_D_aggregator,discovery_only,"页面可用于发现岗位但不满足 research.md 对核心 A/C 证据的严格口径；此前误标为C的条目已从最终 job-postings.csv 核心表移除"
+EX002,大模型算法工程师 J100728,百度,pure_pretrain_posttrain,rejected,"职责核心为模型训练/SFT/RLHF而非应用工程"
+EX003,大模型算法工程师 J99938,百度,pure_model_algorithm,rejected,"预训练/训练/推理优化占主导，非目标 Agent Application 轨道"
+EX004,Agent算法/训练类高级岗位,多家公司,algorithm_or_posttraining_dominant,reference_only,"可用于理解趋势但不进入目标应用工程核心分母"
+EX005,云原生 Agent Infra 高级研发工程师 J100117,百度,senior_social_reference,reference_only,"生产成熟度信号强但非早期人才筛选样本"
+EX006,Agent引擎开发工程师 J103885,百度,senior_social_reference,reference_only,"要求3年以上后端经验，仅作为生产工程参照"
+EX007,同JD多城市/多转载镜像,多家公司,duplicate,rejected,"按 company+official_job_id 或职责指纹合并，保留最高质量主来源"
+EX008,方向列表但无完整JD,金蝶/中科曙光/网易有道/OPPO/Shopee等,insufficient_detail,direction_only,"可证明招聘方向存在，但缺职责/硬性要求字段，不进入能力频次分母"
+EX009,AI产品经理/运营/销售解决方案,多家公司,wrong_role_family,rejected,"不属于 Agent/LLM 应用工程目标岗位族"
+EX010,纯CUDA/推理内核/芯片适配岗,多家公司,infra_or_kernel_only,rejected,"缺少业务Agent应用职责，不用于当前能力地图核心统计"
