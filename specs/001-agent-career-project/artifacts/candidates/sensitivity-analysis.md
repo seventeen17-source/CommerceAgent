@@ -1,55 +1,32 @@
-# Candidate Score Sensitivity Analysis
+# Candidate Sensitivity Analysis — Final
 
-## Base ranking
+## Current ranking
 
-1. C1 Procurement & Supplier Execution — **8.880**
-2. C5 Financial Operations/Policy Compliance — **8.860**
-3. C2 DevOps/R&D Incident — **8.765**
-4. C3 Data/BI Decision-to-Action — **8.655**
-5. C4 Enterprise Email/Internal Workflow — **8.500**
-6. C6 Merchant/E-commerce Operations — **8.290**
+1. **C6 CommerceAgent — E-commerce After-sales Execution & Exception Handling: 9.29**
+2. C5 Financial Operations / Policy Compliance: 8.86
+3. C3 Data/BI Decision-to-Action: 8.655
+4. C2 DevOps/R&D Incident: 8.625
+5. C4 Enterprise Workflow: 8.50
+6. C1 Procurement & Supplier Execution: 8.30
 
-The Top-1/Top-2 gap is **0.020**, far below the 0.5 trigger. All top-four defensible weighted intervals overlap materially. A certain winner is therefore prohibited before bounded validation.
+## Sensitivity conclusion
 
-## Weight sensitivity
+C6 now has a materially clearer lead than the original procurement ranking because the decision model incorporates the P0 business-value/Agent-necessity challenge.
 
-Because the fixed weights must not change, sensitivity varies scores rather than weights. A plausible ±1 change moves weighted total by:
+The main ranking-sensitive dimensions for C6 are:
+- **Agent depth**: drops sharply if the implementation becomes a fixed router instead of evidence-dependent orchestration.
+- **Demand mapping**: remains strong at the capability level; direct after-sales/customer-service Agent evidence strengthens it further but is supplementary to the strict 30-posting core sample.
+- **Feasibility**: depends on keeping v1 bounded to after-sales rather than broad customer service.
+- **Differentiation**: benefits from complementing the existing OpsPilot_Agent rather than duplicating it.
 
-- demand: ±0.25
-- Agent depth: ±0.20
-- interview value: ±0.20
-- feasibility: ±0.15
-- background fit: ±0.10
-- differentiation: ±0.10
+A plausible ±1 change in any single dimension does not justify returning to C1 procurement as the default. C5 or C3 would be the more credible fallback if C6 fails its Agent-value or feasibility gate.
 
-Therefore C1 vs C5 can flip on **any** single plausible scoring correction. C2 can also overtake both if feasibility is validated higher than the current center or if C1/C5 lose one evidence-backed point in a high-weight dimension.
+## Revisit rule
 
-## Ranking-sensitive dimensions
+Reopen the ranking only if implementation evidence shows one of:
+1. intermediate business evidence does not materially change the next tool/action;
+2. the after-sales backend cannot be made realistic enough inside Week 2;
+3. deterministic evaluation cannot separate C6 from a simple rule/router baseline;
+4. new hiring evidence materially changes the target-role demand map.
 
-### C1 Procurement
-- **Demand evidence** is the main downside uncertainty: strict-core evidence supports supply-chain/operations and enterprise execution, but few roles are explicitly procurement-titled.
-- **Feasibility/background fit** are the main upside: bounded domain, deterministic business state, and strong backend fit make a thin vertical slice credible.
-
-### C5 Financial Operations
-- **Demand evidence** is strongest: multiple finance employers explicitly recruit Agent/LLM application, eval and FDE roles.
-- **Feasibility/domain burden** is the main downside: careless scope can introduce regulatory/safety claims and domain explanation cost.
-
-### C2 DevOps/R&D Incident
-- **Demand/interview depth** are strong and directly supported by AI-Coding, R&D efficiency, platform and observability roles.
-- **Feasibility** is ranking-sensitive: real infrastructure would be too expensive, while a small deterministic service simulator may preserve the signal.
-
-### C3 Data/BI
-- Stable feasibility and broad enterprise value.
-- Ranking depends on proving the project is more than NL2SQL and has a meaningful state-changing action.
-
-## Required action
-
-The scoring rubric's close-ranking trigger is active. Execute a bounded validation comparing C1 and C5 on:
-1. ability to specify 10–15 deterministic eval cases;
-2. minimal Tool/business-state surface;
-3. Week-2 vertical-slice complexity;
-4. 60-second business explanation;
-5. unresolved domain/safety assumptions;
-6. direct hiring-evidence mapping.
-
-C2 is retained as the strongest fallback if the validation shows both C1 and C5 have unacceptable hidden scope.
+Until then, CommerceAgent is the sole current first recommendation.
