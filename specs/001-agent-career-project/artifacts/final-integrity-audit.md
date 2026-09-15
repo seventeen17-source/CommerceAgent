@@ -22,6 +22,7 @@ The earlier ProcurePilot selection is retained only as a superseded decision in 
 - E-commerce/customer-service-specific descriptions may support context but are not silently promoted into the strict core denominator.
 - Revised C6 scoring is a decision judgment supported by both core capability signals and supplementary scenario-specific evidence.
 - Facts, design judgments and future targets remain distinguishable.
+- Source-tier definitions are now uniform across `research.md`, `data-model.md`, and the operational collection protocol: A official full JD; B official recruitment/team page; C traceable authoritative full repost; D discovery-only aggregate/snippet.
 
 ## Agent-value integrity
 
@@ -73,14 +74,14 @@ Core explicitly excludes broad customer-service, recommendation, merchant market
 
 PASS for a solo 6-week core + 2-week buffer plan.
 
-## Repository/workflow caveat
+## Repository/workflow status
 
-`.specify/feature.json` is not present in the GitHub repository. The quickstart active-feature-pointer check therefore remains PARTIAL for the remote repository. Before creating the next implementation feature locally, Spec Kit must create/select the active feature in the actual Git worktree.
+Remote repository validation no longer depends on a committed `.specify/feature.json`. `quickstart.md` now validates the feature directory and required artifacts directly, while local Spec Kit remains responsible for resolving the active feature from the actual worktree/branch context.
+
+`001-agent-career-project` is complete as the evidence/decision record. `002-commerce-after-sales-agent` already exists as the implementation-design feature and contains its own spec, plan, data model, contracts, quickstart and tasks.
 
 ## Go / no-go
 
-**GO for creating a new implementation feature for CommerceAgent.**
+**GO to implementation setup for `002-commerce-after-sales-agent`; do not restart the meta-research stage.**
 
-Recommended next feature name: `002-commerce-after-sales-agent` or equivalent.
-
-Do not implement the application inside `001-agent-career-project`; this feature remains the evidence/decision/design record.
+Do not implement the application inside `001-agent-career-project`. Do not expand 001 with additional market research unless a material new recruiting signal appears that could change the selected project.
