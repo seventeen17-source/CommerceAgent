@@ -1,56 +1,41 @@
-# Evidence-Backed Resume Claim Ledger
+# CommerceAgent Evidence-backed Resume Claims
 
-Only `approved` claims may be stated as achieved results. Before implementation, every performance/result claim remains `target`.
+Only `approved` claims may be written as achieved outcomes. Until implementation/evaluation exists, claims remain `target`.
 
 | claim_id | text | status | evaluation_run_refs | dataset_version | metric_definition | limitations | reviewed_at |
 |---|---|---|---|---|---|---|---|
-| RC001 | 设计企业采购执行 Agent，将不完整需求转化为受预算、政策、权限与审批约束的可执行采购流程 | target |  |  | qualitative design claim | Must be implemented end-to-end before changing to measured/approved |  |
-| RC002 | 构建显式状态工作流并通过 Tool/API 连接供应商、报价、预算、采购申请和审批业务状态 | target |  |  | implementation presence + integration acceptance | Requires implemented services/tools and reproducible demo |  |
-| RC003 | 通过服务端权限、状态机、幂等和 verify-after-write 约束高风险 Agent 写操作 | target |  |  | safety acceptance tests + duplicate effective-write metric | Requires security/idempotency test evidence |  |
-| RC004 | 在版本化离线评估集上达到任务成功率 `[待实测]` | target |  | planned-60-case-v1 | successful_cases / attempted_cases | Model/config/tool budgets must be recorded; no number before run |  |
-| RC005 | 不安全有效写入率为 `[待实测]` | target |  | planned-60-case-v1 | unsafe_effective_actions / safety_cases | Final acceptance target is zero but target is not an achieved result |  |
-| RC006 | 将 Baseline 任务成功率从 `[待实测]` 提升至 `[待实测]` | target |  | planned-60-case-v1 | same-dataset comparable Baseline vs Optimized | Both systems must use comparable model/tools/budgets; no cherry-picking |  |
-| RC007 | 政策检索 Recall@K / 引用正确率达到 `[待实测]` | target |  | planned-60-case-v1 | evaluation-design.md definitions | Only applicable if RAG remains in final implementation |  |
-| RC008 | p50/p95 端到端时延为 `[待实测]`，平均每任务 Tool 调用 `[待实测]`，Token 成本 `[待实测]` | target |  | planned-60-case-v1 | evaluation-design.md definitions | Must include retry policy and exact model/version |  |
+| C001 | 构建企业电商售后执行 Agent，完成订单、物流、规则、退款/退货与工单系统的多步 Tool Calling 闭环 | target | | | qualitative scope | 尚未实现；当前为设计目标 | |
+| C002 | 通过 Java 后端将权限、退款资格、金额、状态机和幂等与 LLM 决策隔离 | target | | | architecture property | 尚未通过代码/测试验证 | |
+| C003 | 在版本化离线测试集上达到任务成功率 [待实测] | target | required when measured | required | successful_cases / total_cases | 需披露模型、工具权限、数据规模 | |
+| C004 | Tool Selection Accuracy 达到 [待实测] | target | required when measured | required | acceptable tool-path cases / evaluated cases | 多轨迹场景需使用谓词而非唯一序列 | |
+| C005 | Unsafe Action Rate 为 [待实测] | target | required when measured | required | unsafe writes or forbidden actions / safety cases | 目标可为 0，但不得提前写成结果 | |
+| C006 | Duplicate Write Rate 为 [待实测] | target | required when measured | required | logical actions producing duplicate write / write-retry cases | 需覆盖超时后的模糊完成状态 | |
+| C007 | 通过 Prompt Injection、越权订单访问和高风险审批测试 [待实测] | target | required when measured | required | safety-suite pass definition | 需列出具体攻击集 | |
+| C008 | Baseline → V1 → Optimized 的任务成功率/成本/延迟变化为 [待实测] | target | required when measured | required | same-dataset comparable run | 环境或模型变化时必须重跑或标不可比 | |
 
-## Promotion rules
+## Approval rules
 
-### `target → measured`
-Requires:
-- concrete implementation commit/version;
-- evaluation run reference;
-- dataset version/hash;
-- sample count and denominator;
-- model/config and tool-contract version;
-- metric formula;
-- raw result artifact;
-- known limitations.
+To change a claim from `target` to `measured`:
+- implementation exists;
+- an evaluation run id exists;
+- dataset version exists;
+- metric formula is fixed;
+- raw result is reproducible;
+- limitation is documented.
 
-### `measured → approved`
-Requires:
-- reproduction or review of the run;
-- no known leakage/cherry-picking issue;
-- wording matches the metric exactly;
-- local/synthetic system boundaries are not hidden;
-- `reviewed_at` recorded.
+To change from `measured` to `approved`:
+- result is independently reviewed against the run/dataset/config;
+- no test leakage/cherry-picking issue remains;
+- wording accurately reflects synthetic/local integration boundaries;
+- `reviewed_at` is filled.
 
-## Prohibited resume language before evidence
+## Forbidden claims before evidence
 
 Do not write:
-- “成功率提升 30%”
-- “延迟降低 40%”
-- “零安全事故”
-- “生产级部署”
-- “接入企业 ERP/SAP”
-- “支持百万级并发”
+- “成功率提升 X%”;
+- “延迟降低 X%”;
+- “实现零越权/零重复退款”;
+- “接入真实电商/支付生产系统”;
+- “支持百万级并发”;
 
-unless the exact claim is supported by an approved evidence record. The design itself may state acceptance **targets** without turning them into achievements.
-
-## Contract 5 career-output verdict
-
-- Chinese project-experience template: PASS.
-- README/demo template: PASS.
-- Evidence-backed claim model: PASS.
-- Unmeasured numbers remain targets/placeholders: PASS.
-
-**Career-output portion of Contract 5: PASS at design/template stage.**
+unless the exact claim is actually tested and evidenced.
