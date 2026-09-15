@@ -1,70 +1,82 @@
-# ProcurePilot Scope-Cut Plan
+# CommerceAgent Scope Cut Plan
 
-## Must freeze
+## Must
+- one after-sales domain: refund / return / logistics anomaly / escalation;
+- one primary user flow plus meaningful evidence-dependent branches;
+- explicit Agent state graph;
+- Tool contracts and validated parameters;
+- Java authoritative order/eligibility/write backend;
+- idempotent write handling;
+- one high-risk Human-in-the-loop path;
+- Prompt Injection and authorization defense;
+- policy retrieval only where unstructured knowledge is needed;
+- 60–80 case offline evaluation;
+- per-run trace and error taxonomy;
+- reproducible local startup.
 
-Freeze by end of Week 1:
-- one procurement workflow;
-- persistent supplier/quote/budget/request/approval/audit state;
-- genuine dynamic Agent next-action/tool decisions;
-- protected write tools and deterministic business validation;
-- idempotency + verify-after-write;
-- HITL approval;
-- small policy retrieval with citations;
-- versioned eval cases and trace.
+## Should
+- MCP adapter over existing HTTP tool contracts;
+- second after-sales sub-scenario using the same core;
+- fault injection automation;
+- simple approval UI;
+- basic trace visualization;
+- Docker Compose.
 
-After Week 2, no new Must may be added without removing an equal-or-larger scope item.
+## Nice
+- richer frontend;
+- advanced retrieval/reranking;
+- cloud deployment;
+- more policy categories;
+- more business dashboards.
 
-## Cut order when schedule slips
+## Reject for core
+- broad pre-sales/customer-service platform;
+- product recommendation;
+- ads/merchant operations;
+- procurement module;
+- real payment provider integration;
+- full RBAC admin platform;
+- Kafka/event architecture without measured need;
+- Redis without measured need;
+- Kubernetes;
+- Multi-Agent;
+- fine-tuning/RLHF.
 
-1. Decorative UI / visual polish.
-2. Cloud hosting.
-3. Real external vendor/ERP adapter.
-4. MCP adapter.
-5. Hybrid retrieval/reranking sophistication; keep the simplest policy retrieval that meets eval.
-6. Additional procurement categories.
-7. Optional adversarial depth beyond required security cases.
-
-Do **not** cut:
-- state-changing business loop;
-- dynamic Agent branch;
-- deterministic backend authority;
-- timeout/duplicate/unsafe-write handling;
-- approval/idempotency;
-- evaluation and trace.
-
-## Explicit Reject list
-
-- Multi-Agent without measured single-Agent failure.
-- Kubernetes.
-- Kafka/event bus.
-- Redis/cache without a measured bottleneck.
-- microservice decomposition beyond the Agent/business-backend boundary.
-- long-term user memory.
-- recommendation-model training or SFT/RLHF.
-- full supplier lifecycle/contracts/logistics/inventory platform.
-- complete RBAC/admin CRUD suite.
-- multiple SaaS integrations.
+## Freeze rules
+- Week 1: freeze Must scope.
+- After Week 2: no new Must unless a current Must cannot be made correct/safe without it.
+- New technology may enter only by replacing complexity, not simply adding to it.
 
 ## Circuit breakers
 
-### Week 1
-If Java/Python split produces empty wrappers or blocks tool integration, simplify framework/service boundary before adding features.
+### If Week 2 vertical slice fails
+Cut frontend/policy-RAG complexity and prove `User → Agent → Tool → Backend → safe write/no-write → verification` first. If evidence-dependent Agent branching still cannot be demonstrated, reopen project selection.
 
-### Week 2
-If end-to-end happy + controlled-failure slice is not working, stop all Should/Nice work and focus exclusively on one persistent request path.
+### If Python learning curve delays progress
+Keep Agent graph minimal and explicit; avoid framework-specific abstractions. Do not move deterministic rules into prompts to compensate.
 
-### Week 3
-If safe-write/idempotency/approval is unstable, postpone RAG sophistication and UI; do not proceed to more write tools.
+### If retrieval quality is poor
+Use a smaller versioned policy corpus or deterministic document lookup. RAG is not allowed to block the core after-sales execution path.
 
-### Week 4
-If 60-case eval cannot be frozen, reduce category variety while preserving failure/safety coverage; do not fabricate metrics from a hand-picked subset.
+### If model cost/availability is unstable
+Keep eval data and backend deterministic; support a lower-cost model/config for development. Report actual configuration in results.
 
-### Week 5
-If optimization cannot be attributed to one mechanism, report V1 honestly rather than stacking untraceable changes.
+### If frontend delays progress
+Replace with minimal chat/approval UI or CLI. Do not cut safe writes, eval or trace.
 
-### Model/API cost or quota issue
-Use a lower-cost compatible model or recorded deterministic fixtures for non-model tests; rerun all compared versions under the same model/config before claiming relative improvement.
+## Cut order when behind schedule
+1. visual polish;
+2. MCP;
+3. second scenario breadth;
+4. cloud deploy;
+5. advanced RAG;
+6. observability UI.
 
-## Resume protection
-
-A schedule slip never authorizes turning target metrics into achieved claims. Scope is variable; evidence integrity is not.
+Never cut before core completion:
+- deterministic Agent/backend boundary;
+- dynamic next-tool/evidence branch;
+- authorization;
+- idempotency;
+- HITL;
+- eval;
+- trace.
