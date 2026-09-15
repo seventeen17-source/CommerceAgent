@@ -1,17 +1,18 @@
 # Red Team — Developer Elimination Memo
 
-Target: C1 Procurement & Supplier Execution Agent. Alternatives: C2 DevOps/R&D Incident, C5 Financial Operations.
+Target: **CommerceAgent — E-commerce After-sales Execution & Exception Handling Agent**.
 
-| issue_id | severity | challenge | evidence / failure scenario | proposed disposition |
-|---|---|---|---|---|
-| DEV-01 | P1 | Synthetic supplier/quote data may make the engineering too easy | If tools are only dictionary lookups, there is little real backend/state complexity | **strengthen deterministic system, not breadth**: persistent relational state, quote validity windows, budget reservations, request state machine, audit and idempotent writes |
-| DEV-02 | P1 | Recommendation can become non-deterministic and hard to debug | Multiple acceptable suppliers; an LLM can rationalize arbitrary choices | **constraint-first design**: deterministic eligibility/price/deadline facts; Agent chooses evidence and explains tradeoffs; eval uses predicates rather than exact supplier text |
-| DEV-03 | P1 | Tool failure and partial writes can corrupt state | timeout after a write, repeated retry, stale quote, duplicate request | **Must**: idempotency keys, write verification, bounded retry only for safe reads/idempotent calls, explicit partial-failure state |
-| DEV-04 | P1 | Policy/RAG text can carry prompt injection or stale instructions | malicious supplier note or retrieved document tells the Agent to bypass checks | **Must**: retrieved text is untrusted data; server-side permission/policy validation; source/version metadata; no prompt can grant write permission |
-| DEV-05 | P2 | Real supplier/ERP adapters will consume the schedule | auth, rate limits, vendor-specific schemas and data licenses add little evidence | **delete from core**; local contract-realistic adapter first, external adapter only Should |
-| DEV-06 | P2 | Multi-Agent/MCP/queue/cache can create unnecessary failure modes | components would be added because they are popular rather than required | **reject Multi-Agent/queue/cache/K8s in core; MCP Should only after base tools work** |
-| DEV-07 | P1 | C2 may actually be easier to defend technically if infrastructure is simulated | seeded incidents have crisp ground truth and diagnosis/remediation oracles | **compare C2 after scope cut**: service simulator, logs/deploy history, 5–6 tools, one safe remediation; no real K8s required |
+| issue | severity | attack | required treatment |
+|---|---|---|---|
+| Write timeout can duplicate money/state changes | P0 | Retrying a timed-out refund blindly can create duplicate business objects | Stable idempotency key, ambiguous-completion status query, same-key retry only when safe |
+| Model may access another user's order | P0 | Prompt-provided order id cannot be trusted | Backend rechecks authenticated ownership on every read/write |
+| RAG/prompt injection can try to override policy | P0 | Retrieved/user text may contain malicious instructions | Treat all text as data; backend authorization/eligibility remains authoritative |
+| Dynamic Agent loop can run forever or repeat tools | P1 | Open-ended ReAct is hard to debug and control | Explicit state graph, max steps, repeated-call breaker, bounded retry and safe stop |
+| Java/Python split can create operational noise | P1 | Two services are unnecessary if either side is a shell | Keep only if both have substantial independent responsibilities; otherwise collapse |
+| Eval can become prose judging | P1 | Natural-language answers are subjective | Score tool predicates, parameters, forbidden actions and final backend state deterministically where possible |
+| Real e-commerce/payment integration can derail schedule | P2 | OAuth/payment/provider behavior adds little to the core thesis | Use contract-realistic local systems; external adapters are optional after core passes |
+| Too many technologies can hide reliability bugs | P2 | MCP, Kafka, Redis, K8s, Multi-Agent increase failure surface | Cut from core unless measured need appears |
 
-## Developer verdict
+## Verdict
 
-C1 is technically feasible and safer than C5, but its strongest engineering evidence comes from reliability/state/evaluation rather than procurement complexity itself. C2 has a potentially cleaner causal evaluation story (seed fault → evidence → diagnosis → remediation → health verification) if infrastructure is kept local and deterministic. This is strong enough to justify re-scoring rather than automatically retaining C1.
+**PASS with strict engineering constraints.** The hardest technical proof is not model prompting; it is safe state-changing execution under timeouts, authorization, idempotency, partial failures and traceable recovery. Those mechanisms are Must, not polish.
