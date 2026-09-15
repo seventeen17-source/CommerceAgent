@@ -1,50 +1,54 @@
-# ProcurePilot Technology Decisions
+# CommerceAgent Technology Decisions
 
-These decisions are allowed only because Contract 3 has passed. They are implementation recommendations for the future implementation feature, not application code in this feature.
+The selected project is an e-commerce after-sales execution and exception-handling Agent. Technology is justified by business responsibility, not by keyword popularity.
 
-| Technology / capability | Enterprise value | Project necessity | 2-month learning ROI | Complexity cost | Priority | Decision / revisit trigger |
+| Technology / capability | Enterprise value | Project necessity | 2-month learning ROI | Complexity cost | Priority | Revisit trigger |
 |---|---|---|---|---|---|---|
-| Java + Spring Boot business backend | Strong fit for transactional enterprise services, validation, state machines, audit and APIs | Gives the Agent a real deterministic business system instead of in-memory mocks | High: leverages existing strength and demonstrates mainstream backend engineering beside AI | One service, persistence, transactions, tests | **Must** | Use for supplier/quote/budget/request/approval/PO domain logic. Revisit only if scope proves a separate backend adds no real domain logic |
-| Python Agent service | Dominant ecosystem for LLM/Agent experimentation, eval tooling and model SDKs | Separates probabilistic orchestration from deterministic business authority; not required for business truth | High because Python/Agent engineering is a stated skill gap and appears across target jobs | Cross-language API boundary and deployment | **Must** | Keep the boundary narrow: Agent orchestration/eval only. Revisit if Week-1 spike shows one-language implementation materially reduces risk without losing learning goals |
-| LangGraph or equivalent explicit state graph | Provides inspectable state, conditional routing, checkpoints and bounded tool loops | Strongly matches the project's need for missing-info branches, checks, approval pause and failure paths | High: teaches stateful Agent engineering rather than a chat loop | Framework concepts and version churn | **Must capability; framework replaceable** | Prefer LangGraph if stable at implementation time; otherwise implement equivalent explicit state machine. The capability is Must, the vendor/framework is not |
-| OpenAI-compatible model API abstraction | Allows model experimentation without coupling business rules to one vendor | A model is needed for intent/decision/comparison tasks | High | Model variability, cost and rate limits | **Must capability** | Provider remains configurable; no multi-provider abstraction beyond a small interface unless needed |
-| Minimal web UI | Makes task progress, clarification, approval and trace visible | Useful for demo/HITL but not needed for core Agent correctness | Medium | Frontend time | **Should** | Use a small React/Vite or similarly simple UI. If delayed, a minimal internal page/API client is acceptable |
-| MCP adapter | Standardized interoperability appears in target roles and can expose tools consistently | Base project can work with ordinary HTTP/tool functions; MCP does not create business value by itself | Medium/high once the base system works | Extra protocol/runtime concepts | **Should** | Add after HTTP/tool contracts and eval are stable. Never make Week-2 slice depend on it |
-| RAG for procurement policy | Grounds non-structured policy/approval/category knowledge with citations | Needed only for policy text that cannot be represented as simple authoritative fields/rules | High, because retrieval is common in target roles and creates injection/citation test cases | Chunking/index/retrieval/eval | **Must for a small policy corpus** | Keep structured facts in DB/APIs. If policy corpus is tiny, a simple retrieval implementation is sufficient |
-| PostgreSQL | Transactional persistent state, relational constraints and audit-friendly queries | Needed to make budget/request/approval/idempotency behavior contract-realistic | High and familiar enterprise choice | Schema/migrations | **Must** | One database for business state; avoid database proliferation |
-| pgvector / vector search | Supports semantic policy retrieval inside existing DB | Not required if policy corpus can be served by simpler retrieval; useful to demonstrate embeddings without another service | Medium | Extension/index tuning | **Should** | Prefer same Postgres if used. Revisit based on policy retrieval eval; do not add a separate vector DB by default |
-| Hybrid lexical + semantic retrieval | Better robustness for policy IDs, thresholds and domain terms | Valuable if semantic-only retrieval misses exact terms | Medium | Fusion/ranking code | **Should** | Add only if baseline retrieval error analysis justifies it |
-| Structured run/tool audit tables | Reconstruct one Agent run without relying on a vendor dashboard | Directly required by spec and market evidence | High | Schema and logging discipline | **Must** | Store run, step, model usage, tool execution, retrieval refs, errors, approvals and outcome |
-| Langfuse/LangSmith or hosted tracing | Convenient visualization and eval integration | Not required if local trace/eval artifacts are complete | Medium | External service/config/cost | **Nice** | Use only if setup is trivial and data policy is acceptable |
-| Docker Compose | Reproducible local multi-service demo | Makes Java/Python/Postgres setup repeatable for reviewers | High | Small packaging cost | **Must** | One-command local stack by Week 6 |
-| Cloud deployment | Improves demo accessibility | Not necessary for correctness/interview evidence | Medium | Credentials/cost/ops | **Should** | Add only after reproducible local core |
-| GitHub Actions CI | Reproducible tests and contract/eval smoke checks | Helpful but not part of Agent logic | Medium | Workflow maintenance | **Should** | Add after stable test commands |
-| Redis/cache | Useful at scale | No measured bottleneck or distributed-session need in core | Low | New state/failure mode | **Reject core** | Revisit only after measured latency/throughput need |
-| Kafka/message queue/event bus | Useful for large asynchronous workflows | Not required for one bounded procurement flow | Low | Significant operational complexity | **Reject** | Do not add for architecture decoration |
-| Kubernetes | Enterprise orchestration at scale | No two-month project necessity; Docker Compose proves reproducibility | Low for this project's hiring signal relative to cost | Cluster/ops overhead | **Reject** | Learn conceptually if targeting platform roles, not implement here |
-| Multi-Agent | Can divide specialist roles in complex systems | One explicit state graph can solve current workflow and is easier to evaluate | Low/negative before evidence | Coordination, state, eval and debugging complexity | **Reject by default** | Revisit only if measured single-Agent/state-graph limitation appears |
-| Long-term user memory | May personalize recurring procurement | No current business requirement | Low | Privacy/state/quality burden | **Reject** | Session/task state only |
-| SFT/RLHF/Agentic RL | Can optimize model behavior at scale | Core failures are expected to be workflow/tool/eval problems, not training problems | Low for current target | Data/GPU/experimentation complexity | **Reject** | Revisit only after implementation evidence shows prompt/workflow/tool changes cannot solve a high-value failure class |
+| Java + Spring Boot | Deterministic business APIs, transactions, permissions and state safety | Own order/after-sales domain, eligibility, idempotent writes, audit | High; aligns with backend interviews and user's strength | Medium | **Must** | Revisit only if implementation is intentionally single-language and can preserve equal backend depth |
+| Python + FastAPI | Fast model/Agent ecosystem and eval integration | Agent orchestration and eval runner | High; fills user's weaker Python Agent engineering area | Medium | **Must** | Could collapse into Java only if Python split becomes empty ceremony |
+| Explicit state graph | Bounded, auditable long-running task orchestration | Dynamic evidence gathering, retry/approval/write/verify flow | Very high | Medium | **Must** | Reject graph framework if simple explicit state machine provides same clarity |
+| PostgreSQL | Transactional authoritative business state | Orders, after-sales writes, approvals, audit, eval reset state | High | Low/medium | **Must** | None for core unless a simpler relational DB is required by environment |
+| Tool/API Calling | Connect Agent to real business capabilities | Central to project value | Very high | Medium | **Must** | None; without tools project becomes chatbot |
+| RAG for policy/SOP | Retrieve unstructured policy with citations | Useful for explanation and policy context, but not business authority | High | Medium | **Should** | Cut if policy corpus is too small; use direct versioned lookup instead |
+| MCP | Standardized tool protocol and good interview topic | Not needed to prove business flow; HTTP tools suffice for MVP | Medium/high | Medium | **Should** after MVP | Add in Week 7 if core is stable and it demonstrates protocol portability |
+| React/simple frontend | Makes demo and HITL visible | Useful but not core intelligence | Medium | Medium | **Should** | Replace with minimal HTML/CLI if frontend threatens core schedule |
+| Docker Compose | Reproducible multi-service demo | Helps reviewers run Java/Python/Postgres stack | High | Low | **Should** | Use plain processes if container setup becomes disproportionate |
+| Observability / structured tracing | Debugging, reliability and interview evidence | Required to reconstruct an Agent run | Very high | Medium | **Must** | Implementation library may vary; capability may not be cut |
+| Offline Eval harness | Measures task/tool/state/safety behavior | Required to prove Agent adds value over baseline | Very high | Medium | **Must** | None |
+| Human-in-the-loop | Prevent autonomous high-risk writes | Required for high-value/exception cases | High | Low/medium | **Must** for one path | Threshold/policy can be simplified, capability retained |
+| Redis | Cache/session optimization | No demonstrated need in core | Low | Medium | **Reject core** | Add only after measured latency/state-sharing need |
+| Kafka/message queue | Async scale/event workflows | Core demo does not require production-scale eventing | Low | High | **Reject core** | Add only for a specific async business requirement |
+| Kubernetes | Production orchestration | Does not improve core proof in 8 weeks | Low | High | **Reject** | Only after core project complete, never MVP |
+| Multi-Agent | Specialized role decomposition | No evidence it beats one explicit after-sales state graph | Low | High | **Reject core** | Revisit only if a measured task family truly needs independent agents |
+| Fine-tuning/RLHF | Model behavior specialization | Not needed for the project thesis | Low | Very high | **Reject** | Only future research with data and clear measured need |
+| Vector DB as mandatory platform | Scalable retrieval | Policy corpus may be small enough for simple retrieval | Medium | Medium | **Nice / conditional** | Adopt only if corpus/eval justifies it |
 
-## Architecture decision
+## Architectural choice
 
-Recommended future implementation boundary:
+Recommended baseline:
 
 ```text
-Minimal Web UI
-    |
-    v
-Python Agent Service
-(explicit state graph, model calls, tool orchestration, eval hooks)
-    |
-    | typed HTTP tool calls first; optional MCP adapter later
-    v
-Java Spring Boot Business Backend
-(authoritative validation, transactions, permissions, idempotency, state machine)
-    |
-    v
+Simple Web UI
+   ↓
+Python Agent Service (FastAPI + explicit state graph)
+   ↓ Tool contracts over HTTP
+Java After-sales Backend (Spring Boot)
+   ↓
 PostgreSQL
-(business state + audit; optional pgvector for policy retrieval)
+
+Policy retrieval + Trace/Eval are supporting capabilities.
 ```
 
-This split is not justified by “show two languages.” It is justified only if the Java service owns meaningful deterministic business semantics and the Python service owns probabilistic Agent orchestration/evaluation. If later implementation collapses either side into an empty wrapper, the split must be simplified.
+## Critical decision: RAG is not refund authority
+
+A policy chunk may say “物流异常可申请退款”, but the Agent cannot convert that sentence directly into a money-changing authorization.
+
+The authoritative path is:
+
+`policy evidence (optional) + order/logistics state → Java eligibility service → allowed action/max amount/approval requirement → Agent chooses next business path → guarded write`
+
+This separation is a Must because it is both a real enterprise safety pattern and a strong interview design point.
+
+## Critical decision: Java/Python split must earn its existence
+
+Java exists for substantial domain logic, not résumé decoration. Python exists for actual Agent orchestration/eval, not merely proxying requests. If either side becomes a shell, collapse the split rather than preserve empty complexity.
