@@ -1,13 +1,14 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Agent API
-  version: 0.1.0
+  version: 0.2.0
 servers:
   - url: http://agent-service:8000/api/v1
 paths:
   /agent/runs:
     post:
       summary: Create an Agent run from a natural-language after-sales request
+      description: Creates a run owned by the authenticated customer principal. Principal identity comes from JWT context, never request/model text.
       requestBody:
         required: true
         content:
@@ -19,9 +20,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AgentRunView' }
+        '401': { $ref: '#/components/responses/Error' }
   /agent/runs/{runId}:
     get:
       summary: Get current Agent run state
+      description: Customer may read only a run owned by the authenticated principal; operational/support access must be explicitly authorized.
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -30,9 +33,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AgentRunView' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /agent/runs/{runId}/events:
     get:
       summary: Stream structured run events for UI trace
+      description: Streams structured events for an authorized run only; hidden chain-of-thought and raw credentials are never emitted.
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -41,9 +48,12 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
   /agent/runs/{runId}/input:
     post:
       summary: Supply user clarification/input to a waiting run
+      description: Only the owner of a WAITING_USER run may submit clarification input; input cannot alter authenticated principal or permissions.
       parameters:
         - $ref: '#/components/parameters/RunId'
       requestBody:
@@ -54,16 +64,20 @@ paths:
               type: object
               required: [message]
               properties:
-                message: { type: string }
+                message: { type: string, minLength: 1 }
       responses:
         '200':
           description: Run resumed or updated
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AgentRunView' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /agent/runs/{runId}/resume:
     post:
       summary: Resume a checkpointed run after authoritative approval/business event
+      description: Resume never trusts approval status supplied by the caller. The Agent service re-reads the authoritative backend approval record before continuing.
       parameters:
         - $ref: '#/components/parameters/RunId'
       requestBody:
@@ -80,9 +94,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AgentRunView' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /agent/runs/{runId}/trace:
     get:
       summary: Retrieve structured state/tool timeline
+      description: Owner-authorized structured trace only; no hidden chain-of-thought, auth token, or secret value is returned.
       parameters:
         - $ref: '#/components/parameters/RunId'
       responses:
@@ -93,34 +111,8 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/RunEvent' }
-  /eval/runs:
-    post:
-      summary: Launch an offline evaluation run for a versioned dataset/system version
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateEvalRunRequest' }
-      responses:
-        '202':
-          description: Eval accepted
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EvalRunView' }
-  /eval/runs/{evalRunId}:
-    get:
-      summary: Get evaluation summary
-      parameters:
-        - in: path
-          name: evalRunId
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Eval summary
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EvalRunView' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
 components:
   securitySchemes:
     bearerAuth:
@@ -133,6 +125,12 @@ components:
       name: runId
       required: true
       schema: { type: string }
+  responses:
+    Error:
+      description: Machine-readable error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
   schemas:
     CreateRunRequest:
       type: object
@@ -170,25 +168,14 @@ components:
         latencyMs: { type: [integer, 'null'] }
         summary: { type: [string, 'null'] }
         timestamp: { type: string, format: date-time }
-    CreateEvalRunRequest:
+    ErrorResponse:
       type: object
-      required: [datasetVersion, systemVersion]
+      required: [errorCode, message, retryable, traceId]
       properties:
-        datasetVersion: { type: string }
-        split: { type: string, enum: [DEV, TEST], default: DEV }
-        systemVersion: { type: string, enum: [BASELINE, V1, OPTIMIZED] }
-        modelConfigRef: { type: [string, 'null'] }
-    EvalRunView:
-      type: object
-      properties:
-        evalRunId: { type: string }
-        datasetVersion: { type: string }
-        systemVersion: { type: string }
-        status: { type: string }
-        totalCases: { type: integer }
-        completedCases: { type: integer }
-        metrics:
-          type: object
-          additionalProperties: { type: number }
+        errorCode: { type: string }
+        message: { type: string }
+        retryable: { type: boolean }
+        traceId: { type: string }
+        details: { type: object, additionalProperties: true }
 security:
   - bearerAuth: []
