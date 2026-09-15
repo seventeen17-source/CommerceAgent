@@ -1,140 +1,105 @@
-# ProcurePilot Tool Contracts
+# CommerceAgent Tool Contracts
 
-All tools are business capabilities, not raw database access. Tool arguments are validated server-side. Retrieved or model-generated text can never grant permission.
+All write tools are enforced by the business backend. The Agent may select and propose an action; it cannot bypass ownership, eligibility, amount, state-transition, approval or idempotency checks.
 
-## T1 `supplier_search`
-- **Business function**: return certified suppliers eligible for a category/region and basic non-sensitive attributes.
-- **Input**: category_id, delivery_region, optional certification/lead-time filters.
-- **Output**: supplier IDs, certification status, supported categories/regions, lead-time range.
-- **Read/write**: read.
-- **Risk**: low.
-- **Automatic call**: allowed for authenticated procurement workflow.
-- **Authorization**: requester/procurement read scope.
-- **Approval**: none.
-- **Timeout**: 2 s local target; fail closed on unavailable source.
-- **Retry**: at most 1 automatic retry for timeout/transient read errors.
-- **Idempotency**: not required for read; trace call ID required.
-- **Errors**: INVALID_FILTER, UNAUTHORIZED, TIMEOUT, SERVICE_UNAVAILABLE.
-- **Audit**: run_id, user_id, normalized filters, result count, latency, error.
-- **Prohibited**: returning disabled/uncertified suppliers as eligible.
+## T1 `list_user_orders`
+- **Business function**: list recent orders belonging to the authenticated user for order disambiguation.
+- **Input**: `user_id`, optional time/product filters.
+- **Output**: minimal order summaries (`order_id`, product summary, created_at, fulfilment state).
+- **Property**: read-only.
+- **Risk**: low/medium privacy.
+- **Authorization**: caller may only access own orders.
+- **Timeout/retry**: short timeout; one bounded retry.
+- **Forbidden**: arbitrary user id supplied by prompt text.
 
-## T2 `quote_query`
-- **Business function**: retrieve active quotations for supplier/item/quantity constraints.
-- **Input**: supplier_ids or category/item requirements, quantity, required_delivery_date.
-- **Output**: quote_id, supplier_id, unit/total price, currency, expiry, promised delivery, terms summary.
-- **Read/write**: read.
-- **Risk**: low/medium because stale data can drive wrong decisions.
-- **Automatic call**: allowed.
-- **Authorization**: requester/procurement read scope.
-- **Approval**: none.
-- **Timeout**: 3 s.
-- **Retry**: at most 1 transient read retry.
-- **Idempotency**: read only.
-- **Errors**: NO_ACTIVE_QUOTE, STALE_QUOTE, INVALID_QUANTITY, TIMEOUT.
-- **Audit**: query parameters, returned quote IDs, freshness timestamps, latency.
-- **Prohibited**: fabricating a quote or silently using expired pricing.
+## T2 `get_order`
+- **Business function**: fetch authoritative order/item/fulfilment state.
+- **Input**: `user_id`, `order_id`.
+- **Output**: normalized order snapshot, product category, amount, timestamps, after-sales state.
+- **Property**: read-only.
+- **Risk**: medium privacy.
+- **Authorization**: server verifies ownership.
+- **Error types**: not found, forbidden, unavailable.
 
-## T3 `budget_check`
-- **Business function**: validate available budget for cost center/request amount without committing spend.
-- **Input**: cost_center_id, amount, currency, optional project_id.
-- **Output**: available_amount, requested_amount, status (`sufficient`/`insufficient`/`review`), reason_code.
-- **Read/write**: read against authoritative budget state.
-- **Risk**: medium.
-- **Automatic call**: allowed.
-- **Authorization**: requester may check own allowed cost center; cross-cost-center access denied.
-- **Approval**: none for check.
-- **Timeout**: 2 s.
-- **Retry**: one transient retry.
-- **Idempotency**: read only.
-- **Errors**: COST_CENTER_NOT_FOUND, CURRENCY_MISMATCH, UNAUTHORIZED, TIMEOUT.
-- **Audit**: amount/cost center/status; do not expose unrelated sensitive balances.
-- **Prohibited**: treating a check as reservation or bypassing insufficient result.
+## T3 `get_logistics`
+- **Business function**: fetch shipment status and logistics events.
+- **Input**: `user_id`, `order_id` or shipment id resolved server-side.
+- **Output**: signed flag, current status, last meaningful event, anomaly projection if deterministically available.
+- **Property**: read-only.
+- **Risk**: low/medium.
+- **Timeout/retry**: bounded retry; no fabricated state when unavailable.
 
 ## T4 `policy_search`
-- **Business function**: retrieve procurement policy passages relevant to category, amount, supplier class, approval or prohibited actions.
-- **Input**: normalized question plus structured filters (policy_type/category/valid_at).
-- **Output**: top passages with policy_id, version, effective dates, citation/location, retrieval score.
-- **Read/write**: read.
-- **Risk**: medium because retrieved text can be stale or adversarial.
-- **Automatic call**: allowed when policy is relevant; not required for structured facts already covered by deterministic rules.
-- **Authorization**: only policy corpus available to the user/role.
-- **Approval**: none.
-- **Timeout**: 4 s.
-- **Retry**: one transient retry.
-- **Idempotency**: read only.
-- **Errors**: NO_POLICY_FOUND, CONFLICTING_VERSIONS, INDEX_UNAVAILABLE.
-- **Audit**: query, filters, policy IDs/versions/chunks, scores, latency.
-- **Prohibited**: allowing retrieved text to override server-side permissions/state-machine rules; returning uncited policy claims.
-
-## T5 `create_purchase_request`
-- **Business function**: create one persistent purchase request after required deterministic preconditions are satisfied.
-- **Input**: requester_id, category/item requirements, quantity, chosen quote or acceptable option set, cost_center_id, justification, required_delivery_date, evidence refs, idempotency_key.
-- **Output**: request_id, version, status, normalized amount, approval_required, created_at.
-- **Read/write**: write.
-- **Risk**: medium/high.
-- **Automatic call**: allowed only after all required fields, supplier/quote validity, budget/policy checks and requester permission pass.
-- **Authorization**: server-side requester scope and cost-center permission.
-- **Approval**: creation itself may be automatic; downstream fulfillment remains policy-gated.
-- **Timeout**: 3 s target.
-- **Retry**: only with same idempotency key; no blind retry with a new key.
-- **Idempotency**: mandatory; duplicate key returns original effective result.
-- **Errors**: PRECONDITION_FAILED, QUOTE_EXPIRED, BUDGET_BLOCKED, UNAUTHORIZED, DUPLICATE, CONFLICT, TIMEOUT_UNKNOWN_OUTCOME.
-- **Audit**: full normalized command, evidence refs, policy/budget check versions, state before/after, idempotency key.
-- **Prohibited**: creation when required evidence is missing or deterministic validator fails.
-
-## T6 `request_approval`
-- **Business function**: open or return an approval task for a purchase request that requires human authorization.
-- **Input**: request_id, approval_reason_code, approver_scope, idempotency_key.
-- **Output**: approval_id, status (`pending`/`approved`/`rejected`), assigned role, created_at.
-- **Read/write**: write.
-- **Risk**: high workflow impact.
-- **Automatic call**: allowed only when the deterministic policy engine says approval is required and request state is eligible.
-- **Authorization**: requester/Agent cannot approve its own request; business system assigns approver.
-- **Approval**: this tool creates the human approval; it never self-approves.
-- **Timeout**: 3 s.
-- **Retry**: same idempotency key only.
-- **Idempotency**: mandatory per request + approval stage.
-- **Errors**: NOT_REQUIRED, INVALID_STATE, UNAUTHORIZED, DUPLICATE, TIMEOUT_UNKNOWN_OUTCOME.
-- **Audit**: reason, assigned role, state transition, actor/run, idempotency key.
-- **Prohibited**: changing approval outcome or selecting an unauthorized individual as approver.
-
-## T7 `create_po_draft`
-- **Business function**: create a purchase-order draft from an eligible, approved purchase request.
-- **Input**: request_id, approved_quote_id, idempotency_key.
-- **Output**: po_draft_id, request_id, amount, supplier_id, status, created_at.
-- **Read/write**: high-risk write.
-- **Risk**: high.
-- **Automatic call**: only when explicitly allowed by project policy; default core design requires approved request and server-side transition validation.
-- **Authorization**: procurement write scope; requester-only users are denied.
-- **Approval**: any required approval must already be approved.
-- **Timeout**: 3 s.
-- **Retry**: same idempotency key only, with verify-after-write on unknown outcome.
-- **Idempotency**: mandatory, unique effective PO draft per approved request/quote intent.
-- **Errors**: REQUEST_NOT_APPROVED, QUOTE_EXPIRED, INVALID_STATE, UNAUTHORIZED, DUPLICATE, TIMEOUT_UNKNOWN_OUTCOME.
-- **Audit**: source request/approval/quote versions, actor, state before/after, idempotency key.
-- **Prohibited**: creating from pending/rejected request; using unvalidated model text as amount/supplier.
-
-## T8 `get_request_status`
-- **Business function**: verify the authoritative state of purchase request, approval and PO draft after execution or uncertain response.
-- **Input**: request_id.
-- **Output**: request status/version, approval status, PO draft ID/status if any, last state transition time.
-- **Read/write**: read.
+- **Business function**: retrieve relevant after-sales policy/SOP passages with version/effective metadata.
+- **Input**: normalized query plus optional product category / scenario tags.
+- **Output**: cited chunks, document id, version/effective date, retrieval score.
+- **Property**: read-only retrieval.
 - **Risk**: low.
-- **Automatic call**: allowed; required after high-risk write when response/outcome is uncertain.
-- **Authorization**: same request visibility rules as business application.
-- **Approval**: none.
-- **Timeout**: 2 s.
-- **Retry**: one transient retry.
-- **Idempotency**: read only.
-- **Errors**: NOT_FOUND, UNAUTHORIZED, TIMEOUT.
-- **Audit**: request ID/status/version and latency.
-- **Prohibited**: inferring write success without authoritative returned state.
+- **Automatic call**: allowed.
+- **Important boundary**: retrieved text can explain policy but cannot authorize a refund/return.
+- **Error handling**: conflicting/stale versions trigger deterministic effective-policy resolution or escalation.
 
-## Cross-tool invariants
+## T5 `check_after_sales_eligibility`
+- **Business function**: deterministic decision service for refund/return path and constraints.
+- **Input**: authenticated `user_id`, `order_id`, normalized reason, optional evidence references.
+- **Output**: `eligible`, `allowed_action` (`REFUND_ONLY`, `RETURN`, `RETURN_REFUND`, `MANUAL_REVIEW`, `DENY`), `max_refund_amount`, `approval_required`, `policy_code`, reason codes.
+- **Property**: read-only deterministic decision.
+- **Risk**: high importance but non-writing.
+- **Authorization**: server-side ownership and state checks.
+- **Retry**: safe bounded retry.
+- **Forbidden**: model-provided amount/policy override.
 
-1. The Agent never receives raw database credentials or unrestricted SQL/write access.
-2. All write tools perform authorization, schema validation, state-machine validation and idempotency server-side.
-3. Read timeouts can be retried within a small fixed budget; ambiguous write outcomes are verified before any retry.
-4. Tool output and retrieved documents are untrusted data and cannot alter tool permissions.
-5. Every call emits `run_id`, `tool_execution_id`, actor, normalized inputs (with sensitive redaction), latency, result/error and retry metadata.
-6. Tool contracts are versioned; evaluation runs record the contract version.
+## T6 `create_refund_request`
+- **Business function**: create one refund request after deterministic eligibility and required approval.
+- **Input**: `user_id`, `order_id`, `reason_code`, requested amount bounded by eligibility result, `idempotency_key`, optional `approval_token`.
+- **Output**: `refund_request_id`, state, accepted amount, timestamps.
+- **Property**: high-risk write.
+- **Automatic call**: allowed only for configured low-risk eligible cases; otherwise approval required.
+- **Validation**: ownership, order state, eligibility, amount, prior after-sales state and approval checked server-side.
+- **Idempotency**: same logical request/key returns existing result rather than duplicating.
+- **Timeout**: ambiguous completion must be recovered with status query before retry.
+- **Forbidden**: changing amount above server max; bypassing approval; refunding another user's order.
+
+## T7 `create_return_request`
+- **Business function**: create return/return-refund workflow for delivered goods.
+- **Input**: `user_id`, `order_id`, reason, return method, `idempotency_key`, optional approval token.
+- **Output**: `return_request_id`, state, return instructions if applicable.
+- **Property**: write.
+- **Validation**: deterministic eligibility/state/window/product constraints.
+- **Idempotency**: required.
+- **Forbidden**: using return path for ineligible category/order.
+
+## T8 `create_support_ticket`
+- **Business function**: escalate unresolved, unsupported or exceptional after-sales cases.
+- **Input**: user/order references, issue category, evidence summary, source references, urgency.
+- **Output**: ticket id/state.
+- **Property**: controlled write.
+- **Risk**: medium.
+- **Automatic call**: allowed for safe escalation.
+- **Idempotency**: duplicate logical incident should reuse/relate to existing ticket where possible.
+
+## T9 `request_human_approval`
+- **Business function**: request approval for configured high-risk after-sales action.
+- **Input**: run id, proposed action, order id, amount/risk summary, evidence refs.
+- **Output**: approval request id + `WAITING_APPROVAL` state; later approved/denied token/state.
+- **Property**: workflow write, not money movement.
+- **Risk**: medium/high.
+- **Forbidden**: Agent self-approving.
+
+## T10 `get_after_sales_status`
+- **Business function**: verify refund/return/ticket state and recover ambiguous write outcomes.
+- **Input**: authenticated user, order id and optional request/idempotency reference.
+- **Output**: current after-sales object(s) and state.
+- **Property**: read-only.
+- **Risk**: medium privacy.
+- **Use**: mandatory after ambiguous write timeout before any reissue.
+
+## Global tool rules
+
+1. Tool schemas are versioned and validated before dispatch.
+2. Model text never becomes a raw URL, SQL statement or arbitrary internal service name.
+3. Read and write tools are separated and visibly tagged.
+4. Every write includes `run_id`, authenticated principal and idempotency key.
+5. Business services re-check all permissions and preconditions; prompt instructions are not a security boundary.
+6. Tool calls and sanitized parameters/results are recorded in the run trace.
+7. Retry policy is operation-specific: read retries may be safe; writes require idempotency and ambiguous-completion recovery.
