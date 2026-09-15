@@ -1,138 +1,41 @@
-<!--
-Sync Impact Report
-- Version change: template placeholder -> 1.0.0
-- Modified principles: all template placeholders replaced by project-specific governance
-- Added sections: Architecture & Security Constraints; Development Workflow & Quality Gates
-- Removed sections: none; placeholder-only content replaced
-- Follow-up TODOs: none
--->
-
 # CommerceAgent Constitution
 
-## Core Principles
+Version: **2.0.0** · Amended: **2026-09-15**
 
-### I. Deterministic Business Authority
-The LLM/Agent MAY interpret user intent, resolve ambiguity, decide what evidence is needed next,
-select from allowlisted tools, and choose among business paths that the backend has declared legal.
-The LLM/Agent MUST NOT be authoritative for order ownership, authentication, authorization,
-refund/return eligibility, refund amount, legal state transitions, approval requirements,
-idempotency, or transaction success. Every money- or state-changing action MUST be revalidated
-against current authoritative business state by the Java backend immediately before commit.
+本宪章约束当前唯一实现 feature：`specs/002-commerce-after-sales-agent/`。关键词 MUST 表示合并实现前必须满足，不代表当前已经通过测试。
 
-Rationale: the project is intended to demonstrate useful Agent reasoning without delegating
-financial or transactional authority to probabilistic model output or retrieved prose.
+## I. 确定性业务权威
 
-### II. Safe, Idempotent, Verifiable Writes
-Every state-changing capability MUST enforce authentication, authorization, deterministic
-validation, idempotency, transactional consistency where applicable, audit recording, and
-post-write verification. A timeout or unknown write outcome MUST NOT trigger a blind retry.
-Recovery MUST first query authoritative business state and MAY retry only with the same logical
-idempotency context when the backend proves that no conflicting write exists.
+LLM 负责理解、澄清、提出下一项证据/工具；Python 校验结构、白名单和执行预算；Java 独占订单归属、资格、金额、审批、状态与事务写入的最终判断。每次业务写入 MUST 在 Java 事务中重新验证当前状态。模型和政策文本均不得授权写入。
 
-Rationale: a demo that can duplicate refunds or claim success without verified state is not an
-acceptable enterprise Agent implementation.
+## II. 小范围、完整闭环
 
-### III. Evidence-Dependent Agent Behavior
-The Agent MUST maintain explicit task state and choose its next action from current evidence rather
-than follow one fixed refund-like workflow. The same high-level user request under materially
-different seeded business states MUST be able to produce different outcomes such as clarification,
-refund, return, approval, escalation, denial, or safe stop. The Agent MUST have bounded step/retry
-budgets and MUST stop when no new evidence can be obtained.
+V1 仅处理本地合成订单的退款申请、退货退款申请、订单澄清、人工审批、拒绝和安全停止。创建申请不等于支付退款到账。只实现一个 Java 应用、一个 Python 应用、一个薄 Web 客户端、一个 PostgreSQL 实例。政策使用按代码/版本直查；不实现向量检索、完整工单后台、独立 Trace/Eval 看板、真实支付、多 Agent、MCP、Redis、Kafka 或 Kubernetes。
 
-Rationale: this is the project's Agent Value Gate. If evidence cannot change the next action, the
-feature should be implemented as deterministic workflow code instead of being presented as Agent
-reasoning.
+## III. 安全写入与恢复
 
-### IV. Untrusted Inputs, Retrieval, and Model Output
-User text, retrieved policy text, model-generated arguments, and external tool results MUST be
-treated as untrusted data until validated. Retrieved policy/SOP content MAY provide explanation,
-context, and citations but MUST NOT alter authentication, tool allowlists, refund amount,
-eligibility, approval state, or backend permissions. The Agent MUST NOT be able to supply arbitrary
-internal URLs, SQL, service names, or executable code as a substitute for registered tools.
+所有可重放的写入 MUST 有稳定操作标识、有效载荷指纹、授权、事务去重和可查询结果。未知超时先查权威操作状态；查询暂时不存在也不证明旧请求不会提交。重试 MUST 复用原键，最终由原子去重和订单级互斥约束防止重复。审批创建、审批决定、用户输入和恢复同样要处理重放。不得宣称分布式 exactly-once。
 
-Rationale: prompt injection and poisoned retrieval must fail closed at deterministic boundaries.
+## IV. 边界由机制强制
 
-### V. Reproducible Tests, Eval, and Trace
-Business invariants and high-risk paths MUST have automated tests before the corresponding feature
-is considered complete. Agent behavior MUST be evaluated on versioned, resettable fixtures with
-explicit expected tool constraints and final business-state oracles wherever possible. Baseline and
-Agent variants MUST use comparable dataset versions, permissions, reset state, and metric
-definitions. Public performance, safety, latency, cost, or improvement claims MUST be backed by a
-reproducible run artifact. Trace data MUST capture structured state transitions, tools, validated
-parameter summaries, results/errors, retries, approval state, write result, and verification result,
-but MUST NOT persist or expose hidden chain-of-thought.
+运行账号不得持有数据库超级用户或迁移权限。Python 运行账号 MUST 无 `commerce` 表权限；Java/Python 通过类型化 HTTP 协作。认证来自经过校验的 JWT，不来自模型参数。令牌/私钥不得进入 prompt、checkpoint、trace、Git 或前端构建产物。审批由人工角色写入，Agent 只能查询和引用审批记录。
 
-Rationale: project value comes from measurable behavior and inspectable failure modes, not a small
-number of curated successful demos.
+## V. 持久化与迁移
 
-### VI. Bounded Architecture and Scope
-The core implementation MUST remain the smallest architecture that preserves the business/Agent
-boundary: one Java modular monolith, one Python Agent service, one lightweight web client, and one
-PostgreSQL datastore are sufficient unless measured evidence proves otherwise. Microservice
-splitting, Kafka, Kubernetes, Redis as core state, independent vector databases, Multi-Agent
-orchestration, real payment/provider integrations, or broad commerce features MUST NOT be added to
-the core scope without a documented requirement and an equal-or-larger scope tradeoff.
+每张表只有一个迁移所有者。Flyway 管理自定义 `commerce`/`agent` 表；官方 PostgreSQL checkpointer 管理专用 `checkpoint` schema，采用一次性初始化任务和锁定依赖。两者不得管理同一张表。图状态以官方 checkpoint 为恢复权威，`AgentRun` 是关联/展示投影，不另造一份恢复状态。重启后须实测澄清、审批和提交后恢复。
 
-Rationale: complexity is acceptable only when it solves a demonstrated problem and remains
-explainable in a 6-8 week solo project.
+## VI. Agent 价值是待验证假设
 
-## Architecture & Security Constraints
+分支数量不是 Agent 优越性的证明。基线和 Agent MUST 复用工具、后端、安全层、可用信息及评测条件，只替换决策策略。允许诚实结论为标准路径没有收益。没有实测收益时不得编造提升或故意削弱基线。
 
-- Java owns authoritative commerce state, business invariants, authorization, deterministic
-  eligibility, legal state transitions, idempotency, approval validation, audit, and transactional
-  writes.
-- Python owns Agent state/orchestration, LLM interactions, allowlisted tool adapters, policy
-  retrieval, checkpoint/resume behavior, structured Agent trace, and offline evaluation.
-- The Agent MUST NOT read or write commerce database tables directly; business access goes through
-  typed backend contracts.
-- Authentication context MUST come from the application/security layer and MUST NOT be inferred
-  from prompt text. Tokens and credentials MUST NOT be inserted into prompts or stored in trace.
-- Human approval MUST be represented by an authoritative backend record. The Agent MAY reference
-  an `approvalRequestId` but MUST NOT mint or assert an approved token/state itself.
-- PostgreSQL MAY host separate logical schemas for commerce, Agent runtime/eval, and policy
-  retrieval. Schema ownership and migrations MUST be explicit; shared-database convenience MUST
-  NOT blur service authority.
-- Evaluation-only reset/fixture endpoints MUST be unavailable outside test/eval profiles.
+## VII. 评测与成果诚信
 
-## Development Workflow & Quality Gates
+业务不变量优先用确定性测试，模型流程用受控替身测试，真实模型用固定配置和重复运行评测。固定业务时钟但不伪造 JWT 时钟；dev/test 按场景家族隔离。非法尝试和被接受的非法动作分开计数。V1 的安全验收要求测试中被接受的非法写入为零，但不得推断普遍安全。任何指标 MUST 有原始运行记录；目标、文档检查、替身测试不等于真实模型结果。
 
-1. **Spec before implementation**: `spec.md`, `plan.md`, data model, contracts, and `tasks.md` MUST
-   agree before implementation begins.
-2. **Tests before risky behavior**: authorization, eligibility, state transition, idempotency,
-   timeout recovery, approval, and prompt-injection boundaries MUST have automated tests as part of
-   their story implementation.
-3. **MVP gate**: the logistics-anomaly refund slice MUST work end to end—Agent to Java to
-   PostgreSQL to verified result and trace—before optional framework/infrastructure expansion.
-4. **Agent Value gate**: before calling the system a completed Agent project, the same refund-like
-   request MUST be demonstrated against seeded states that lead to refund, return, clarification,
-   and approval paths.
-5. **Safety gate**: no cross-user write, approval bypass, duplicate logical refund/return, or
-   model-authorized financial action may be accepted in the frozen adversarial test set.
-6. **Evidence gate**: README/resume/demo numbers MUST be linked to actual versioned eval output;
-   target values are not achievements.
-7. **Scope change rule**: after the core Week-2 slice is underway, any new Must-have capability
-   requires removing or deferring comparable scope.
+## Workflow
 
-## Governance
+先完成 tasks.md 的 M0/M1，不为后续功能预建空服务。危险行为先写失败测试，再实现。每次只提交一组有验收结果的任务；未运行不得勾选。新增 V1 范围必须同时删除相当范围。工期以首个切片的实际耗时校准，不以 Markdown 数量计算完成率。
 
-This constitution is the highest project-level engineering authority for CommerceAgent. Feature
-specifications, implementation plans, task lists, and code reviews MUST comply with it. A design or
-implementation that conflicts with a MUST rule cannot be justified by convenience, framework
-defaults, or model capability.
+## Amendment record
 
-Amendments require:
-1. a documented reason and affected principles;
-2. an explicit version change using semantic versioning;
-3. migration/update notes for affected spec, plan, contracts, tasks, tests, and documentation;
-4. a new consistency analysis before implementation continues when the amendment changes an
-   existing feature boundary.
-
-Versioning policy:
-- MAJOR: removes/redefines a non-negotiable principle or changes authority/security boundaries;
-- MINOR: adds a new principle or materially expands governance requirements;
-- PATCH: clarification that does not change required behavior.
-
-Every implementation PR MUST review at least: deterministic authority, safe writes, Agent Value,
-input/retrieval trust boundary, reproducible evidence, and scope simplicity.
-
-**Version**: 1.0.0 | **Ratified**: 2026-09-15 | **Last Amended**: 2026-09-15
+2.0.0 replaces 1.0.0: 将完整售后产品收缩为申请执行 MVP；取消首版向量检索与独立看板；以“每表一个迁移所有者”替代“Flyway 管理全部表”；保留安全、恢复、审批和诚实评测。旧方案及评分留在 Git 历史，不作为新的实现依据。本次同步重写 002 的规格、计划、数据模型、契约、任务和验收文档。只有实际测试记录才能把相关 gate 标为 PASS。

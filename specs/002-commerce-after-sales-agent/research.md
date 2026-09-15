@@ -1,147 +1,60 @@
-# CommerceAgent Technical Research
+# 关键技术决策（ADR 合集）
 
-This document resolves the implementation-planning decisions for `002-commerce-after-sales-agent`.
+2026-09-15；所有安装/运行结果仍待 M0 验证。这里只记录实现所需裁决，不新增研究层。
 
-## Decision 1 — Java 21 + Spring Boot 3.5.x for the business backend
+## ADR-01：保留双语言，但压缩业务广度
 
-**Decision**: Use Java 21 LTS with Spring Boot 3.5.x.
+Java 21 + Spring Boot 3.5.16 承担真实授权、事务、审批、去重；Python 3.13 + FastAPI 承担模型与图。退款/退货合并为一种申请实体，物流用订单上的合成快照，规则用版本化资源；不建设完整电商平台。Web 仅两处薄界面，轨迹内嵌。不是因为语言数量能加分，而是两侧各有不可省略职责。
 
-**Rationale**: The project needs substantial deterministic domain logic, transactions, authorization, idempotency and audit. Java is also aligned with the user's existing strength and the hiring evidence that repeatedly accepts Java/Python/Go for AI application/backend roles. Spring Boot 3.5.x is preferred over a major-version jump because ecosystem maturity matters more than novelty for an 8-week portfolio project.
+## ADR-02：模型与决策接口
 
-**Alternatives considered**:
-- Spring Boot 4.x: rejected for core because the project gains little interview value from a newer major line while accepting more compatibility churn.
-- Python-only backend: rejected because it would remove an opportunity to demonstrate deep transactional backend engineering and underuse the user's strongest language.
+初始模型：`gpt-4.1-mini-2025-04-14`，通过官方 Python SDK `AsyncOpenAI` 调用 Chat Completions，使用原生工具调用。选择理由是支持工具调用、结构化输出和明确快照，不声称它是当前最强或最便宜。
 
-## Decision 2 — Python 3.13 + FastAPI for Agent orchestration
+配置：`LLM_BASE_URL`（仅部署配置可设）、`LLM_API_KEY`、`LLM_MODEL`、temperature=0、top_p=1、单次输出上限 512 tokens、关闭并行工具调用。支持性由 M0 探针验证；不支持参数时明确记录调整，不静默忽略。seed 仅在供应商支持时记录，不保证完全确定。
 
-**Decision**: Use Python 3.13 and FastAPI for the Agent service.
+模型只看到经过裁剪的业务证据与当前允许工具 schema；身份、金额、operationId、JWT 均由程序注入，模型无权填写。Native tool_call.arguments 必须经过 Pydantic 严格解析；拒绝多工具、未知参数、任意 URL/SQL、未知订单标识。最多一次格式纠正，之后 SAFE_STOP。
 
-**Rationale**: Python has the strongest current Agent/evaluation ecosystem and directly addresses the user's weaker skill area. FastAPI provides typed request models and a simple async service surface without turning the service into a framework-heavy platform.
+允许动作包括工具调用、ASK_USER、DENY、SAFE_STOP。工具目录在 runtime-contracts.md；程序按阶段缩小白名单。证据收集需要什么由模型提议，是否足以执行写入由程序/Java 校验，不用模型“confidence”代替安全判断。
 
-**Alternatives considered**:
-- Java-only Agent: viable, but rejected because it reduces exposure to the Python Agent ecosystem that is common in current application-engineering roles.
-- Flask/Django: no compelling advantage for this bounded Agent API.
+M0 用 6 个合成输入检查工具 schema、非法参数拦截、模型错误、usage 和预算；这是接入测试，不是业务成功率。密钥不可用时本地替身测试仍可进行，但 G0 的真实模型子项保持 BLOCKED，不虚构通过。更换模型须记录供应商、实际 model id、参数、模板哈希并重跑比较；不需要改业务 API。
 
-## Decision 3 — Explicit LangGraph Graph API
+## ADR-03：官方 checkpointer + 分区迁移
 
-**Decision**: Use LangGraph's explicit graph/state primitives rather than a black-box generic agent constructor.
+使用固定依赖的 `AsyncPostgresSaver`；它的 `.setup()` 只由一次性 checkpoint-init 任务调用，管理专用 `checkpoint` schema。Flyway 管自定义 commerce/agent 表。连接明确设置 search_path，并验证 current_schema 与实际表位置。运行账号只获必需 DML/sequence 权限；初始化账号不提供给常驻服务。
 
-**Rationale**: The product requires conditional branching, loops, clarification interrupts, Human-in-the-loop pause/resume, checkpointed execution and bounded recovery. These are workflow/state problems. The graph remains project-owned: state schema, nodes, edge conditions, stop rules and tool policies are explicit in repository code.
+`thread_id = run_id`（UUID）；图状态由官方 checkpoint 保存。AgentRun 只存索引、所有者、展示状态/版本和配置，不复制 state_json 为第二恢复真相。恢复以 checkpoint 为准，更新展示投影。等待节点前的副作用可能重放：持久化操作意图、幂等 API、重放测试缺一不可。不要自建完整 checkpointer 或复制第三方 DDL。
 
-**Alternatives considered**:
-- Open-ended ReAct loop: rejected because it weakens bounded execution, failure recovery and deterministic evaluation.
-- Hand-written while-loop state machine: technically possible and useful for understanding, but LangGraph provides checkpoint/HITL runtime support with less boilerplate.
-- Multi-Agent: rejected because the workflow does not require independently autonomous role agents.
+依赖版本在 M0 成功后写入 uv.lock；升级时重新跑空库初始化、重复初始化、WAITING_USER/WAITING_APPROVAL 恢复和提交后崩溃测试。不根据包名猜测版本号。
 
-## Decision 4 — Java modular monolith
+## ADR-04：权限而非共享密码
 
-**Decision**: Deploy one Java application with explicit domain modules.
+PostgreSQL 17 一个实例；bootstrap 管角色/schema；app_migrator 管自定义 DDL；checkpoint_migrator 仅管 checkpoint；commerce_runtime 与 agent_runtime 仅管各自 DML。agent_runtime 不继承 commerce 权限，所有运行角色非 superuser、非 owner、无 CREATE/CREATEROLE/BYPASSRLS。关闭 public schema 的非必要 CREATE；新表的 default privileges 也要维护。使用运行账号实际执行越权 SQL 并断言 permission denied。
 
-**Rationale**: Order, logistics projection, eligibility, refund, return, approval, ticket and audit share transactional business state. Splitting them into network microservices would add service discovery, distributed transactions and failure modes without increasing the evidence the project is meant to demonstrate.
+## ADR-05：身份与恢复
 
-**Alternatives considered**:
-- One microservice per domain: rejected as architecture theater for this scale.
-- One undifferentiated package: rejected because module boundaries are valuable for interviews/testing even when deployment is monolithic.
+dev/eval 使用本地产生的 RSA 密钥和预置用户的短期 JWT。Java/Python 只持公钥并验证 alg=RS256、issuer、audience、exp、subject。私钥仅在本地生成令牌脚本使用，不进入镜像/Git。认证令牌仅为本次请求的运行时上下文，不保存到 prompt/checkpoint/log。
 
-## Decision 5 — PostgreSQL as the only core datastore
+审批由独立 APPROVER 身份调用 Java；恢复由原客户触发，Java 提供所有者可读的单条审批查询。服务重启或 token 过期后，客户用新有效 token 继续，不借用审批人 token，也不引入完整身份平台。
 
-**Decision**: Use PostgreSQL for business state, Agent trace/checkpoint metadata, audit records and policy retrieval vectors via pgvector.
+## ADR-06：策略可替换，基线不复制系统
 
-**Rationale**: A relational database is the authoritative store for transactional commerce state. Reusing PostgreSQL for a small policy corpus avoids introducing a separate vector database with no measured scale requirement.
+DecisionPolicy 有相同的 State 输入和 Action 输出。基线与 Agent 共享同一个意图/订单线索提取器、工具、安全执行器、图持久化和评分器。基线使用固定证据顺序及合理条件分支，也会澄清/审批/安全停止。Agent 才动态选择下一证据。两者不读取 oracle、case_id 或期望结果。模型与预算一致；额外调用成本单独报告。允许结果为没有优势。
 
-**Alternatives considered**:
-- Qdrant/Milvus/Elasticsearch: rejected for V1 because the corpus is small and the project is not a retrieval-platform benchmark.
-- Redis as mandatory state store: rejected until a real shared-state/latency need is measured.
+## ADR-07：政策直查与结果措辞
 
-## Decision 6 — RAG only for unstructured policy/SOP
+使用 ruleCode/ruleVersion 对应的 policyCode/policyVersion 查询本地版本化文本；无向量 DB、嵌入、reranker 或检索召回率目标。政策文件只解释，不改变执行规则。缺少政策时说明无法引用，不因文案缺失猜规则。返回“申请创建/待审批/已拒绝/自动处理停止”，从不把申请说成到账或工单已接手。
 
-**Decision**: Use retrieval only for policy/SOP explanation and context. Order, logistics, amount, eligibility, approval and after-sales status always come from structured APIs.
+## ADR-08：可复现的是条件与证据，不是逐字输出
 
-**Rationale**: Business truth must remain deterministic, versioned and auditable. Vector retrieval is appropriate for prose policy but not for real-time transactional state.
+业务时钟与 fixture 固定；JWT 用真实认证时钟。确定性测试不使用真实模型；真实模型 final test 每例初始 3 次，保留逐次数据、均值与波动及模型配置，关键不稳定案例增加次数。test 不能用于调 prompt；后续优化只看 dev，提前登记后再进行有限 final 比较。详见 evaluation.md。
 
-**Alternatives considered**:
-- Put all commerce data in a vector DB: rejected as incorrect authority modelling.
-- No RAG at all: acceptable fallback if the policy corpus is too small; a direct versioned policy lookup can replace vector retrieval without changing business authority.
+## 主要来源（官方资料；访问 2026-09-15）
 
-## Decision 7 — HTTP/JSON first; MCP deferred
+- Spring Boot 3.5 系统要求：https://docs.spring.io/spring-boot/3.5/system-requirements.html
+- GPT-4.1 mini 能力与快照：https://developers.openai.com/api/docs/models/gpt-4.1-mini
+- LangGraph persistence：https://docs.langchain.com/oss/python/langgraph/persistence
+- LangGraph interrupts：https://docs.langchain.com/oss/python/langgraph/interrupts
+- 官方 PostgreSQL checkpointer 包：https://pypi.org/project/langgraph-checkpoint-postgres/
+- PostgreSQL schemas/privileges：https://www.postgresql.org/docs/current/ddl-schemas.html
 
-**Decision**: Tool adapters call typed Java HTTP/JSON APIs first. MCP is optional after the core flow works.
-
-**Rationale**: The hiring signal behind MCP is reusable tool interoperability, not the protocol label by itself. The project should first prove tool schemas, auth, retry/idempotency and safe writes with a transparent contract.
-
-**Alternatives considered**:
-- MCP from day one: rejected because it risks turning protocol plumbing into a Week-1 dependency.
-
-## Decision 8 — Local JWT fixtures, not full identity product
-
-**Decision**: Use a minimal local JWT setup with seeded users/roles.
-
-**Rationale**: Authorization is essential to demonstrate cross-user protection, but registration, password recovery, social login and account administration do not contribute to the project thesis.
-
-**Alternatives considered**:
-- `X-User-Id` header only: rejected because it makes authorization too toy-like.
-- Full OAuth/OIDC provider: rejected as non-core scope.
-
-## Decision 9 — Agent checkpoints and resume state persisted
-
-**Decision**: Persist enough Agent execution/checkpoint state to support clarification/HITL resume and run reconstruction.
-
-**Rationale**: `WAITING_USER` and `WAITING_APPROVAL` are first-class states; they cannot depend on an in-memory process surviving. The exact LangGraph checkpointer implementation may evolve, but resume semantics are Must.
-
-**Alternatives considered**:
-- Memory-only state: rejected because restart would break approval/clarification workflows and make recovery unconvincing.
-
-## Decision 10 — Self-contained structured tracing
-
-**Decision**: Keep core run/tool traces in project-owned storage; OpenTelemetry or external tracing platforms are optional enrichments.
-
-**Rationale**: A reviewer cloning the repository must be able to inspect a failed run without requiring a paid SaaS. Trace data records explicit state transitions, tools, validated parameter summaries, errors, retries, approval and verification; hidden model chain-of-thought is neither required nor stored.
-
-**Alternatives considered**:
-- LangSmith-only/Langfuse-only: rejected as a hard dependency, though adapters may be added later.
-
-## Decision 11 — Versioned eval cases in Git
-
-**Decision**: Store eval case definitions in versioned YAML/JSON files and use deterministic scorers against resettable Java fixtures.
-
-**Rationale**: The main correctness targets are business state, tool selection, parameters, forbidden actions, duplicate writes and safety. Most do not need an LLM judge. Versioning the dataset supports comparable Baseline/V1/Optimized runs.
-
-**Alternatives considered**:
-- Manual demo-only evaluation: rejected.
-- LLM-as-judge as primary oracle: rejected for business/safety correctness; it may only supplement qualitative response scoring.
-
-## Decision 12 — Docker Compose deployment
-
-**Decision**: Core local deployment is Docker Compose for PostgreSQL, Java backend, Python Agent service and optional web UI.
-
-**Rationale**: Reproducibility matters; cluster orchestration does not.
-
-**Alternatives considered**:
-- Kubernetes: rejected for core.
-- Cloud-first deployment: deferred until the local evidence loop is stable.
-
-## Decision 13 — Four thin frontend surfaces
-
-**Decision**: Provide Customer Console, Approval Center, Run Trace and Eval Dashboard.
-
-**Rationale**: Each page proves a distinct product capability. The project does not need a generic admin dashboard.
-
-**Alternatives considered**:
-- CLI only: workable for early implementation, but a thin web UI improves demonstration of HITL and traces.
-- Large operations console: rejected.
-
-## Decision 14 — Explicitly rejected technologies/features
-
-Rejected from core unless later measurement changes the decision:
-- Multi-Agent;
-- Kafka/event-bus architecture;
-- Kubernetes;
-- mandatory Redis;
-- independent vector database;
-- model fine-tuning/RLHF;
-- real payment gateway;
-- broad customer-service/pre-sales/recommendation/marketing/procurement modules.
-
-## Research exit verdict
-
-No unresolved implementation-planning clarification remains that blocks Phase 1 design. Technology decisions remain revisitable through measured evidence, but the baseline stack and architectural boundaries are frozen strongly enough to generate the data model and contracts.
+这些资料支持接口行为，不等于已验证当前项目组合。M0 探针结果才是接入门的证据。

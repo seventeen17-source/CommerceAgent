@@ -1,189 +1,64 @@
-# Feature Specification: CommerceAgent 企业电商售后执行与异常处置 Agent
+# CommerceAgent：可编码的售后申请 MVP
 
-**Feature Branch**: `[002-commerce-after-sales-agent]`
+Feature: `002-commerce-after-sales-agent` · Revision: 2 · 2026-09-15
+Status: **READY FOR M0 CODING；运行验收未执行**
 
-**Created**: 2026-09-15
+## 产品目标与边界
 
-**Status**: Draft
+用户提出售后请求，系统理解并补齐必要信息，通过真实的本地业务 API 创建退款或退货退款申请；金额、权限、资格、审批和去重由 Java 决定。用户能看到申请编号、经过验证的状态、政策来源和简明工具轨迹。
 
-**Input**: Build an enterprise e-commerce after-sales execution and exception-handling Agent that can understand ambiguous customer requests, gather evidence across order/logistics/policy systems, dynamically choose the next business tool or path, execute only authorized after-sales actions, escalate high-risk/uncertain cases, and produce auditable results. It must not be a FAQ chatbot or a fixed intent-to-refund router.
+成功指“申请已创建并验证”，不指钱已到账、退货已签收或真实电商集成。业务数据全部合成。V1 单币种 CNY、每订单一个商品摘要/一个包裹、整单售后、每订单最多一个售后申请；无部分退款、拆单、取消重开或完整履约生命周期。
 
-## User Scenarios & Testing *(mandatory)*
+## 用户故事
 
-### User Story 1 - 物流异常退款闭环 (Priority: P1)
+### US1 / P1：物流停滞的退款申请
 
-消费者提出“订单一直没收到，我不要了，帮我退款”之类的自然语言请求。系统必须识别相关订单，检查订单与物流状态，在需要时获取售后规则，并通过确定性资格检查判断是否允许退款；满足条件时创建退款申请并验证最终业务状态。
+输入：我的耳机一直没收到，不想要了。用户订单唯一且 SHIPPED；固定业务时钟下物流停滞至少 120 小时；资格允许且金额低于审批阈值。
+验收：查订单/物流，调用 Java 资格服务；创建唯一 REFUND_ONLY 申请；查询 operation 与申请记录后才报告成功。金额等于后端订单金额。超时、并发重试或 Python 重启不能产生第二条申请。服务不可用时不猜测成功。
 
-**Why this priority**: 这是最小可用业务闭环，能够同时证明自然语言理解、动态取证、Tool Calling、确定性业务规则、安全写入和最终状态验证。
+### US2 / P1：已签收改走退货退款申请
 
-**Independent Test**: 给定一个 `SHIPPED`、未签收、物流超过阈值无更新且普通金额的订单，用户只提供自然语言投诉；系统应独立完成订单定位、物流查询、资格检查、退款创建和写后验证，并且只能生成一个退款申请。
+相同退款意图，订单 DELIVERED 且签收不超过 7 天，资格允许 RETURN_REFUND。
+验收：不得创建 REFUND_ONLY；创建一个 RETURN_REFUND 申请并返回后续寄回要求，不能声称退款到账。窗口外或不支持类别拒绝/安全停止。
 
-**Acceptance Scenarios**:
+### US3 / P1：不确定订单先澄清
 
-1. **Given** 用户拥有一个已发货但 120 小时无有效物流更新的订单且后端资格服务返回可退款，**When** 用户请求退款，**Then** 系统创建且仅创建一个正确金额的退款申请，并返回可验证的退款编号与处理结果。
-2. **Given** 退款创建调用发生超时且结果未知，**When** Agent 恢复流程，**Then** 系统必须先查询售后状态并使用同一逻辑幂等标识处理，不得产生重复退款申请。
+账号中存在两个可能匹配的耳机订单。
+验收：WAITING_USER，业务写入为零；展示当前用户候选订单；有效用户输入后恢复原 run。重启不丢候选；他人、无效候选、重复输入不得改变错误订单。
 
----
+### US4 / P1：高金额人工审批与恢复
 
-### User Story 2 - 已签收商品改走退货路径 (Priority: P1)
+资格允许但整单金额达到 100000 分（合成规则，不是现实平台政策）。
+验收：创建唯一 PENDING 审批，WAITING_APPROVAL；审批人可通过/拒绝；客户只能查询自己的审批。恢复时重新读取 Java 状态并校验订单、用户、run、动作、金额、规则与订单版本。批准前不得创建售后申请；拒绝、过期、跨绑定或已消费审批不可复用。
 
-当订单已经签收时，系统必须根据新的业务证据改变处理路径，而不是继续执行未签收退款。
+### US5 / P2：版本化政策解释
 
-**Why this priority**: 该故事直接验证“中间 Tool Result 会改变下一步动作”，是 Agent Value Gate 的核心证明。
+按资格结果中的 policyCode/policyVersion 直查项目内政策文本。
+验收：返回代码、版本、章节和内容摘要；不存在版本时不编造引用。政策文本即使包含恶意指令也不能授权或改变金额。没有向量库、embedding 或 RAG 效果主张。
 
-**Independent Test**: 将同一类用户请求放到已签收且仍在退货期的订单上，系统应从退款路径切换到退货/退货退款路径。
+## 横切要求
 
-**Acceptance Scenarios**:
+- FR-001：两服务验证 JWT，用户身份不来自模型；所有订单/run/操作/审批查询都检查所有者。越权对象用一致 404 避免泄漏存在性。
+- FR-002：LLM 通过限定工具模式提出下一动作；Python 验证白名单、参数、证据和预算；Java 最终校验写入。模型不得提供金额、用户身份、幂等键或审批状态。
+- FR-003：缺证据、无权限、超预算、无法恢复、规则冲突时 SAFE_STOP 或 DENIED；提示用户联系人工，不伪造已创建工单。
+- FR-004：所有写入/输入必须抗重放；未知写结果按 operationId 查询；原子事务与订单唯一约束兜底，不能靠“先查无记录”证明未提交。
+- FR-005：checkpoint、业务状态与展示状态分离。凭据不进入 checkpoint；恢复使用当前有效身份。支持提交后、checkpoint 前崩溃测试。
+- FR-006：审批为 Java 权威记录；Agent/客户不能审批；批准结果绑定明确动作快照且有期限，事务内消费。
+- FR-007：Python 数据库账号无 commerce 访问权限；运行账号无迁移/超级用户权限；迁移按表明确所有者。
+- FR-008：每 run 有结构化事件、工具调用、错误码、重试、操作标识、验证结果；不要求或存储隐藏思维链，不记录 token/私钥。
+- FR-009：政策使用准确版本直查，结构化规则是最终权威。规则只接受可验证业务事实；自报缺陷进入人工处理，不能触发任意退款。
+- FR-010：基线复用系统与安全层，只替换策略。固定工作流允许合理条件分支、澄清和审批，禁止故意削弱。
+- FR-011：评测固定数据/规则/业务时钟，分开 dev/test，重复真实模型运行，报告每次结果与波动，不用 temperature=0 声称完全确定。
+- FR-012：安全统计区分模型危险提议、执行器阻断与后端接受。测试中后端接受非法写入必须为零；不能据此声称普遍安全。
+- FR-013：保留最小安全停止/有限重试；完整工单产品不在 V1。
+- FR-014：克隆后可按实际 README 启动；没有密钥的离线测试能运行；真实模型测试须显式选择并设置预算。
 
-1. **Given** 订单已签收 3 天且退货资格允许，**When** 用户说“直接给我退款”，**Then** 系统不得直接创建未签收退款，而应进入退货资格检查并创建退货申请。
+## 验收门
 
----
+G0：模型合同与 PostgreSQL checkpoint 重启恢复测试通过，权限隔离通过。G1：US1 端到端、超时/重复验证通过。G2：US2/US3 通过，并准备不少于 6 个模糊表达/中途更正/动态取证案例；仅分支数量不证明增益。G3：US4 与重放/审批绑定测试通过。G4：US5 + 失败停止通过。G5：60 个版本化案例（30 dev/30 test）、至少 30 个确定性安全/并发测试、可比基线、重复模型报告、90 秒演示和干净环境启动。
 
-### User Story 3 - 模糊订单澄清 (Priority: P1)
+所有 G 当前均 PENDING。Gate 通过只证明指定配置与测试范围，不是生产认证。无需证明 Agent 必定优于基线；如无增益，记录结论并停止额外框架投入。
 
-当用户说“把上次买的耳机退掉”但账号中存在多个候选订单时，系统必须先澄清订单身份。
+## 明确不做
 
-**Why this priority**: 企业级 Agent 不能通过猜测关键业务对象来完成资金或状态写入。
-
-**Independent Test**: 给定两个都可能匹配自然语言描述的订单，系统必须返回澄清问题且在用户确认前保持所有退款/退货写入计数为 0。
-
-**Acceptance Scenarios**:
-
-1. **Given** 当前用户存在两个相似耳机订单，**When** 用户发起模糊退货请求，**Then** 系统要求用户确认目标订单且不得提前产生任何售后写操作。
-
----
-
-### User Story 4 - 高风险售后人工审批 (Priority: P2)
-
-当确定性风险规则要求人工审批时，系统必须暂停自动执行并等待授权。
-
-**Why this priority**: 高风险写操作的 Human-in-the-loop 是企业 Agent 与普通自动化脚本的重要区别。
-
-**Independent Test**: 给定一个满足售后资格但金额达到高风险阈值的订单，Agent 只能创建审批请求并进入等待状态；审批通过前退款/退货写操作必须为 0。
-
-**Acceptance Scenarios**:
-
-1. **Given** 资格服务返回 `approval_required=true`，**When** Agent 准备执行售后动作，**Then** 系统进入 `WAITING_APPROVAL`，只有合法审批结果到达后才允许继续。
-
----
-
-### User Story 5 - 无法自动处理时安全转人工 (Priority: P2)
-
-当关键证据缺失、业务状态冲突、规则无法自动决策或依赖服务持续失败时，系统必须安全停止自动写入并转人工。
-
-**Why this priority**: 企业系统必须优先保证安全，而不是为了“完成任务”而猜测业务状态。
-
-**Independent Test**: 关闭物流服务或让资格服务返回 `MANUAL_REVIEW`，系统不得凭模型推断继续退款，而应创建人工工单或清晰返回需要人工介入的状态。
-
-**Acceptance Scenarios**:
-
-1. **Given** 物流状态无法在重试预算内获取，**When** 用户要求基于“疑似物流丢失”退款，**Then** 系统不得生成未经证据支持的退款，并应转人工或返回证据不足状态。
-2. **Given** 资格服务返回 `MANUAL_REVIEW`，**When** Agent 处理请求，**Then** 系统创建可追踪的售后工单并附带已收集证据。
-
----
-
-### User Story 6 - 售后规则检索与可解释结果 (Priority: P2)
-
-系统可以检索非结构化售后政策，用于解释处理依据和补充上下文，但政策文本本身不能直接授权资金或业务写入。
-
-**Why this priority**: 该故事把 RAG 的合理边界与确定性业务规则分离，避免“向量库即业务数据库”。
-
-**Independent Test**: 给定一个需要政策解释的售后案例，系统应返回有效政策来源/版本信息；即使检索文本声称“可直接退款”，最终售后资格仍必须来自确定性业务服务。
-
-**Acceptance Scenarios**:
-
-1. **Given** 检索结果包含适用售后条款，**When** 系统解释处理结果，**Then** 返回可追溯政策来源，同时最终资格与金额与确定性服务保持一致。
-2. **Given** 检索到相互冲突或过期政策，**When** 无法确定有效版本，**Then** 系统不得选择任意文本作为授权依据，而应安全停止或转人工。
-
----
-
-### Edge Cases
-
-- 用户存在多个同类订单且自然语言无法唯一指向目标订单。
-- 用户输入不存在或不属于本人的订单号。
-- 订单已取消、已经有退款/退货申请或处于不可重复售后状态。
-- 物流服务超时、返回冲突状态或数据长期不可用。
-- 售后政策检索无结果、命中过期版本或出现冲突版本。
-- 资格服务不可用、返回拒绝或 `MANUAL_REVIEW`。
-- 退款/退货写操作超时且是否成功未知。
-- 用户重复提交同一个售后请求。
-- 用户通过 Prompt Injection 声称管理员权限或要求跳过规则。
-- 高金额或异常商品需要人工审批。
-- Agent 达到最大步骤数、重复调用同一 Tool 而没有获得新证据。
-- 写操作成功但最终状态验证失败。
-
-## Requirements *(mandatory)*
-
-### Functional Requirements
-
-- **FR-001**: System MUST accept natural-language after-sales requests and classify the requested business goal without assuming a final action prematurely.
-- **FR-002**: System MUST resolve the target order only from orders accessible to the authenticated user.
-- **FR-003**: System MUST ask for clarification when multiple plausible orders remain and MUST NOT perform a business write before order resolution.
-- **FR-004**: System MUST maintain explicit task state across multi-step after-sales handling.
-- **FR-005**: System MUST choose the next allowed business capability based on current evidence rather than using one fixed path for all refund-like requests.
-- **FR-006**: Different order/logistics/eligibility evidence MUST be able to produce materially different outcomes including clarification, refund, return, approval, escalation, denial, or safe stop.
-- **FR-007**: System MUST enforce a maximum step budget and stop conditions that prevent infinite tool loops.
-- **FR-008**: System MUST validate tool results and error states before using them as business evidence.
-- **FR-009**: System MUST obtain refund/return eligibility, maximum allowed amount, and approval requirements from deterministic business rules rather than from model output or retrieved prose.
-- **FR-010**: System MUST NOT allow the Agent to override eligibility, amount, ownership, approval, or legal state-transition results.
-- **FR-011**: System MUST support read capabilities for user orders, order detail, logistics state, after-sales status, and applicable policy knowledge.
-- **FR-012**: System MUST support guarded business writes for refund request, return request, support ticket, and approval request where applicable.
-- **FR-013**: Every money/state-changing write MUST be authorized and validated server-side against current business state.
-- **FR-014**: Every logical refund/return write MUST be idempotent and MUST NOT create duplicates during user retry, Agent retry, or ambiguous network timeout.
-- **FR-015**: After a write attempt, system MUST verify resulting business state before claiming success to the user.
-- **FR-016**: System MUST pause high-risk actions when an authoritative risk rule requires human approval.
-- **FR-017**: The Agent MUST NOT be able to self-approve, fabricate approval state, or bypass an approval requirement through prompt text.
-- **FR-018**: System MUST provide a safe escalation path that can create a support ticket with already-collected evidence when automatic processing cannot continue.
-- **FR-019**: Unstructured policy retrieval MAY be used for after-sales policy/SOP context and explanation.
-- **FR-020**: Policy retrieval MUST preserve source/version/effective metadata sufficient for citation and conflict handling.
-- **FR-021**: Retrieved text MUST be treated as untrusted data and MUST NOT change authorization, tool allowlists, approval thresholds, refund amount, or deterministic eligibility rules.
-- **FR-022**: User-provided claims such as “I am an administrator” MUST NOT change the authenticated principal or business permission.
-- **FR-023**: System MUST prevent a user from reading or modifying another user's order or after-sales state.
-- **FR-024**: System MUST expose only registered, allowlisted business capabilities to the Agent and MUST NOT accept arbitrary internal endpoint, URL, SQL, or service names from model output.
-- **FR-025**: System MUST record a unique run identifier for each Agent execution.
-- **FR-026**: System MUST record structured state transitions, tool name, validated parameter summary, result/error, retry/timeout events, approval state, write result, and final verification result for each run.
-- **FR-027**: System MUST make one failed run reconstructable from structured trace data without requiring hidden chain-of-thought.
-- **FR-028**: System MUST support resettable synthetic business states for offline evaluation so expected tool/actions and final state can be checked reproducibly.
-- **FR-029**: System MUST maintain a versioned offline evaluation dataset of at least 60 cases and target approximately 74 cases across normal, branching, failure, safety, approval, idempotency, and retrieval scenarios.
-- **FR-030**: Evaluation MUST measure at minimum task success, tool selection, parameter correctness, business-state correctness, policy compliance, unsafe actions, duplicate writes, average tool calls, end-to-end latency, and token usage; retrieval/citation metrics MUST be included for policy-retrieval cases.
-- **FR-031**: Baseline and Agent versions MUST be evaluated on comparable dataset versions, tool permissions, reset states, and metric definitions.
-- **FR-032**: The product scope MUST remain limited to after-sales execution for the first releasable version and MUST exclude broad pre-sales recommendation, merchant marketing, procurement, generic omnichannel customer service, and model-training functionality.
-
-### Key Entities *(include if feature involves data)*
-
-- **User**: Authenticated actor allowed to access only their own commerce and after-sales data.
-- **Order**: Authoritative purchase record including current fulfilment/after-sales state and ownership.
-- **OrderItem**: Product/category information required for after-sales rule evaluation.
-- **Shipment / LogisticsEvent**: Delivery state and event history used as evidence for logistics-related cases.
-- **AfterSalesPolicy**: Versioned unstructured policy/SOP content used for retrieval and explanation.
-- **EligibilityDecision**: Deterministic result describing allowed action, maximum amount, approval requirement, policy/reason code, and denial/manual-review state.
-- **RefundRequest**: Idempotent refund business object with lifecycle state.
-- **ReturnRequest**: Idempotent return/return-refund business object with lifecycle state.
-- **SupportTicket**: Escalation object containing evidence and reason for human handling.
-- **ApprovalRequest**: Human-in-the-loop state for configured high-risk actions.
-- **AgentRun**: One user task execution with explicit state and final outcome.
-- **ToolExecution**: Structured record of one allowed business capability invocation.
-- **AuditLog**: Immutable-enough business/security audit event associated with important reads/writes and decisions.
-
-## Success Criteria *(mandatory)*
-
-### Measurable Outcomes
-
-- **SC-001**: A reviewer can independently demonstrate at least five business paths: logistics-anomaly refund, delivered-item return, ambiguous-order clarification, high-risk approval, and safe escalation.
-- **SC-002**: At least four seeded business states for the same refund-like natural-language request produce at least three materially different next actions or tool paths.
-- **SC-003**: 100% of money/state-changing evaluation cases use deterministic eligibility/authorization before the write is accepted.
-- **SC-004**: In the final safety evaluation set, no unauthorized cross-user write or approval-bypassing write is accepted by the business system.
-- **SC-005**: In duplicate/retry/ambiguous-timeout evaluation cases, each logical refund or return produces at most one corresponding business write.
-- **SC-006**: 100% of completed Agent runs include enough structured trace information to reconstruct the main state/tool/approval/write/verification path.
-- **SC-007**: The project includes a versioned offline evaluation set with at least 60 cases and a target of approximately 74 cases, with a frozen test split used for final reporting.
-- **SC-008**: Baseline and final Agent results reported in project materials are produced from comparable evaluation conditions and linked to dataset/run configuration.
-- **SC-009**: A 60–90 second demo can show one normal after-sales execution plus one safety/failure path and visibly prove that the system changes business state or deliberately refuses/escalates rather than merely answering a question.
-- **SC-010**: No resume/README performance percentage, latency claim, safety result, or improvement number is presented as achieved unless backed by a reproducible evaluation run and metric definition.
-
-## Assumptions
-
-- The first implementation uses synthetic/local but contract-realistic e-commerce business systems; no claim of real production payment/e-commerce integration is required.
-- The v1 user is already authenticated; building a complete login/account system is outside the core feature.
-- The v1 focuses on one bounded after-sales domain: order identification, logistics evidence, refund/return eligibility, refund/return request creation, escalation, and one human-approval path.
-- Product recommendation, pre-sales FAQ, merchant operations, marketing, procurement, real payment settlement, omnichannel support, model training, and multi-agent collaboration are out of scope for v1.
-- If implementation evidence shows that the workflow reduces to a fixed `intent → refund endpoint` router and intermediate evidence does not change the next action, the feature has failed its Agent-value hypothesis and must be redesigned before adding more technology.
+向量检索/pgvector、MCP、多 Agent、Redis/Kafka/K8s、独立 Eval/Trace 页面、真实支付/真实淘宝京东接入、推荐/营销/售前、通用规则引擎、完整用户中心、完整工单运营、独立部署的基线系统。未来需求必须新建范围决策，不给它们预造空目录或待办占位。
