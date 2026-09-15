@@ -8,16 +8,17 @@
 - 已阅读 [research.md](./research.md) 中的决策与替代方案。
 - 使用 [data-model.md](./data-model.md) 和 [artifact-contracts.md](./contracts/artifact-contracts.md) 作为统一口径。
 
-## Scenario 1 — 验证活动 feature 与必需文件
+## Scenario 1 — 验证 feature 目录与必需文件
 
 在仓库根目录运行：
 
 ```powershell
-Get-Content -Raw .specify/feature.json
 Get-ChildItem specs/001-agent-career-project
 ```
 
-**Expected**: `feature_directory` 指向 `specs/001-agent-career-project`，并存在 `spec.md`、`plan.md`、`research.md`、`data-model.md`、`quickstart.md`、`contracts/` 和 `checklists/`。
+**Expected**: `specs/001-agent-career-project` 存在，并包含 `spec.md`、`plan.md`、`research.md`、`data-model.md`、`quickstart.md`、`contracts/`、`checklists/` 和 `tasks.md`。
+
+说明：本仓库不以提交 `.specify/feature.json` 作为远程仓库的一致性前提。活动 feature 由本地 Spec Kit 工作流/当前分支上下文解析；远程 Quickstart 只验证 feature 目录和必需产物本身。
 
 ## Scenario 2 — 验证规格没有遗留占位符
 
@@ -85,5 +86,4 @@ weighted_total =
 
 ## Ready for Next Phase
 
-当以上场景全部通过时，可以运行 `$speckit-tasks`，生成执行招聘调研、候选评估、反证和最终项目规格的任务清单。此时仍不应生成最终 Agent 应用的编码任务；应用实现任务应在最终项目规格通过后另建 feature。
-
+当以上场景全部通过时，001 的研究/选题阶段视为完成。最终应用实现必须在新的 feature 中进行；当前已建立 `002-commerce-after-sales-agent` 作为实现设计 feature，因此不应再向 001 增加应用编码任务。
