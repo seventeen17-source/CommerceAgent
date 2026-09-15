@@ -1,15 +1,16 @@
 # Red Team — Hiring Manager Elimination Memo
 
-Target: C1 Procurement & Supplier Execution Agent. Alternatives: C2 DevOps/R&D Incident, C5 Financial Operations.
+Target: **CommerceAgent — E-commerce After-sales Execution & Exception Handling Agent**.
 
-| issue_id | severity | challenge | evidence / failure scenario | proposed disposition |
-|---|---|---|---|---|
-| HM-01 | P1 | Does procurement map directly enough to the target role family? | Market evidence strongly supports Tool/API, workflow, eval and enterprise integration, but C2 has more direct R&D/platform/AI-Coding job mapping and C5 has denser finance-domain hiring evidence | **compare alternatives and lower C1 demand confidence** |
-| HM-02 | P1 | Will a hiring manager understand the value in 60 seconds without procurement expertise? | “fuzzy request → supplier/quote/budget/policy → approval-ready request” is understandable, but terminology such as sourcing/PO can distract if overdone | **simplify narrative**: one purchase-request workflow, common terms, one measurable outcome loop |
-| HM-03 | P1 | Does a local synthetic procurement system look fake? | No real ERP/vendor credentials are available; a stateless mock would undermine enterprise credibility | **retain contract-realistic local system** with persistent supplier/quote/budget/request/approval state, transactions, audit and idempotency; README must call it synthetic/local |
-| HM-04 | P1 | Is there a more role-adjacent problem that shows faster onboarding? | C2 mirrors R&D efficiency/platform/Agent backend responsibilities visible in multiple core postings and is closer to daily software-engineering work | **promote C2 as active challenger** rather than treating it as runner-up decoration |
-| HM-05 | P2 | Is broad “procurement platform” scope necessary? | Broad sourcing, contracts, inventory, logistics and supplier lifecycle would make the project less credible in 6–8 weeks | **delete breadth**: one category, request-to-approval/PO-draft workflow only |
+| issue | severity | attack | required treatment |
+|---|---|---|---|
+| Can I understand the business value in 30–60 seconds? | P0 | “AI客服” is too generic and sounds like FAQ | Position as after-sales execution/exception handling: cross order/logistics/policy/refund systems to complete or safely escalate a real task |
+| Does it resemble real enterprise responsibilities? | P1 | A student demo can look toy-like | Persistent order/after-sales state, auth, eligibility, approval, idempotency, audit and deterministic eval must be first-class |
+| Is the scope too broad? | P1 | Customer service can expand into recommendation, pre-sales, merchant ops and CRM | Freeze v1 to order/logistics/refund/return/escalation only |
+| Does it signal backend strength? | P1 | A pure LLM wrapper would underuse the user's Java advantage | Domain state machine, transaction rules, write safety and audit must be substantial backend responsibilities |
+| Does it differentiate from OpsPilot_Agent? | P1 | A second infra/R&D Agent would add little portfolio breadth | Keep CommerceAgent customer-facing commerce/business-state oriented |
+| Are production claims honest? | P1 | Synthetic systems can be misrepresented as real platform integration | README/demo must explicitly say local/synthetic contract-realistic business systems unless real adapters are added |
 
-## Hiring-manager verdict
+## Verdict
 
-C1 has clear enterprise value and a good business-state loop, but it is **not the strongest direct hiring-domain match**. C2 deserves a higher role-mapping score after scope is reduced to a small incident simulator. If C2 can preserve the same reliability/eval evidence without infrastructure sprawl, a hiring manager would likely find it more immediately connected to software/AI engineering responsibilities.
+**PASS.** The project is hiring-manager readable if the first sentence is about completing after-sales work rather than answering questions, and if the implementation stays narrow enough to demonstrate deep execution, safety and evaluation instead of broad chatbot features.
