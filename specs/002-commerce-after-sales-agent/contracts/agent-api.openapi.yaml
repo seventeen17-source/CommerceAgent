@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info: {title: CommerceAgent MVP Run API, version: 2.0.0}
+servers:
+  - url: http://localhost:8000/api/v1
+security: [{bearerAuth: []}]
+paths:
+  /agent/runs:
+    post:
+      operationId: createRun
+      description: Owner derived from JWT. clientRequestId and request hash deduplicate. Advance synchronously to terminal or wait state; retry with the same clientRequestId after transport failure. Policy strategy is server configuration, not caller text.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [clientRequestId, message]
+              properties:
+                clientRequestId: {$ref: '#/components/schemas/Id'}
+                message: {type: string, minLength: 1, maxLength: 4000}
+      responses:
+        '200': {$ref: '#/components/responses/Run'}
+        default: {$ref: '#/components/responses/Error'}
+  /agent/runs/{runId}:
+    get:
+      operationId: getRun
+      description: Owner-only projection, reconcilable from checkpoint. Unknown or other-owner resource gives the same 404.
+      parameters: [{$ref: '#/components/parameters/RunId'}]
+      responses:
+        '200': {$ref: '#/components/responses/Run'}
+        default: {$ref: '#/components/responses/Error'}
+  /agent/runs/{runId}/inputs:
+    post:
+      operationId: supplyInput
+      description: WAITING_USER owner only. Check duplicate inputId/hash before state version. Never reapply an already checkpointed input.
+      parameters: [{$ref: '#/components/parameters/RunId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [inputId, expectedStateVersion]
+              anyOf: [{required: [message]}, {required: [selectedOrderId]}]
+              properties:
+                inputId: {$ref: '#/components/schemas/Id'}
+                expectedStateVersion: {type: integer, format: int64, minimum: 0}
+                message: {type: string, minLength: 1, maxLength: 4000}
+                selectedOrderId: {$ref: '#/components/schemas/Id'}
+      responses:
+        '200': {$ref: '#/components/responses/Run'}
+        default: {$ref: '#/components/responses/Error'}
+  /agent/runs/{runId}/continue:
+    post:
+      operationId: continueRun
+      description: Owner only, with a fresh valid JWT. No caller-supplied approval state or id. Serialize per run, reread authoritative approval, reconcile pending writes. PENDING approval and terminal runs return current view. WAITING_USER requires inputs. Busy run returns 409.
+      parameters: [{$ref: '#/components/parameters/RunId'}]
+      responses:
+        '200': {$ref: '#/components/responses/Run'}
+        default: {$ref: '#/components/responses/Error'}
+  /agent/runs/{runId}/trace:
+    get:
+      operationId: getTrace
+      description: Owner-only redacted timeline, no credentials or hidden reasoning. No SSE required.
+      parameters: [{$ref: '#/components/parameters/RunId'}]
+      responses:
+        '200': {description: Timeline, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}}}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    RunId: {in: path, name: runId, required: true, schema: {$ref: '#/components/schemas/Id'}}
+  responses:
+    Run:
+      description: Current owner-scoped run view
+      content: {application/json: {schema: {$ref: '#/components/schemas/RunView'}}}
+    Error:
+      description: Stable errors from runtime-contracts.md
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+  schemas:
+    Id: {type: string, format: uuid}
+    RunView:
+      type: object
+      required: [runId, status, stateVersion, outcome, message, candidates, approvalId, requestId, operationId]
+      properties:
+        runId: {$ref: '#/components/schemas/Id'}
+        status: {type: string, enum: [RUNNING, WAITING_USER, WAITING_APPROVAL, COMPLETED, DENIED, SAFE_STOP, FAILED]}
+        stateVersion: {type: integer, format: int64, minimum: 0}
+        outcome: {type: string, enum: [NONE, PENDING, VERIFIED, UNKNOWN]}
+        message: {type: string}
+        candidates:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [orderId, productName, createdAt]
+            properties:
+              orderId: {$ref: '#/components/schemas/Id'}
+              productName: {type: string}
+              createdAt: {type: string, format: date-time}
+        approvalId: {type: [string, 'null'], format: uuid}
+        requestId: {type: [string, 'null'], format: uuid}
+        operationId: {type: [string, 'null'], format: uuid}
+        errorCode: {type: [string, 'null']}
+        citations:
+          type: array
+          items:
+            type: object
+            required: [policyCode, policyVersion, section]
+            properties:
+              policyCode: {type: string}
+              policyVersion: {type: string}
+              section: {type: string}
+    Event:
+      type: object
+      required: [sequence, eventType, timestamp, summary]
+      properties:
+        sequence: {type: integer, minimum: 0}
+        eventType: {type: string, enum: [STATE, TOOL_PROPOSED, TOOL_BLOCKED, TOOL_RESULT, RETRY, INPUT, APPROVAL, WRITE, VERIFY, ERROR]}
+        timestamp: {type: string, format: date-time}
+        summary: {type: string}
+        toolName: {type: [string, 'null']}
+        operationId: {type: [string, 'null'], format: uuid}
+        errorCode: {type: [string, 'null']}
+        latencyMs: {type: [integer, 'null'], minimum: 0}
+    Error:
+      type: object
+      additionalProperties: false
+      required: [errorCode, message, retryable, traceId]
+      properties:
+        errorCode: {type: string}
+        message: {type: string}
+        retryable: {type: boolean}
+        traceId: {type: string}

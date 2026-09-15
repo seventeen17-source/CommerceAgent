@@ -1,50 +1,41 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# CommerceAgent Constitution
 
-## Core Principles
+Version: **2.0.0** · Amended: **2026-09-15**
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+本宪章约束当前唯一实现 feature：`specs/002-commerce-after-sales-agent/`。关键词 MUST 表示合并实现前必须满足，不代表当前已经通过测试。
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+## I. 确定性业务权威
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+LLM 负责理解、澄清、提出下一项证据/工具；Python 校验结构、白名单和执行预算；Java 独占订单归属、资格、金额、审批、状态与事务写入的最终判断。每次业务写入 MUST 在 Java 事务中重新验证当前状态。模型和政策文本均不得授权写入。
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+## II. 小范围、完整闭环
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+V1 仅处理本地合成订单的退款申请、退货退款申请、订单澄清、人工审批、拒绝和安全停止。创建申请不等于支付退款到账。只实现一个 Java 应用、一个 Python 应用、一个薄 Web 客户端、一个 PostgreSQL 实例。政策使用按代码/版本直查；不实现向量检索、完整工单后台、独立 Trace/Eval 看板、真实支付、多 Agent、MCP、Redis、Kafka 或 Kubernetes。
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## III. 安全写入与恢复
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+所有可重放的写入 MUST 有稳定操作标识、有效载荷指纹、授权、事务去重和可查询结果。未知超时先查权威操作状态；查询暂时不存在也不证明旧请求不会提交。重试 MUST 复用原键，最终由原子去重和订单级互斥约束防止重复。审批创建、审批决定、用户输入和恢复同样要处理重放。不得宣称分布式 exactly-once。
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+## IV. 边界由机制强制
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+运行账号不得持有数据库超级用户或迁移权限。Python 运行账号 MUST 无 `commerce` 表权限；Java/Python 通过类型化 HTTP 协作。认证来自经过校验的 JWT，不来自模型参数。令牌/私钥不得进入 prompt、checkpoint、trace、Git 或前端构建产物。审批由人工角色写入，Agent 只能查询和引用审批记录。
 
-## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
+## V. 持久化与迁移
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+每张表只有一个迁移所有者。Flyway 管理自定义 `commerce`/`agent` 表；官方 PostgreSQL checkpointer 管理专用 `checkpoint` schema，采用一次性初始化任务和锁定依赖。两者不得管理同一张表。图状态以官方 checkpoint 为恢复权威，`AgentRun` 是关联/展示投影，不另造一份恢复状态。重启后须实测澄清、审批和提交后恢复。
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+## VI. Agent 价值是待验证假设
+
+分支数量不是 Agent 优越性的证明。基线和 Agent MUST 复用工具、后端、安全层、可用信息及评测条件，只替换决策策略。允许诚实结论为标准路径没有收益。没有实测收益时不得编造提升或故意削弱基线。
+
+## VII. 评测与成果诚信
+
+业务不变量优先用确定性测试，模型流程用受控替身测试，真实模型用固定配置和重复运行评测。固定业务时钟但不伪造 JWT 时钟；dev/test 按场景家族隔离。非法尝试和被接受的非法动作分开计数。V1 的安全验收要求测试中被接受的非法写入为零，但不得推断普遍安全。任何指标 MUST 有原始运行记录；目标、文档检查、替身测试不等于真实模型结果。
+
+## Workflow
+
+先完成 tasks.md 的 M0/M1，不为后续功能预建空服务。危险行为先写失败测试，再实现。每次只提交一组有验收结果的任务；未运行不得勾选。新增 V1 范围必须同时删除相当范围。工期以首个切片的实际耗时校准，不以 Markdown 数量计算完成率。
+
+## Amendment record
+
+2.0.0 replaces 1.0.0: 将完整售后产品收缩为申请执行 MVP；取消首版向量检索与独立看板；以“每表一个迁移所有者”替代“Flyway 管理全部表”；保留安全、恢复、审批和诚实评测。旧方案及评分留在 Git 历史，不作为新的实现依据。本次同步重写 002 的规格、计划、数据模型、契约、任务和验收文档。只有实际测试记录才能把相关 gate 标为 PASS。
