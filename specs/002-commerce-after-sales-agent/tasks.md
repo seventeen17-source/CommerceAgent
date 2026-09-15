@@ -19,9 +19,9 @@
 **Purpose**: Create the minimum runnable project skeleton. Do not add business features yet.
 
 - [ ] T001 Create the planned root directories `commerce-backend/`, `agent-service/`, `web/`, `eval/`, `knowledge/policies/`, and `infra/` without adding unused microservice folders
-- [ ] T002 Initialize Java 21 Spring Boot 3.5.x Maven project with Spring Web, Security, Validation, Data JPA, PostgreSQL, Flyway and Testcontainers dependencies in `commerce-backend/pom.xml`
-- [ ] T003 [P] Initialize Python 3.13 project with FastAPI, LangGraph, Pydantic, httpx, PostgreSQL checkpoint support, pytest and pytest-asyncio in `agent-service/pyproject.toml`
-- [ ] T004 [P] Initialize React + TypeScript application and API client dependencies in `web/package.json` and `web/src/`
+- [ ] T002 Generate `commerce-backend/` with Spring Initializr using Java 21, Maven, Spring Boot 3.5.x, group `com.seventeen17`, artifact/name `commerce-backend`, package `com.seventeen17.commerceagent`, and dependencies Spring Web, Spring Security, Validation, Spring Data JPA, PostgreSQL Driver, Flyway Migration, Actuator and Testcontainers; keep generated Maven Wrapper files (`mvnw`, `mvnw.cmd`, `.mvn/`) and then verify `commerce-backend/pom.xml`
+- [ ] T003 [P] Generate `agent-service/` with `uv init --python 3.13` (application package layout), then add FastAPI, Uvicorn, LangGraph, Pydantic Settings, httpx, PostgreSQL/async database support, pytest and pytest-asyncio in `agent-service/pyproject.toml`; keep `uv.lock` under version control once dependencies resolve
+- [ ] T004 [P] Generate `web/` with Vite using the React + TypeScript template (`npm create vite@latest web -- --template react-ts`), install dependencies, and keep the generated TypeScript/Vite configuration as the baseline before adding project-specific UI code
 - [ ] T005 Configure PostgreSQL with pgvector and logical `commerce`, `agent`, `policy`, and optional `eval` schemas in `infra/docker-compose.yml` plus non-secret examples in `.env.example`; Flyway in `commerce-backend` is the single V1 migration runner
 - [ ] T006 [P] Configure Java formatting/static-analysis/test plugins in `commerce-backend/pom.xml` and Python lint/type-check settings in `agent-service/pyproject.toml`
 - [ ] T007 [P] Add application configuration skeletons for dev/test/eval profiles in `commerce-backend/src/main/resources/application.yml`, `commerce-backend/src/test/resources/application-test.yml`, and `agent-service/app/config/settings.py`
