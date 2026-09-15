@@ -2,6 +2,17 @@
 
 This model separates authoritative commerce state, Agent execution state, retrieval knowledge, and audit/evaluation records.
 
+## Database and schema ownership
+
+CommerceAgent uses one PostgreSQL instance for local simplicity, but ownership is explicit:
+
+- `commerce` schema: authoritative business tables. Semantic owner: Java backend.
+- `agent` schema: AgentRun/ToolExecution/checkpoint/runtime trace. Semantic owner: Python Agent service.
+- `policy` schema: policy retrieval metadata/chunks/vectors. Semantic owner: Python Agent service.
+- `eval` schema: optional eval-run/result metadata only. Semantic owner: eval runner/Agent service.
+
+For V1, **Flyway in the Java project is the single migration authority for all shared PostgreSQL schemas** so startup order and schema versioning remain deterministic. This does not transfer business authority to Java for Agent/policy data, and Python MUST NOT read/write `commerce` business tables directly. Python accesses authoritative business state only through typed Java APIs.
+
 ## 1. User
 
 Fields:
@@ -99,7 +110,7 @@ Fields:
 Rules:
 - used by deterministic eligibility service;
 - never sourced from model output;
-- may correspond to a human-readable AfterSalesPolicy document but is not the same entity.
+- may correspond to a human-readable AfterSalesPolicy but is not the same entity.
 
 ## 7. EligibilityDecision
 
@@ -141,7 +152,8 @@ Fields:
 Constraints:
 - unique logical idempotency key per write scope;
 - `amount` cannot exceed deterministic eligibility result;
-- existing incompatible after-sales state blocks creation.
+- existing incompatible after-sales state blocks creation;
+- when approval is required, `approval_request_id` must resolve to an authoritative APPROVED record bound to the same run/order/action/amount.
 
 ## 9. ReturnRequest
 
@@ -160,7 +172,8 @@ Fields:
 
 Constraints:
 - uniqueness/idempotency equivalent to refund writes;
-- creation requires deterministic return eligibility.
+- creation requires deterministic return eligibility;
+- approval binding rules match RefundRequest when approval is required.
 
 ## 10. SupportTicket
 
@@ -193,7 +206,6 @@ Fields:
 - `requested_at`
 - `decided_at` nullable
 - `decided_by` nullable
-- `approval_token_hash` nullable
 
 Transitions:
 - `PENDING → APPROVED | DENIED | EXPIRED`
@@ -201,7 +213,9 @@ Transitions:
 
 Rules:
 - Agent cannot set `APPROVED`;
-- only authorized approver endpoint can transition the record.
+- only authorized approver endpoint can transition the record;
+- approval is referenced by `approval_request_id`; no model-generated approval token is accepted;
+- sensitive writes re-read the record and verify run/order/action/amount binding immediately before commit.
 
 ## 12. AgentRun
 
@@ -225,7 +239,8 @@ Fields:
 
 Rules:
 - persisted enough to resume clarification/approval flows;
-- business truth is referenced, not duplicated as authoritative state.
+- business truth is referenced, not duplicated as authoritative state;
+- run reads/resume endpoints enforce authenticated ownership or an explicitly authorized operational role.
 
 ## 13. ToolExecution
 
@@ -266,9 +281,11 @@ Rules:
 - key write/auth decisions create an audit event;
 - append-oriented from application perspective.
 
-## 15. PolicyDocument
+## 15. AfterSalesPolicy (domain concept) / PolicyDocument (storage)
 
-Fields:
+`AfterSalesPolicy` is the spec/domain concept for versioned human-readable after-sales policy/SOP knowledge. In storage it is represented by `PolicyDocument` plus `PolicyChunk` records.
+
+PolicyDocument fields:
 - `id`
 - `document_code`
 - `title`
@@ -311,7 +328,7 @@ Rules:
 - expected business-state predicates
 - tags
 
-Definitions should live in versioned Git files; optional DB metadata may index them.
+Definitions live in versioned Git files; optional DB metadata may index them.
 
 ### EvalRun
 - `eval_run_id`
@@ -329,6 +346,8 @@ Definitions should live in versioned Git files; optional DB metadata may index t
 - latency/token/tool-call counts
 - failure taxonomy
 
+The V1 eval runner is CLI/file-first. It writes versioned machine-readable reports under `eval/reports/`; a public Eval API is not required for the core feature.
+
 ## Relationship Summary
 
 ```text
@@ -344,7 +363,8 @@ User 1---* Order 1---* OrderItem
 AgentRun 1---* ToolExecution
 AgentRun --- Refund/Return/Ticket/Approval via run_id
 
-PolicyDocument 1---* PolicyChunk
+AfterSalesPolicy
+  -> PolicyDocument 1---* PolicyChunk
 
 AfterSalesRule -> EligibilityDecision -> guarded write
 ```
@@ -353,7 +373,8 @@ AfterSalesRule -> EligibilityDecision -> guarded write
 
 1. `AgentRun` state is not business authorization.
 2. `EligibilityDecision` is deterministic and is revalidated for sensitive writes.
-3. `WAITING_APPROVAL` prevents refund/return creation until approval is valid.
+3. `WAITING_APPROVAL` prevents refund/return creation until the referenced authoritative ApprovalRequest is APPROVED and bound to the same action context.
 4. Timeout after a write never implies failure; status is queried before retry.
 5. Same logical idempotency key cannot create more than one logical refund/return.
 6. Retrieval documents and Agent prose never change Order/Refund/Return state directly.
+7. One physical PostgreSQL instance does not imply shared authority: service ownership remains enforced by API boundaries and schema conventions.
