@@ -1,34 +1,23 @@
-# Implementation / Interview Plan Gate Report
+# Implementation & Interview Plan Gate Report
 
-## US5 acceptance checks
+Project: **CommerceAgent — E-commerce After-sales Execution & Exception Handling Agent**
 
-| Check | Result |
-|---|---|
-| 6 core weeks + up to 2 optional/buffer weeks | PASS |
-| Every week has a runnable/demonstrable increment | PASS |
-| Week 2 contains `User → Agent → Tool → Business System → Result` | PASS |
-| Week 2 also contains a controlled failure path | PASS |
-| Week 3 covers timeout/retry, invalid parameters, duplicate/idempotency, injection/authorization and HITL | PASS |
-| Week 4 freezes a versioned 50–100 case dataset and comparable Baseline/V1 runs | PASS — 60-case target |
-| Week 5 allows one attributable optimization rather than feature sprawl | PASS |
-| Week 6 produces a clean-environment reproducible core | PASS |
-| Must/Should/Nice/Reject and cut order explicit | PASS |
-| No new Must after Week 2 without an equal/larger cut | PASS |
-| Must modules map to interview questions | PASS |
-| Personally reproducible core mechanisms are identified | PASS |
-| AI-assist boundary is explicit | PASS |
-| Safety/eval/observability are core rather than last-week polish | PASS |
+## Contract 5 checks
 
-## SC-008 verdict
+- **6+2 week roadmap exists**: PASS — `weekly-roadmap.md`.
+- **Week 2 vertical slice**: PASS by design — must demonstrate normal refund plus controlled failure through `User → Agent → Tool → Java Backend → safe write/no-write → verification → trace`.
+- **Every week has runnable evidence**: PASS.
+- **Reliability/security before late polish**: PASS — Week 3 handles timeout/idempotency/auth/injection/HITL.
+- **Evaluation before packaging**: PASS — Week 4 freezes 60–80 case set; Week 5 performs one attributable optimization.
+- **Scope-cut order exists**: PASS — `scope-cut-plan.md` cuts UI/MCP/cloud before core Agent/safety/eval/trace.
+- **Must modules mapped to interview knowledge**: PASS — `interview-map.md`.
+- **Core mechanisms user must reproduce**: PASS — state graph, tool validation, Java eligibility/state, idempotency, HITL, policy retrieval, eval scorer, trace.
+- **Career outputs keep metrics as targets**: PASS.
 
-PASS at planning/design level. The roadmap has a runnable exit gate every week and preserves the Week-2 vertical slice. Actual completion evidence belongs to the future implementation feature.
+## Week 2 circuit breaker
 
-## SC-009 verdict
+If the implementation cannot show at least two materially different after-sales paths caused by evidence—for example logistics anomaly → refund, delivered item → return, ambiguous order → clarification, high value → approval—the implementation is not allowed to compensate by adding more frameworks. The project must first repair the Agent-value thesis.
 
-PASS at planning/design level. All Must modules have at least one interview question, a required design concept and a simplified mechanism the user must be able to reproduce.
+## Verdict
 
-## Contract 5 implementation/interview portion
-
-**PASS.**
-
-The plan is ready to become input to a separate implementation feature after this research/decision feature completes its career-output and integrity stages.
+**PASS for creating a separate implementation feature.** No application code should be added to `001-agent-career-project`.
