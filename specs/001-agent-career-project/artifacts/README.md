@@ -1,36 +1,44 @@
 # Execution Artifacts
 
-This directory contains the executable outputs of `001-agent-career-project`.
+This directory contains the executed outputs of `001-agent-career-project`.
 
 ## Source of truth
 - `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/artifact-contracts.md`, and `quickstart.md` remain design inputs.
-- This `artifacts/` tree records execution evidence, intermediate analysis, decisions, and exit-gate reports.
-- External facts must include direct/authoritative source URLs and observation date where available.
-- Facts, inferences, recommendations, assumptions, and targets must be distinguishable.
+- This `artifacts/` tree records execution evidence, intermediate analysis, decisions, superseded decisions, final design, and exit-gate reports.
+- External facts use direct/authoritative source URLs and observation dates where available.
+- Facts, inferences, recommendations, assumptions, and future targets must remain distinguishable.
 
 ## Structure
 - `market/`: job evidence, exclusions, audit, capability map.
 - `candidates/`: candidate portfolio, fatal gates, scores, sensitivity.
-- `decisions/`: decision log, red-team memos, final selection.
-- `final-project/`: A–Q project specification and implementation/interview plan.
+- `decisions/`: decision log, red-team records, superseded and final selections.
+- `final-project/`: authoritative CommerceAgent A–Q specification and implementation/interview plan.
 - `career/`: resume/README/demo templates and evidence-backed claims.
 
 ## Current status
+
 | Stage | Status |
 |---|---|
-| Setup | complete |
-| Foundational rules | complete |
-| US1 market evidence | complete — Gate 1 PASS |
-| US2 candidate portfolio | complete — Contract 2 PASS with explicit uncertainty |
-| US3 red team | complete — Contract 3 PASS; ProcurePilot selected |
-| US4 final project spec | complete — Contract 4 PASS |
-| US5 roadmap/interview | complete — implementation/interview plan PASS |
-| US6 career materials | complete — templates only; metrics remain targets |
-| Cross-cutting traceability/integrity | complete |
-| Local Spec Kit active-feature pointer | action required before next local implementation workflow (`.specify/feature.json` absent in GitHub repo) |
+| Setup | PASS |
+| Foundational rules | PASS |
+| US1 market evidence | PASS — 30 strict core postings / 20 employers |
+| US2 candidate portfolio | PASS |
+| US3 red team / selection | PASS — decision reopened after P0 challenge; C1 ProcurePilot superseded |
+| US4 final project spec | PASS — **CommerceAgent after-sales execution Agent** |
+| US5 roadmap/interview | PASS |
+| US6 career templates | PASS; metrics remain targets until implementation |
+| Final integrity audit | PASS with local `.specify/feature.json` caveat |
 
-## Final decision
+## Final project
 
-`001-agent-career-project` is ready for review/merge as a research-and-design feature. The selected project is **ProcurePilot: Enterprise Procurement & Supplier Execution Agent**.
+**CommerceAgent — E-commerce After-sales Execution & Exception Handling Agent**
 
-Application code is intentionally not part of this feature. After review/merge, create/select a separate implementation feature (suggested logical name: `002-procurepilot-implementation`) through the local Spec Kit workflow, then generate its implementation tasks from the final A–Q specification, scenarios, tool contracts, evaluation design, and 6+2 week roadmap.
+Core thesis:
+
+> The Agent handles ambiguity, evidence gathering and dynamic Tool/path selection; deterministic backend services retain authority over order ownership, eligibility, amount, approvals, idempotency and money/state-changing writes.
+
+The previous ProcurePilot design is preserved in history as a superseded decision rather than deleted, demonstrating that the red-team/decision process can actually change the outcome.
+
+## Next step
+
+Create a separate implementation feature (recommended: `002-commerce-after-sales-agent`) and run Spec Kit from specification through implementation there. Do not add application code to this research/decision feature.
