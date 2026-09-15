@@ -1,0 +1,6 @@
+job_id,title_raw,company,career_level,source_url,source_tier,why_reference_only,trend_signals
+Baidu-J100117,云原生 Agent Infra 高级研发工程师,百度,高级趋势样本,https://talent.baidu.com/jobs/detail/SOCIAL/4b326f6b-2c39-461c-ae64-69b4201c680e,A,明确要求高级云原生/分布式经验且非早期人才,"Agent sandbox/gateway/observability; MCP/SDK/Skill; isolation; runtime governance; auto-recovery"
+Baidu-J103885,Agent引擎开发工程师,百度,高级趋势样本,https://talent.baidu.com/jobs/detail/SOCIAL/d56ce9b0-296b-4615-9497-115968d4fc14,A,要求3年以上后端开发经验,"runtime; plugin/skill; persistence; retry; trace; security; HITL; policy enforcement"
+Baidu-J104493,大模型算法工程师,百度,高级趋势样本,https://talent.baidu.com/jobs/detail/SOCIAL/57595856-2688-42e3-b21d-6e2ea6b27a22,A,社招算法岗且混合预训练/后训练,"Agent planning/tool/memory/multi-agent; eval; RL; productionization"
+Baidu-J96228,大模型算法工程师,百度,高级趋势样本,https://talent.baidu.com/jobs/detail/SOCIAL/80dc23aa-5483-4272-afd6-851c58d107f3,A,社招且核心为后训练算法,"SFT/RM/RL; synthetic data; RAG/Agent business applications"
+Ant-2027-risk-AI,AI工程师-应用方向（转正实习线索）,蚂蚁国际,趋势线索/待官方复核,https://www.nowcoder.com/feed/main/detail/66643a64f122497fbc29cdf28c96562d,D,社区招聘帖非完整官方职位页不进入核心分母,"Agent architecture; RAG; toolchain; planning; memory; model effect/performance/security"
