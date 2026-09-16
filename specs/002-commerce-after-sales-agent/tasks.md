@@ -17,7 +17,7 @@
 
 **目标**：只创建最小可运行项目骨架，不写业务功能。
 
-- [ ] T001 创建 `commerce-backend/`、`agent-service/`、`web/`、`eval/`、`knowledge/policies/`、`infra/` 根目录，不创建无用微服务目录。
+- [ ] T001 创建 `commerce-backend/`、`agent-service/`、`web/`、`eval/`、`knowledge/policies/`、`infra/` 根目录，不创建无用微服务目录；创建并维护根 `README.md` 作为项目入口，只记录当前真实状态、设计入口、计划技术栈和第一实现目标，不提前填写未实测成果。
 - [ ] T002 使用 Spring Initializr 生成 `commerce-backend/`：Java 21、Maven、Spring Boot 3.5.x、group `com.seventeen17`、artifact/name `commerce-backend`、package `com.seventeen17.commerceagent`；依赖 Spring Web、Spring Security、Validation、Spring Data JPA、PostgreSQL Driver、Flyway Migration、Actuator、Testcontainers；保留 `mvnw`、`mvnw.cmd`、`.mvn/`。
 - [ ] T003 [P] 使用 `uv init --python 3.13` 初始化 `agent-service/`，加入 FastAPI、Uvicorn、LangGraph、Pydantic Settings、httpx、PostgreSQL/async DB、pytest、pytest-asyncio；依赖解析后提交 `uv.lock`。
 - [ ] T004 [P] 使用 Vite React + TypeScript 初始化 `web/`：`npm create vite@latest web -- --template react-ts`，保留 Vite/TS 基线配置。
@@ -25,7 +25,7 @@
 - [ ] T006 [P] 在 `commerce-backend/pom.xml` 配置 Java format/static analysis/test 插件，在 `agent-service/pyproject.toml` 配置 Python lint/type-check。
 - [ ] T007 [P] 配置 dev/test/eval：`commerce-backend/src/main/resources/application.yml`、`commerce-backend/src/test/resources/application-test.yml`、`agent-service/app/config/settings.py`。
 
-**Checkpoint**：三端空壳可启动并连接本地 PostgreSQL；Java 21 / Python 3.13 / Docker 版本已验证。
+**Checkpoint**：三端空壳可启动并连接本地 PostgreSQL；Java 21 / Python 3.13 / Docker 版本已验证；根 README 能准确反映当前阶段且不包含未实测成果。
 
 ---
 
@@ -156,7 +156,7 @@
 - [ ] T080 增加 CI：Java Test、Python Test、Frontend Build、Contract Check。
 - [ ] T081 完成 Docker Compose clean startup、seed、health check 与三个核心 Dockerfile。
 - [ ] T082 执行 `quickstart.md` 全部核心场景，记录 pass/fail 并修 blocker。
-- [ ] T083 更新根 `README.md`：架构、真实本地启动、60–90 秒 Demo、仅实测 Eval 数字、Known Limitations，以及“不是真实支付/生产 ERP”的明确说明。
+- [ ] T083 将根 `README.md` 从当前最小项目入口升级为最终作品集交付版本：补充最终架构、真实本地启动方式、60–90 秒 Demo、仅实测 Eval 数字、Known Limitations，以及“不是真实支付/生产 ERP”的明确说明；不得删除历史阶段说明以掩盖实现范围变化。
 
 ---
 
