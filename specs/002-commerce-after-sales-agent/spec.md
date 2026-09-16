@@ -2,7 +2,7 @@
 
 **Feature Branch**: `[002-commerce-after-sales-agent]`  
 **Created**: 2026-09-15  
-**Status**: Draft
+**Status**: Approved
 
 ## 目标
 
