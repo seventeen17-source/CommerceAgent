@@ -24,7 +24,7 @@
 
 **语言/版本**：Java 21 LTS；Python 3.13；TypeScript 5.x
 
-**主要依赖**：Spring Boot 3.5.x、Spring Security、Spring Data JPA、Flyway、FastAPI、LangGraph Graph API、Pydantic、httpx、React、PostgreSQL、pgvector
+**主要依赖**：Spring Boot 4.1.1、Spring Security、Spring Data JPA、Flyway、FastAPI、LangGraph Graph API、Pydantic、httpx、React、PostgreSQL、pgvector
 
 **存储**：一个 PostgreSQL 实例，逻辑上区分：
 

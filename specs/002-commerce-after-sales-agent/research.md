@@ -2,14 +2,18 @@
 
 本文用于固化 `002-commerce-after-sales-agent` 的实现规划决策。目标不是堆技术名词，而是明确每一项技术为什么存在、解决什么问题，以及什么情况下应该删掉。
 
-## 决策 1 — Java 21 + Spring Boot 3.5.x 负责业务后端
+## 决策 1 — Java 21 + Spring Boot 4.1.1 负责业务后端
 
-**决定**：使用 Java 21 LTS + Spring Boot 3.5.x。
+**决定**：使用 Java 21 LTS + Spring Boot 4.1.1，由 Spring Initializr 官方脚手架生成。
 
 **原因**：项目需要真实的确定性业务逻辑、事务、权限、幂等和审计。Java 也是用户当前更熟悉的语言，可以承担业务权威层。
 
+**版本说明**：脚手架实际生成的是 Spring Boot 4.1.1，而非早期计划中的 3.5.x。选择跟随官方当前版本，理由是官方脚手架与安全补丁默认指向新主线，长期维护成本更低；且本项目业务代码从零开始，没有既有 Spring Boot 3.x 代码需要迁移，切换成本最小。
+
+**已知影响**：Spring Boot 4.x 相对 3.5.x 存在坐标与 API 变更，实现时需注意：Web starter 坐标变为 `spring-boot-starter-webmvc`；测试依赖拆分为对应的 `*-test` starter（如 `spring-boot-starter-webmvc-test`）；部分自动配置与 API 与 3.x 不同，T008+ 实现必须以官方 4.1.1 文档为准，不能照搬 3.x 写法。
+
 **未选方案**：
-- Spring Boot 4.x：核心收益有限，却增加版本兼容波动。
+- Spring Boot 3.5.x：与早期文档一致，但既然业务代码从零起步，回到旧主线只会增加未来的升级成本。
 - Python-only backend：会削弱事务型后端能力的展示，也浪费现有 Java 优势。
 
 ## 决策 2 — Python 3.13 + FastAPI 负责 Agent Orchestration
