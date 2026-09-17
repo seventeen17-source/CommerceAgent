@@ -4,8 +4,8 @@
 
 ## 当前状态
 
-- **当前 Phase**：Phase 1 — 项目脚手架（T001–T007 全部完成）
-- **当前 Tasks**：T001–T007
+- **当前 Phase**：Phase 2 — Foundational
+- **当前 Tasks**：T009–T010
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -14,18 +14,21 @@
   - T005 — PostgreSQL（`pgvector/pgvector:0.8.6-pg18` 镜像）与三个逻辑 schema、三个独立角色；**`agent_app` 读 `commerce.*` 被数据库拒绝**（实测）；T005 不启用 `vector` extension，是否启用留给 US6/T065
   - T006 — Java 侧 Spotless 3.10.2（palantirJavaFormat）+ SpotBugs 4.10.4.1 + JaCoCo 0.8.15；Python 侧 ruff 0.16.8 + mypy 2.3.1。`mvnw verify` **BUILD SUCCESS**；`ruff check` / `ruff format --check` / `mypy app` 全部通过
   - T007 — `application.yml`（含 dev profile，应用身份 `commerce_app` / 迁移身份 `migrator` 分离）、`application-test.yml`（数据源由 Testcontainers 注入）、`app/config/settings.py`。实测 `mvnw spring-boot:run` **Started CommerceBackendApplication in 4.538 seconds**，Flyway 以 `migrator` 身份把 history 表建在 `commerce` schema
-- **当前优先任务**：Phase 2 — T008（初始 Flyway migration）
-- **下一 Gate**：Phase 1 完成标准已全部满足；**进入 Phase 2 需你确认**
+  - T008 — `V001__core_schema.sql` 创建 9 张核心表并建立约束/索引；本地 `mvnw.cmd verify` **BUILD SUCCESS**；`infra/postgres/verify-t008.sql` 返回 **`T008_ACCEPTANCE_OK`**；`agent_app` 对 `commerce.*` 无权限，`commerce_app` / `agent_app` 各自在所属 schema 具备所需权限；`vector` extension 未启用
+- **当前优先任务**：T009 + T010 — Java JPA 领域模型与 `AfterSalesRule` 持久化
+- **下一 Gate**：完成 T009/T010 后，进入 T011–T014 的 Security / Error / Audit / Fixture 基础能力
 - **当前 Blocker**：无
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
   - 本机 `core.autocrlf=true`；`infra/` 下的脚本与 `.env*` 已由根 `.gitattributes` 钉为 LF（否则容器内执行会 `bad interpreter`）
-  - 数据库容器 `commerceagent-postgres`，宿主端口 **5432**（原 `opspilot-db` 已废弃并移除，其数据卷 `opspilot_agent_pgdata` 保留未删）
+  - 数据库容器 `commerceagent-postgres`，宿主端口 **5432**，并仅绑定 `127.0.0.1:5432`；Adminer 仅绑定 `127.0.0.1:8081`
+  - 原 `opspilot-db` 已废弃并移除，其数据卷 `opspilot_agent_pgdata` 保留未删
   - 启动数据库：`docker compose -f infra/docker-compose.yml up -d`（首次可 `cp .env.example .env` 覆盖默认值）
   - Java 侧两条命令：`mvnw.cmd spotless:apply` 修复格式；`mvnw.cmd verify` 跑 compile + test + spotless check + SpotBugs + JaCoCo
+  - Testcontainers PostgreSQL 已固定为 `postgres:18`，避免 `latest` 漂移破坏可复现性
   - Python 侧三条命令：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`
 - **未决项**：
-  - `.specify/feature.json` 本地仍指向 `specs/001-agent-career-project`，按执行顺序第 2 步应指向 002
+  - `.specify/feature.json` 本地仍指向 `specs/001-agent-career-project`，后续应切换为 `specs/002-commerce-after-sales-agent`
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
 
@@ -35,7 +38,7 @@
 |---|---|---|---|---|
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
-| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（待确认） |
+| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008 ✅，当前 T009–T010） |
 | 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ⬜ |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
@@ -43,7 +46,7 @@
 | 7 | Policy / RAG | T064–T070 | 政策证据可检索引用，但不掌握资金授权 | ⬜ Optional/P2 |
 | 8 | Eval & Portfolio | T071–T083 | Eval、CI、Docker、README、Demo、真实指标完成 | ⬜ |
 
-## Phase 1 — 当前执行顺序
+## Phase 1 — 完成记录
 
 1. ✅ 拉取最新 `main` 并确认工作区干净
 2. ⬜ 本地 `.specify/feature.json` 指向 `specs/002-commerce-after-sales-agent`（当前仍为 001）
@@ -74,6 +77,26 @@
 
 > 「三个工程最小启动 / build 成功」的实测依据：Java `mvnw verify` BUILD SUCCESS（含 Testcontainers 起真实 PostgreSQL）；Web `npm.cmd run build` 产出 `dist/`；Python `uv run python --version` → 3.13.14、`mypy app` 通过且 `settings` 可加载。Python 的应用入口（`app/main.py`）属 T018。
 > 「Git diff 只包含预期脚手架和基础配置」已验证：Phase 1 收尾后工作区干净，改动全部落在 `2a5dbde`（T006 Java）/ `2d204a2`（T006 Python）/ `f371be7`（T007 配置）/ `d47a121`（文档）四个提交内。
+
+## Phase 2 — 当前执行顺序
+
+1. ✅ T008：初始 Flyway migration（核心业务表 + Agent Run/Trace 表）
+2. ⬜ T009：User / Order / OrderItem / Shipment / LogisticsEvent JPA Entity/Repository
+3. ⬜ T010：AfterSalesRule 持久化
+4. ⬜ T011：JWT / role-aware principal
+5. ⬜ T012：统一 Error Envelope
+6. ⬜ T013：结构化 Audit Writer
+7. ⬜ T014：dev/eval fixture loader
+8. ⬜ T015–T018：Agent State / Commerce Client / Run+Trace / FastAPI security skeleton
+
+### T008 验收证据
+
+- `V001__core_schema.sql` 已创建 `commerce.users`、`orders`、`order_items`、`shipments`、`logistics_events`、`after_sales_rules`、`audit_logs`、`agent.agent_runs`、`agent.tool_executions`
+- `mvnw.cmd verify`：用户本地复验 **BUILD SUCCESS**
+- `infra/postgres/verify-t008.sql`：用户本地复验返回 **`T008_ACCEPTANCE_OK`**
+- PostgreSQL / Adminer 对宿主机均仅绑定 `127.0.0.1`
+- Flyway 测试检查的是 **V001 存在且 success=true**，不再错误要求“最新 migration 必须永远是 V001”
+- Testcontainers 固定 `postgres:18`，避免 `latest` 漂移
 
 ## 维护规则
 
