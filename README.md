@@ -76,7 +76,7 @@ specs/
 
 ## 计划技术栈
 
-- Java 21 + Spring Boot 3.5.x
+- Java 21 + Spring Boot 4.1.1
 - Python 3.13 + FastAPI + LangGraph
 - React + TypeScript + Vite
 - PostgreSQL

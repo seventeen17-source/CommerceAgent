@@ -2,14 +2,18 @@
 
 本文用于固化 `002-commerce-after-sales-agent` 的实现规划决策。目标不是堆技术名词，而是明确每一项技术为什么存在、解决什么问题，以及什么情况下应该删掉。
 
-## 决策 1 — Java 21 + Spring Boot 3.5.x 负责业务后端
+## 决策 1 — Java 21 + Spring Boot 4.1.1 负责业务后端
 
-**决定**：使用 Java 21 LTS + Spring Boot 3.5.x。
+**决定**：使用 Java 21 LTS + Spring Boot 4.1.1，由 Spring Initializr 官方脚手架生成。
 
 **原因**：项目需要真实的确定性业务逻辑、事务、权限、幂等和审计。Java 也是用户当前更熟悉的语言，可以承担业务权威层。
 
+**版本说明**：脚手架实际生成的是 Spring Boot 4.1.1，而非早期计划中的 3.5.x。选择跟随官方当前版本，理由是官方脚手架与安全补丁默认指向新主线，长期维护成本更低；且本项目业务代码从零开始，没有既有 Spring Boot 3.x 代码需要迁移，切换成本最小。
+
+**已知影响**：Spring Boot 4.x 相对 3.5.x 存在坐标与 API 变更，实现时需注意：Web starter 坐标变为 `spring-boot-starter-webmvc`；测试依赖拆分为对应的 `*-test` starter（如 `spring-boot-starter-webmvc-test`）；部分自动配置与 API 与 3.x 不同，T008+ 实现必须以官方 4.1.1 文档为准，不能照搬 3.x 写法。
+
 **未选方案**：
-- Spring Boot 4.x：核心收益有限，却增加版本兼容波动。
+- Spring Boot 3.5.x：与早期文档一致，但既然业务代码从零起步，回到旧主线只会增加未来的升级成本。
 - Python-only backend：会削弱事务型后端能力的展示，也浪费现有 Java 优势。
 
 ## 决策 2 — Python 3.13 + FastAPI 负责 Agent Orchestration
@@ -142,6 +146,36 @@ Kubernetes 不进入核心范围。
 **决定**：配置层记录 `MODEL_PROVIDER`、`MODEL_NAME`、`MODEL_TEMPERATURE` 等；实现只需先支持一个 OpenAI-compatible provider，不为了“多模型兼容”额外造复杂抽象。
 
 Eval Run 必须记录模型配置，以保证数字可追溯。
+
+## 决策 16 — Python 侧数据库驱动使用 psycopg 3
+
+**决定**：`agent-service` 使用 **psycopg 3**（`psycopg[binary,pool]`）访问 PostgreSQL。不引入 asyncpg；V1 不引入 SQLAlchemy / Alembic。
+
+**原因**：
+
+1. LangGraph 的 Postgres checkpointer 官方包 `langgraph-checkpoint-postgres` 的依赖声明即为 `psycopg>=3.2.0` + `psycopg-pool>=3.2.0`。决策 9 要求 checkpoint 必须持久化，因此 psycopg 是既有的传递依赖，**不是额外选型**。
+2. psycopg 3 原生支持 async（`AsyncConnection`），满足本服务的异步访问需求；再引入 asyncpg 会形成两套驱动并存。
+3. 计划已将 Flyway（Java 侧）定为 V1 的单一迁移执行者，因此 Python 侧不需要 Alembic。
+
+**影响**：`agent` schema 的自有表（`agent_runs`、`tool_executions` 等）在 T017 由 psycopg 直接以 SQL 访问；若后续出现复杂查询或映射需求，再单独评估引入查询层，并需要新的决策记录。
+
+**验证方式**：T003 已在 `agent-service/pyproject.toml` 落地 `psycopg[binary,pool]` 与 `langgraph-checkpoint-postgres`，并经 `uv.lock` 解析与导入 smoke test 验证。
+
+## 决策 17 — 前端工具链版本跟随 create-vite 官方模板
+
+**决定**：`web/` 使用 `create-vite` 官方 `react-ts` 模板，其依赖版本组合（Vite 8.x、React 19.x、TypeScript ~6.0.x、`@vitejs/plugin-react` 6.x、oxlint）**原样保留**，不手工改写版本。
+
+**原因**：
+
+1. 该组合由官方模板验证过。手工改写（例如把 TypeScript 退回 5.x）会跳出已验证组合，并且违反 AGENTS.md §7「不得手写仿官方脚手架」。
+2. 原 `plan.md` 写的是 `TypeScript 5.x`，与模板实际钉的 `~6.0.2` 不一致。项目前端从零开始，没有既有 TS 5.x 代码需要保持兼容，跟随当前官方组合的长期升级成本更低。
+
+**影响**：
+
+- `plan.md` 的版本声明同步修订为 `TypeScript 6.0.x`。
+- 模板的 lint 工具是 **oxlint**，不是 ESLint。后续任何前端 lint/格式化任务必须以 oxlint 的配置与 CLI 为准，不能照抄 ESLint 配置。
+
+**验证方式**：T004 实装结果为 `typescript 6.0.3 / vite 8.3.0 / react 19.3.0 / @vitejs/plugin-react 6.1.1 / oxlint 1.83.0`，且 `npm run build`（`tsc -b && vite build`）成功产出 `dist/`。
 
 ## 明确拒绝的技术/功能
 
