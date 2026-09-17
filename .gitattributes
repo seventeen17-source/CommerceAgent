@@ -1,0 +1,14 @@
+# 统一换行符策略。本机 core.autocrlf=true 会把手写文件转成 CRLF，
+# 但下列文件必须在 Linux 容器/环境中保持 LF，否则出现 "bad interpreter: /bin/bash^M"
+# 或变量值里混入 \r。
+
+# 在 postgres 容器内由 entrypoint 执行的初始化脚本
+*.sh text eol=lf
+
+# docker compose 读取的 env 文件：CRLF 会把 \r 带进变量值
+.env text eol=lf
+.env.example text eol=lf
+
+# 容器内使用、且对 CRLF 敏感的其他文本
+Dockerfile text eol=lf
+*.dockerfile text eol=lf

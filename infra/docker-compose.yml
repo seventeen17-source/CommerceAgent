@@ -1,0 +1,52 @@
+# CommerceAgent — 本地 PostgreSQL（含 pgvector）
+#
+# 用法（在仓库根目录执行）：
+#   cp .env.example .env                                            # 首次，填入你自己的密码
+#   docker compose --env-file .env -f infra/docker-compose.yml up -d
+#
+# 所有变量都带默认值，因此不提供 .env 也能直接起（便于快速验证）。
+#
+# 重要：PG18 的 PGDATA 变更为 /var/lib/postgresql/18/docker，官方镜像的 VOLUME
+# 也随之改为 /var/lib/postgresql。因此数据卷必须挂到 /var/lib/postgresql，
+# 仍然挂旧路径 /var/lib/postgresql/data 会静默落到匿名卷、容器重建即丢数据。
+# 参考：https://github.com/docker-library/docs/blob/master/postgres/README.md
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg18
+    container_name: commerceagent-postgres
+    restart: unless-stopped
+
+    environment:
+      # 超级用户：仅用于初始化，不得写入任何应用配置
+      POSTGRES_DB: ${POSTGRES_DB:-commerceagent}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres_dev_only}
+
+      # 以下三个角色由 infra/postgres/initdb 脚本创建
+      COMMERCE_APP_USER: ${COMMERCE_APP_USER:-commerce_app}
+      COMMERCE_APP_PASSWORD: ${COMMERCE_APP_PASSWORD:-commerce_app_dev_only}
+      AGENT_APP_USER: ${AGENT_APP_USER:-agent_app}
+      AGENT_APP_PASSWORD: ${AGENT_APP_PASSWORD:-agent_app_dev_only}
+      MIGRATOR_USER: ${MIGRATOR_USER:-migrator}
+      MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:-migrator_dev_only}
+
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+    volumes:
+      # PG18+ 的挂载点（见文件头说明）
+      - commerceagent-pgdata:/var/lib/postgresql
+      # 初始化脚本：仅在数据卷为空时执行一次
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  commerceagent-pgdata:
+    name: commerceagent-pgdata
