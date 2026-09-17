@@ -1,8 +1,13 @@
-# CommerceAgent — 本地 PostgreSQL（含 pgvector）
+# CommerceAgent — 本地 PostgreSQL（含 pgvector-capable 镜像）+ Adminer
 #
 # 用法（在仓库根目录执行）：
 #   cp .env.example .env                                            # 首次，填入你自己的密码
 #   docker compose --env-file .env -f infra/docker-compose.yml up -d
+#
+# Adminer 仅绑定 127.0.0.1，不对局域网/公网暴露：
+#   http://127.0.0.1:${ADMINER_PORT:-8081}
+# 登录时 Server 填 postgres（Docker Compose service 名），Database 填 commerceagent。
+# 日常查看优先使用 commerce_app / agent_app 验证真实权限边界；postgres 仅用于必要排查。
 #
 # 所有变量都带默认值，因此不提供 .env 也能直接起（便于快速验证）。
 #
@@ -46,6 +51,19 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+
+  adminer:
+    image: adminer:6.0.1
+    container_name: commerceagent-adminer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      # 只监听本机，避免把数据库管理界面暴露到局域网/公网。
+      - "127.0.0.1:${ADMINER_PORT:-8081}:8080"
 
 volumes:
   commerceagent-pgdata:
