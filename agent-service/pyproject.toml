@@ -40,11 +40,6 @@ select = [
     "S",    # flake8-bandit（安全问题，例如硬编码密码）
     "RUF",  # ruff 自带规则
 ]
-ignore = [
-    # 配置默认值里的开发用口令是刻意的本地占位，真实值来自环境变量
-    "S105",
-    "S106",
-]
 # 本项目的注释与 docstring 使用中文，全角标点是有意为之。
 # 这里逐一放行，而不是关掉 RUF002/RUF003 —— 关掉会同时失去对
 # 西里尔字母 а、希腊字母 ο 等"真同形字"冒充 ASCII 的检测能力。
@@ -55,8 +50,11 @@ allowed-confusables = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# 测试里允许 assert 与硬编码测试数据
+# 测试里允许 assert。
 "tests/**" = ["S101"]
+# settings.py 中的口令仅是本地开发占位默认值，真实环境应由环境变量覆盖；
+# 仅在这个配置文件放行，避免整个项目失去硬编码 secret 检测。
+"app/config/settings.py" = ["S105", "S106"]
 
 [tool.mypy]
 python_version = "3.13"
