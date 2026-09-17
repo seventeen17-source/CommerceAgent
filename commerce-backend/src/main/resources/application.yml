@@ -1,0 +1,63 @@
+# CommerceAgent — Java 业务后端配置
+#
+# 变量清单见仓库根 `.env.example`；本地覆盖：在仓库根 `cp .env.example .env`。
+# 所有变量都有默认值，因此不配 .env 也能在本机直接跑。
+#
+# 身份划分（见 specs/002-.../research.md 决策 18）：
+#   应用运行身份 = commerce_app —— 只拥有 commerce schema
+#   迁移运行身份 = migrator     —— 可在 commerce/agent/policy 建对象，Flyway 专用
+# 这就是为什么下面 datasource 与 flyway 用的是两组不同凭据：应用不该拿迁移权限。
+
+spring:
+  application:
+    name: commerce-backend
+
+  # 未显式指定 profile 时走 dev（本地/常规运行）。
+  # 测试显式使用 test profile —— 那时数据源由 Testcontainers 的 @ServiceConnection 注入，
+  # 见 src/test/resources/application-test.yml。
+  profiles:
+    default: dev
+
+  jpa:
+    # 表结构的权威是 Flyway；Hibernate 只允许校验，绝不允许自动改表
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: commerce
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    default-schema: commerce
+    schemas: commerce,agent,policy
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+---
+# dev profile：真实连接本地 PostgreSQL（infra/docker-compose.yml）。
+# test profile 不加载本节，因此测试不会去连 localhost。
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:commerceagent}
+    username: ${COMMERCE_APP_USER:commerce_app}
+    password: ${COMMERCE_APP_PASSWORD:commerce_app_dev_only}
+    hikari:
+      maximum-pool-size: 5
+
+  flyway:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:commerceagent}
+    user: ${MIGRATOR_USER:migrator}
+    password: ${MIGRATOR_PASSWORD:migrator_dev_only}
