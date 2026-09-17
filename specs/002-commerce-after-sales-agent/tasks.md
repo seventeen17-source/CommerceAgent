@@ -19,8 +19,8 @@
 
 - [ ] T001 创建 `commerce-backend/`、`agent-service/`、`web/`、`eval/`、`knowledge/policies/`、`infra/` 根目录，不创建无用微服务目录；创建并维护根 `README.md` 作为项目入口，只记录当前真实状态、设计入口、计划技术栈和第一实现目标，不提前填写未实测成果。
 - [X] T002 使用 Spring Initializr 生成 `commerce-backend/`：Java 21、Maven、Spring Boot 4.1.1、group `com.seventeen17`、artifact/name `commerce-backend`、package `com.seventeen17.commerceagent`；依赖 Spring Web、Spring Security、Validation、Spring Data JPA、PostgreSQL Driver、Flyway Migration、Actuator、Testcontainers；保留 `mvnw`、`mvnw.cmd`、`.mvn/`。
-- [ ] T003 [P] 使用 `uv init --python 3.13` 初始化 `agent-service/`，加入 FastAPI、Uvicorn、LangGraph、Pydantic Settings、httpx、PostgreSQL/async DB、pytest、pytest-asyncio；依赖解析后提交 `uv.lock`。
-- [ ] T004 [P] 使用 Vite React + TypeScript 初始化 `web/`：`npm create vite@latest web -- --template react-ts`，保留 Vite/TS 基线配置。
+- [X] T003 [P] 使用 `uv init --python 3.13` 初始化 `agent-service/`，加入 FastAPI、Uvicorn、LangGraph、Pydantic Settings、httpx、PostgreSQL/async DB、pytest、pytest-asyncio；依赖解析后提交 `uv.lock`。
+- [X] T004 [P] 使用 Vite React + TypeScript 初始化 `web/`：`npm create vite@latest web -- --template react-ts`，保留 Vite/TS 基线配置。
 - [ ] T005 配置 PostgreSQL 与逻辑 schema（`commerce`、`agent`、`policy`、可选 `eval`）到 `infra/docker-compose.yml` 和 `.env.example`；设计独立 DB role，使 Agent Service 对 `commerce.*` 无直接权限。
 - [ ] T006 [P] 在 `commerce-backend/pom.xml` 配置 Java format/static analysis/test 插件，在 `agent-service/pyproject.toml` 配置 Python lint/type-check。
 - [ ] T007 [P] 配置 dev/test/eval：`commerce-backend/src/main/resources/application.yml`、`commerce-backend/src/test/resources/application-test.yml`、`agent-service/app/config/settings.py`。
