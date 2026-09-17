@@ -17,11 +17,11 @@
 
 **目标**：只创建最小可运行项目骨架，不写业务功能。
 
-- [ ] T001 创建 `commerce-backend/`、`agent-service/`、`web/`、`eval/`、`knowledge/policies/`、`infra/` 根目录，不创建无用微服务目录；创建并维护根 `README.md` 作为项目入口，只记录当前真实状态、设计入口、计划技术栈和第一实现目标，不提前填写未实测成果。
+- [X] T001 创建并维护当前阶段真实需要的根项目结构与 `README.md`；`commerce-backend/`、`agent-service/`、`web/`、`infra/` 随对应 Setup Task 产生；`eval/`、`knowledge/policies/` 在首次产生真实内容的对应任务中创建，**不得仅为满足目录结构提交空目录**；根 `README.md` 只记录当前真实状态、设计入口、计划技术栈和第一实现目标，不提前填写未实测成果。
 - [X] T002 使用 Spring Initializr 生成 `commerce-backend/`：Java 21、Maven、Spring Boot 4.1.1、group `com.seventeen17`、artifact/name `commerce-backend`、package `com.seventeen17.commerceagent`；依赖 Spring Web、Spring Security、Validation、Spring Data JPA、PostgreSQL Driver、Flyway Migration、Actuator、Testcontainers；保留 `mvnw`、`mvnw.cmd`、`.mvn/`。
 - [X] T003 [P] 使用 `uv init --python 3.13` 初始化 `agent-service/`，加入 FastAPI、Uvicorn、LangGraph、Pydantic Settings、httpx、PostgreSQL/async DB、pytest、pytest-asyncio；依赖解析后提交 `uv.lock`。
 - [X] T004 [P] 使用 Vite React + TypeScript 初始化 `web/`：`npm create vite@latest web -- --template react-ts`，保留 Vite/TS 基线配置。
-- [X] T005 配置 PostgreSQL 与逻辑 schema（`commerce`、`agent`、`policy`、可选 `eval`）到 `infra/docker-compose.yml` 和 `.env.example`；设计独立 DB role，使 Agent Service 对 `commerce.*` 无直接权限。
+- [X] T005 配置 PostgreSQL 与逻辑 schema（`commerce`、`agent`、`policy`、可选 `eval`）到 `infra/docker-compose.yml` 和 `.env.example`；设计独立 DB role，使 Agent Service 对 `commerce.*` 无直接权限；允许使用 pgvector-capable 镜像，但 **T005 不启用 `vector` extension、不创建向量表**，是否启用留给 US6/T065。
 - [ ] T006 [P] 在 `commerce-backend/pom.xml` 配置 Java format/static analysis/test 插件，在 `agent-service/pyproject.toml` 配置 Python lint/type-check。
 - [ ] T007 [P] 配置 dev/test/eval：`commerce-backend/src/main/resources/application.yml`、`commerce-backend/src/test/resources/application-test.yml`、`agent-service/app/config/settings.py`。
 
@@ -72,7 +72,7 @@
 - [ ] T032 [US1] 在 `graph.py` / `routing.py` 连接显式 LangGraph：START → understand → resolve → evidence loop → eligibility → refund write → verify → finalize；包含最大 step/retry budget。
 - [ ] T033 [US1] 实现 Agent Run Create/Execute/Response Serialization：`api/runs.py`；只返回已验证业务 ID/事实，不接受模型自称成功。
 - [ ] T034 [US1] 实现最小 Customer Console：`web/src/features/chat/`，展示输入、run status、resolved order、final result 和可折叠 tool timeline。
-- [ ] T035 [US1] 添加 US1 Eval Case：正常退款、重复请求、unknown timeout recovery；`eval/datasets/v1/dev/us1_logistics_refund.yaml` + `eval/scorers/business_state.py`。
+- [ ] T035 [US1] 添加 US1 Eval Case：正常退款、重复请求、unknown timeout recovery；首次创建 `eval/`，并落地 `eval/datasets/v1/dev/us1_logistics_refund.yaml` + `eval/scorers/business_state.py`。
 
 **Week-2 Gate**：必须真实跑通 Web/API → Agent → Java Tool → PostgreSQL → exactly one RefundRequest → verified result + trace。未通过前禁止 MCP、Dashboard polish、Multi-Agent。
 
@@ -133,7 +133,7 @@
 该阶段不得阻塞 Portfolio MVP。如果 US1–US4、Safety、Eval 尚未稳定，可以整体延期。
 
 - [ ] T064 [P] [US6] 编写 effective-date、citation metadata、expired/conflict policy、retrieval prompt-injection Test。
-- [ ] T065 [US6] 如确认需要向量检索，创建 pgvector 与 `policy.policy_documents` / `policy.policy_chunks`；否则允许先使用版本化 Policy Lookup。
+- [ ] T065 [US6] 如确认需要向量检索，首次创建 `knowledge/policies/`，启用 pgvector extension，并创建 `policy.policy_documents` / `policy.policy_chunks`；否则允许先使用版本化 Policy Lookup，且不启用 vector extension。
 - [ ] T066 [P] [US6] 创建 synthetic AfterSalesPolicy 文档：general refund、logistics exception、electronics return、manual-review。
 - [ ] T067 [US6] 实现 Policy Ingestion/Chunking/Embedding（仅启用 Vector Retrieval 时）。
 - [ ] T068 [US6] 实现 metadata-filtered Policy Retrieval，返回 document code/version/effective date/section/score/conflict flags。
