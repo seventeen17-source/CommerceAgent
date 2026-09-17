@@ -4,8 +4,9 @@
 # 执行时机：仅在数据卷为空时，由 postgres 官方镜像的 entrypoint 执行一次。
 #
 # 职责边界（重要）：
-#   本脚本只创建【角色 + schema + 权限】，不创建任何业务表。
+#   本脚本只创建【角色 + schema + 权限】，不创建任何业务表，也不启用可选扩展。
 #   表的权威是 Flyway（commerce-backend/src/main/resources/db/migration），
+#   pgvector extension 是否启用由 US6 / T065 在真实需要向量检索时决定。
 #   见 specs/002-commerce-after-sales-agent/research.md 决策 18。
 #
 # 权限模型：
@@ -56,10 +57,7 @@ psql -v ON_ERROR_STOP=1 \
     GRANT USAGE, CREATE ON SCHEMA agent  TO :"agent_user";
     GRANT USAGE, CREATE ON SCHEMA policy TO :"agent_user";
 
-    -- 6) pgvector：只在 policy schema 启用，且暂不建任何向量表（US6 才使用）
-    CREATE EXTENSION IF NOT EXISTS vector SCHEMA policy;
-
-    -- 7) 默认权限：migrator 之后建的表/序列，自动授权给对应应用角色
+    -- 6) 默认权限：migrator 之后建的表/序列，自动授权给对应应用角色
     ALTER DEFAULT PRIVILEGES FOR ROLE :"migrator_user" IN SCHEMA commerce
         GRANT ALL ON TABLES TO :"commerce_user";
     ALTER DEFAULT PRIVILEGES FOR ROLE :"migrator_user" IN SCHEMA commerce
