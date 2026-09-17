@@ -29,7 +29,15 @@
 
 Skill 的规范来源：`seventeen17-source/project-coding-tutor`。
 
-如果当前环境存在 `.agents/skills/project-coding-tutor/SKILL.md`，先读取并遵循它；如果该 Skill 已作为全局/本地 Skill 安装，则直接调用它。默认使用 **Level 2 — Pair**。
+如果该 Skill 已作为全局/本地 Skill 安装，则直接调用它。CommerceAgent 仓库中的自定义 Skill 源码统一维护在 `skills_` 分支；不要为了让当前工作分支可见而把 `project-coding-tutor` 复制回 `main` 或功能分支。
+
+### Skill 分支规则
+
+- `main` / 功能分支允许保留 **Spec Kit 初始化自动生成的 `.agents/skills/speckit-*` 项目工具**；它们属于当前仓库的 Spec Kit 工作流资产。
+- `project-coding-tutor` 等**自定义 Skill**统一放在 `skills_` 分支，或安装为本地/全局 Skill；不得因为合并其他阶段分支而顺带带回 `main`。
+- 如果 `AGENTS.md` 声明需要某个自定义 Skill，但当前环境不可发现，应先解决安装/发现问题，而不是复制 Skill 源码污染业务分支。
+
+默认使用 **Level 2 — Pair**。
 
 教学要求：
 
