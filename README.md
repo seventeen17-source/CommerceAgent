@@ -36,6 +36,13 @@ Verified Result + Structured Trace
 - **政策检索不等于业务授权**：非结构化政策只能用于解释和引用，不能覆盖结构化业务规则。
 - **Trace 不保存隐藏思维链**：只记录状态迁移、Tool、参数摘要、结果、错误、重试、审批和写后验证。
 
+## 项目总架构入口
+
+如果你想从一张总图理解整个项目，包括 Web、React、TypeScript、Vite、npm、Python、FastAPI、LangGraph、Java、Spring Boot、PostgreSQL、Docker、Eval、T001–T083 的关系和完整请求链路，先看：
+
+- [`docs/PROJECT_ARCHITECTURE.md`](docs/PROJECT_ARCHITECTURE.md)：**CommerceAgent 全项目架构与学习地图**
+- [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md)：当前做到哪一阶段、下一步做什么
+
 ## 仓库结构
 
 ```text
