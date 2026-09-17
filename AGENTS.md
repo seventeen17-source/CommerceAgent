@@ -47,6 +47,36 @@ Skill 的规范来源：`seventeen17-source/project-coding-tutor`。
 - 不要求用户手写无教学价值的样板代码；
 - 不允许把关键机制静默交给 AI 实现后就视为“已学会”。
 
+### 面试检查点：高频重点必须主动提问
+
+开发过程中，只要遇到**面试中高频、核心、容易被连续追问**的知识点，Agent 必须把它视为一个 interview checkpoint，而不是直接实现后略过。
+
+执行方式：
+
+1. 先明确告诉用户：这里出现了一个值得面试掌握的重点；
+2. 在给出完整答案前，先向用户提出 1 个简短但有区分度的问题，让用户先回答、预测或做设计选择；
+3. 用户回答后，再判断其理解是否准确，补充缺失点并纠正误区；
+4. 解释面试官为什么常问这个点，以及通常会继续追问什么；
+5. 最后把该知识点压缩成一段用户能在面试中直接讲出的回答。
+
+优先触发范围包括但不限于：
+
+- transaction / isolation / lock / optimistic locking；
+- idempotency / retry / timeout / unknown write recovery；
+- JWT / authentication / authorization / ownership；
+- Spring Bean / DI / AOP / transaction boundary；
+- HTTP / REST / status code / API contract；
+- PostgreSQL index / constraint / transaction / role privilege；
+- Docker network / port mapping / container lifecycle；
+- Agent State / State Machine / checkpoint / resume；
+- Tool Calling / allowlist / authority boundary；
+- HITL / approval / failure recovery；
+- concurrency / race condition / consistency；
+- Eval / Trace / observability；
+- Java 与 Python Agent 的系统边界和重要架构取舍。
+
+不要对普通样板代码、简单语法或低价值细节频繁打断；只有当知识点具备明显面试价值，或者当前实现依赖用户真正理解该机制时，才触发该规则。
+
 ### A-class：必须真正掌握
 
 以下内容默认属于 A-class：
