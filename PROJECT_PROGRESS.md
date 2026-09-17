@@ -15,7 +15,7 @@
   - T006 — Java 侧 Spotless 3.10.2（palantirJavaFormat）+ SpotBugs 4.10.4.1 + JaCoCo 0.8.15；Python 侧 ruff 0.16.8 + mypy 2.3.1。`mvnw verify` **BUILD SUCCESS**；`ruff check` / `ruff format --check` / `mypy app` 全部通过
   - T007 — `application.yml`（含 dev profile，应用身份 `commerce_app` / 迁移身份 `migrator` 分离）、`application-test.yml`（数据源由 Testcontainers 注入）、`app/config/settings.py`。实测 `mvnw spring-boot:run` **Started CommerceBackendApplication in 4.538 seconds**，Flyway 以 `migrator` 身份把 history 表建在 `commerce` schema
 - **当前优先任务**：Phase 2 — T008（初始 Flyway migration）
-- **下一 Gate**：进入 Phase 2 需要你确认 Phase 1 收尾
+- **下一 Gate**：Phase 1 完成标准已全部满足；**进入 Phase 2 需你确认**
 - **当前 Blocker**：无
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
@@ -69,11 +69,11 @@
 - [x] 三个工程最小启动 / build 成功
 - [x] PostgreSQL / Docker Compose 基础环境可启动（实测 healthy；含 schema 归属与 role 边界验证）
 - [x] 没有提前加入 US6 / MCP / Multi-Agent 等非当前依赖；`vector` extension 未在 T005 启用（重置数据卷后实测 `pg_extension` 中为 0）
-- [ ] Git diff 只包含预期脚手架和基础配置（T006/T007 提交后判定）
+- [x] Git diff 只包含预期脚手架和基础配置（Phase 1 收尾后 `git status` 干净）
 - [x] 当天 `docs/devlog/YYYY-MM-DD.md` 已记录真实进展、问题、决策和 Git 证据（2026-09-16 记 T001/T002；2026-09-17 记 T003–T007）
 
 > 「三个工程最小启动 / build 成功」的实测依据：Java `mvnw verify` BUILD SUCCESS（含 Testcontainers 起真实 PostgreSQL）；Web `npm.cmd run build` 产出 `dist/`；Python `uv run python --version` → 3.13.14、`mypy app` 通过且 `settings` 可加载。Python 的应用入口（`app/main.py`）属 T018。
-> 「Git diff 只包含预期脚手架和基础配置」待本阶段最后一次提交完成后判定。
+> 「Git diff 只包含预期脚手架和基础配置」已验证：Phase 1 收尾后工作区干净，改动全部落在 `2a5dbde`（T006 Java）/ `2d204a2`（T006 Python）/ `f371be7`（T007 配置）/ `d47a121`（文档）四个提交内。
 
 ## 维护规则
 
