@@ -1,7 +1,9 @@
 # CommerceAgent — Java 业务后端配置
 #
-# 变量清单见仓库根 `.env.example`；本地覆盖：在仓库根 `cp .env.example .env`。
-# 所有变量都有默认值，因此不配 .env 也能在本机直接跑。
+# 变量清单见仓库根 `.env.example`。
+# 注意：Spring Boot 不会自动读取仓库根 `.env`；下面的 ${...} 来自进程环境变量或 JVM/System Property。
+# 根 `.env` 主要供 Docker Compose 使用。若直接运行 `mvnw.cmd spring-boot:run` 并希望覆盖默认值，
+# 请先把对应变量注入当前 shell/IDE 进程环境。所有变量都有开发默认值，因此不注入也能在本机默认配置下运行。
 #
 # 身份划分（见 specs/002-.../research.md 决策 18）：
 #   应用运行身份 = commerce_app —— 只拥有 commerce schema
