@@ -16,6 +16,55 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.8",
 ]
+
+[tool.ruff]
+# 与 Java 侧保持一致的行宽取向；Python 社区主流为 88/100，这里取 100
+line-length = 100
+target-version = "py313"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort（导入排序）
+    "UP",   # pyupgrade（用新语法）
+    "B",    # flake8-bugbear（常见陷阱）
+    "ASYNC",# flake8-async（阻塞调用等异步陷阱）
+    "S",    # flake8-bandit（安全问题，例如硬编码密码）
+    "RUF",  # ruff 自带规则
+]
+ignore = [
+    # 配置默认值里的开发用口令是刻意的本地占位，真实值来自环境变量
+    "S105",
+    "S106",
+]
+# 本项目的注释与 docstring 使用中文，全角标点是有意为之。
+# 这里逐一放行，而不是关掉 RUF002/RUF003 —— 关掉会同时失去对
+# 西里尔字母 а、希腊字母 ο 等"真同形字"冒充 ASCII 的检测能力。
+allowed-confusables = [
+    "，", "。", "、", "：", "；", "！", "？",
+    "（", "）", "【", "】", "《", "》",
+    "“", "”", "‘", "’", "—", "…",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试里允许 assert 与硬编码测试数据
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_ignores = true
+show_error_codes = true
+# LangGraph / psycopg 等第三方库的 stub 完整度不一致，逐个按需处理而不是全局放水
+[[tool.mypy.overrides]]
+module = ["langgraph.*", "langgraph_checkpoint_postgres.*"]
+ignore_missing_imports = true
+
