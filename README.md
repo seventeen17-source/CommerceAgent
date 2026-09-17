@@ -2,7 +2,7 @@
 
 企业电商售后执行与异常处置 Agent。
 
-> 当前状态：**设计阶段已完成，正式实现即将开始。**
+> 当前状态：**Phase 1 — Setup**。T002–T005 已完成并有本地验证证据，当前准备进入 T006–T007。
 >
 > 仓库中的性能、安全、时延、成本和成功率等指标，在没有实际 Eval 运行产物之前都只视为目标，不视为已达成结果。
 
@@ -36,6 +36,22 @@ Verified Result + Structured Trace
 - **政策检索不等于业务授权**：非结构化政策只能用于解释和引用，不能覆盖结构化业务规则。
 - **Trace 不保存隐藏思维链**：只记录状态迁移、Tool、参数摘要、结果、错误、重试、审批和写后验证。
 
+## 当前实现进度
+
+Phase 1 当前已经完成：
+
+- **T002**：Spring Initializr 生成 `commerce-backend/`，Java 21 + Spring Boot 4.1.1，Maven Wrapper 可用；
+- **T003**：`uv init` 生成 `agent-service/`，Python 3.13，依赖与 `uv.lock` 已落地；
+- **T004**：Vite React + TypeScript 生成 `web/`，前端 build 已验证；
+- **T005**：PostgreSQL + `commerce` / `agent` / `policy` schema + 独立 DB role + Docker Compose 已配置，并实测 `agent_app` 无权访问 `commerce.*`。
+
+当前下一步：
+
+- **T006**：Java/Python 代码质量与静态检查配置；
+- **T007**：dev/test/eval 环境配置与数据库连接配置。
+
+> `pgvector/pgvector` 镜像已作为未来能力基线使用，但 **T005 不启用 `vector` extension，也不创建向量表**；是否启用向量检索由 US6 / T065 决定。
+
 ## 项目总架构入口
 
 如果你想从一张总图理解整个项目，包括 Web、React、TypeScript、Vite、npm、Python、FastAPI、LangGraph、Java、Spring Boot、PostgreSQL、Docker、Eval、T001–T083 的关系和完整请求链路，先看：
@@ -46,21 +62,22 @@ Verified Result + Structured Trace
 ## 仓库结构
 
 ```text
-.specify/
-  memory/constitution.md
-
-specs/
-  001-agent-career-project/
-  002-commerce-after-sales-agent/
+commerce-backend/   # Java 业务后端
+agent-service/      # Python Agent Service
+web/                # React + TypeScript Web
+infra/              # PostgreSQL / Docker Compose
+specs/              # Spec / Plan / Research / Tasks / Contracts
+.specify/           # Spec Kit 项目配置
+.agents/skills/     # Spec Kit 初始化生成的项目内 speckit-* 工具
 ```
 
-### `001-agent-career-project`
+### `specs/001-agent-career-project`
 
 回答：**为什么最终选择 CommerceAgent？**
 
 包含招聘市场调研、能力地图、项目候选、Fatal Gate、评分、Red Team 和最终选题依据。
 
-### `002-commerce-after-sales-agent`
+### `specs/002-commerce-after-sales-agent`
 
 回答：**CommerceAgent 具体怎么做？**
 
@@ -82,8 +99,6 @@ specs/
 - PostgreSQL
 - Docker Compose
 - JUnit / Testcontainers / pytest
-
-当前尚未提交正式实现代码；后续基础工程将使用 Spring Initializr、`uv init` 和 Vite 官方脚手架生成。
 
 ## 第一实现目标
 
