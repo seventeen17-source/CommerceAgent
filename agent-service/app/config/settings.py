@@ -5,24 +5,29 @@
 而不是在运行到一半时才拿到 None。
 
 配置来源优先级：进程环境变量 > `agent-service/.env`（该文件被 gitignore）。
-仓库根目录的 `.env` 是给 docker compose 用的，两者用途不同，不要混。
+这里把 `.env` 路径固定为 `agent-service/.env`，避免从仓库根目录、IDE 或其他工作目录
+启动进程时因为当前工作目录变化而读错配置文件。仓库根目录的 `.env` 主要给 Docker Compose
+使用，不会被 Java/Spring Boot 或本模块自动共享读取。
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_AGENT_SERVICE_ROOT = Path(__file__).resolve().parents[2]
+_AGENT_ENV_FILE = _AGENT_SERVICE_ROOT / ".env"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_AGENT_ENV_FILE,
         env_file_encoding="utf-8",
-        # 仓库根 .env 里还有 POSTGRES_SUPERUSER / COMMERCE_APP_* / MIGRATOR_* 等
-        # 与本服务无关的变量，必须忽略而不是报错
+        # 该 .env 若包含额外变量，必须忽略而不是报错。
         extra="ignore",
         # pydantic v2 默认保护 "model_" 前缀，而 MODEL_NAME / MODEL_PROVIDER
-        # 正是本项目的配置项，必须显式放开
+        # 正是本项目的配置项，必须显式放开。
         protected_namespaces=(),
     )
 
