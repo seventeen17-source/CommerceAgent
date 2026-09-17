@@ -147,6 +147,36 @@ Kubernetes 不进入核心范围。
 
 Eval Run 必须记录模型配置，以保证数字可追溯。
 
+## 决策 16 — Python 侧数据库驱动使用 psycopg 3
+
+**决定**：`agent-service` 使用 **psycopg 3**（`psycopg[binary,pool]`）访问 PostgreSQL。不引入 asyncpg；V1 不引入 SQLAlchemy / Alembic。
+
+**原因**：
+
+1. LangGraph 的 Postgres checkpointer 官方包 `langgraph-checkpoint-postgres` 的依赖声明即为 `psycopg>=3.2.0` + `psycopg-pool>=3.2.0`。决策 9 要求 checkpoint 必须持久化，因此 psycopg 是既有的传递依赖，**不是额外选型**。
+2. psycopg 3 原生支持 async（`AsyncConnection`），满足本服务的异步访问需求；再引入 asyncpg 会形成两套驱动并存。
+3. 计划已将 Flyway（Java 侧）定为 V1 的单一迁移执行者，因此 Python 侧不需要 Alembic。
+
+**影响**：`agent` schema 的自有表（`agent_runs`、`tool_executions` 等）在 T017 由 psycopg 直接以 SQL 访问；若后续出现复杂查询或映射需求，再单独评估引入查询层，并需要新的决策记录。
+
+**验证方式**：T003 已在 `agent-service/pyproject.toml` 落地 `psycopg[binary,pool]` 与 `langgraph-checkpoint-postgres`，并经 `uv.lock` 解析与导入 smoke test 验证。
+
+## 决策 17 — 前端工具链版本跟随 create-vite 官方模板
+
+**决定**：`web/` 使用 `create-vite` 官方 `react-ts` 模板，其依赖版本组合（Vite 8.x、React 19.x、TypeScript ~6.0.x、`@vitejs/plugin-react` 6.x、oxlint）**原样保留**，不手工改写版本。
+
+**原因**：
+
+1. 该组合由官方模板验证过。手工改写（例如把 TypeScript 退回 5.x）会跳出已验证组合，并且违反 AGENTS.md §7「不得手写仿官方脚手架」。
+2. 原 `plan.md` 写的是 `TypeScript 5.x`，与模板实际钉的 `~6.0.2` 不一致。项目前端从零开始，没有既有 TS 5.x 代码需要保持兼容，跟随当前官方组合的长期升级成本更低。
+
+**影响**：
+
+- `plan.md` 的版本声明同步修订为 `TypeScript 6.0.x`。
+- 模板的 lint 工具是 **oxlint**，不是 ESLint。后续任何前端 lint/格式化任务必须以 oxlint 的配置与 CLI 为准，不能照抄 ESLint 配置。
+
+**验证方式**：T004 实装结果为 `typescript 6.0.3 / vite 8.3.0 / react 19.3.0 / @vitejs/plugin-react 6.1.1 / oxlint 1.83.0`，且 `npm run build`（`tsc -b && vite build`）成功产出 `dist/`。
+
 ## 明确拒绝的技术/功能
 
 核心范围拒绝：
