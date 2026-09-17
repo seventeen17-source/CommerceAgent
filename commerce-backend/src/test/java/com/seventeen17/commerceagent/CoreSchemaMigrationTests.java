@@ -33,14 +33,12 @@ class CoreSchemaMigrationTests {
 
     @Test
     void flywayCreatesAllT008CoreTables() {
-        List<String> actualTables = jdbcTemplate.queryForList(
-                """
+        List<String> actualTables = jdbcTemplate.queryForList("""
                 SELECT table_schema || '.' || table_name
                 FROM information_schema.tables
                 WHERE table_schema IN ('commerce', 'agent')
                   AND table_type = 'BASE TABLE'
-                """,
-                String.class);
+                """, String.class);
 
         assertTrue(
                 actualTables.containsAll(EXPECTED_CORE_TABLES),
@@ -49,15 +47,13 @@ class CoreSchemaMigrationTests {
 
     @Test
     void flywayReachedVersion001() {
-        String version = jdbcTemplate.queryForObject(
-                """
+        String version = jdbcTemplate.queryForObject("""
                 SELECT version
                 FROM commerce.flyway_schema_history
                 WHERE success = true
                 ORDER BY installed_rank DESC
                 LIMIT 1
-                """,
-                String.class);
+                """, String.class);
 
         assertEquals("001", version);
     }
