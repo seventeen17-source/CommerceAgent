@@ -46,16 +46,15 @@ class CoreSchemaMigrationTests {
     }
 
     @Test
-    void flywayReachedVersion001() {
-        String version = jdbcTemplate.queryForObject("""
-                SELECT version
+    void flywayVersion001Succeeded() {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
                 FROM commerce.flyway_schema_history
-                WHERE success = true
-                ORDER BY installed_rank DESC
-                LIMIT 1
-                """, String.class);
+                WHERE version = '001'
+                  AND success = true
+                """, Integer.class);
 
-        assertEquals("001", version);
+        assertEquals(1, count);
     }
 
     @Test
