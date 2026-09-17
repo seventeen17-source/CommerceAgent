@@ -37,7 +37,7 @@ services:
       MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:-migrator_dev_only}
 
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
 
     volumes:
       # PG18+ 的挂载点（见文件头说明）
