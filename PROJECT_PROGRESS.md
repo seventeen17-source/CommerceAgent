@@ -20,7 +20,7 @@
   - T015 — 显式 `AgentState`（`agent-service/app/agent/state.py`）：Pydantic 状态 schema + `PrincipalRole`/`RunStatus`/`WriteStatus`/`VerificationStatus` 四个枚举，`extra="forbid"` 拒绝未声明字段（含 raw credential），model validator 对 step/retry budget fail closed；Python 门禁四条命令全部通过：`ruff check` **All checks passed**、`ruff format --check` **7 files**、`mypy app` **Success 5 files**、`pytest -q` **11 passed**
 - **当前优先任务**：T016 — 类型化 Java API Client（`agent-service/app/clients/commerce_client.py`）
 - **下一 Gate**：T016–T018 完成 Commerce Client / Run+Trace 持久化 / FastAPI security skeleton 后，Phase 2 收口，进入 US1 MVP
-- **当前 Blocker**：无
+- **当前 Blocker**：无；T016 前置 contract hardening 已放在 `foundation/t016-contract-hardening`：修复 eligibility `ruleVersion` 类型、Java-owned enum 前向兼容策略，并新增 `GET /api/v1/me` 作为 Python 获取权威 principal role 的边界。该分支尚需用户本地 Java/Python 质量门禁复验后再视为正式收口。
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
   - 本机 `core.autocrlf=true`；`infra/` 下的脚本与 `.env*` 已由根 `.gitattributes` 钉为 LF（否则容器内执行会 `bad interpreter`）
@@ -32,6 +32,7 @@
   - Python 侧验收命令：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`、`uv run pytest -q`（四条全绿才算通过）
 - **未决项**：
   - `.specify/feature.json` 本地仍指向 `specs/001-agent-career-project`，后续应切换为 `specs/002-commerce-after-sales-agent`
+  - T015 后续跨服务审查又发现并已在 `foundation/t016-contract-hardening` 处理：① OpenAPI 的 Java-owned enum 不应让 T016 生成封闭消费端枚举；② `ruleVersion` 契约误写为 string；③ Python 无法仅凭当前 JWT 得到权威 role，因此增加 Java `GET /api/v1/me`；④ Evidence/Verification 开放字典增加递归敏感信息拒绝。T017 另明确要求并发 resume 使用 row lock/CAS/version 防分叉。
   - T015 的 3 个评审发现已全部在 T015 内处置完毕（详见 `docs/devlog/2026-09-18.md` 的「T015 review findings 处置结果」）：②③ 采纳并落地，① 经判断**拒绝**并把"跨服务取值策略"写进 `state.py`（远程拥有的值域不镜像成 `StrEnum`，未知值受控降级为 `SAFE_STOP`）
   - 根 `.gitignore` 建议补 `.mypy_cache/`、`.ruff_cache/`（当前靠工具默认行为兜底）
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
