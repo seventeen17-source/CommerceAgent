@@ -35,7 +35,7 @@
 
 - [X] T008 创建初始 Flyway migration：`commerce.users`、`commerce.orders`、`commerce.order_items`、`commerce.shipments`、`commerce.logistics_events`、`commerce.after_sales_rules`、项目自有 `agent.agent_runs`、`agent.tool_executions`、`commerce.audit_logs`；文件 `commerce-backend/src/main/resources/db/migration/V001__core_schema.sql`。第三方 LangGraph checkpoint 表若由库自管理，放到独立 schema 并按 `research.md` 记录 migration 例外。
 - [X] T009 [P] 实现 User、Order、OrderItem、Shipment、LogisticsEvent JPA Entity/Repository：`commerce-backend/src/main/java/com/seventeen17/commerceagent/order/`、`logistics/`；保留 immutable ownership、optimistic `version`、权威价格/状态。
-- [ ] T010 [P] 实现 `AfterSalesRule` 持久化：`eligibility/`；包含唯一 `rule_code`、version/effective dates、物流/退货/金额/审批阈值、`allowed_action`、`active`。
+- [X] T010 [P] 实现 `AfterSalesRule` 持久化：`eligibility/`；包含唯一 `rule_code`、version/effective dates、物流/退货/金额/审批阈值、`allowed_action`、`active`。
 - [ ] T011 实现本地 JWT 认证和 role-aware principal：`security/`；Customer API 只能从 principal 推导 ownership。
 - [ ] T012 [P] 实现与 `contracts/error-contracts.md` 对齐的统一 Error Envelope：`common/error/`。
 - [ ] T013 [P] 实现结构化业务/安全 Audit Writer：`audit/`；禁止保存 hidden chain-of-thought 和 raw token。
