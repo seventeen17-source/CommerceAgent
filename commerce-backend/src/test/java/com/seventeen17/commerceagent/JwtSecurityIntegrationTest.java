@@ -65,8 +65,7 @@ class JwtSecurityIntegrationTest {
     void tamperedJwtSignatureIsRejected() throws Exception {
         seedUser("t011-customer-tampered", "t011-customer-tampered", UserRole.CUSTOMER, UserStatus.ACTIVE);
         String token = localJwtIssuer.issue("t011-customer-tampered");
-        char replacement = token.charAt(token.length() - 1) == 'A' ? 'B' : 'A';
-        String tampered = token.substring(0, token.length() - 1) + replacement;
+        String tampered = tamperSignature(token);
 
         mockMvc.perform(get("/__test/security/principal").header("Authorization", "Bearer " + tampered))
                 .andExpect(status().isUnauthorized());
@@ -101,6 +100,20 @@ class JwtSecurityIntegrationTest {
 
         mockMvc.perform(get("/__test/security/principal").header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized());
+    }
+
+    private static String tamperSignature(String token) {
+        String[] parts = token.split("\\.", -1);
+        if (parts.length != 3 || parts[2].length() < 3) {
+            throw new IllegalArgumentException("Expected compact JWT with a signature segment");
+        }
+
+        int index = parts[2].length() / 2;
+        char current = parts[2].charAt(index);
+        char replacement = current == 'A' ? 'B' : 'A';
+        String tamperedSignature =
+                parts[2].substring(0, index) + replacement + parts[2].substring(index + 1);
+        return parts[0] + "." + parts[1] + "." + tamperedSignature;
     }
 
     private String encode(String subject, Instant issuedAt, Instant expiresAt, String roleClaim) {

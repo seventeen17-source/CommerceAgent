@@ -64,8 +64,7 @@ class ErrorEnvelopeIntegrationTest {
     void invalidBearerTokenUsesUnifiedErrorEnvelope() throws Exception {
         seedUser("t012-invalid-token");
         String token = localJwtIssuer.issue("t012-invalid-token");
-        char replacement = token.charAt(token.length() - 1) == 'A' ? 'B' : 'A';
-        String tampered = token.substring(0, token.length() - 1) + replacement;
+        String tampered = tamperSignature(token);
 
         MvcResult result = mockMvc.perform(
                         get("/__test/errors/business").header("Authorization", "Bearer " + tampered))
@@ -138,6 +137,20 @@ class ErrorEnvelopeIntegrationTest {
         assertTrue(body.contains("\"errorCode\":\"ACCESS_DENIED\""));
         assertTrue(body.contains("\"retryable\":false"));
         assertTrue(body.contains("\"traceId\":\"" + traceId + "\""));
+    }
+
+    private static String tamperSignature(String token) {
+        String[] parts = token.split("\\.", -1);
+        if (parts.length != 3 || parts[2].length() < 3) {
+            throw new IllegalArgumentException("Expected compact JWT with a signature segment");
+        }
+
+        int index = parts[2].length() / 2;
+        char current = parts[2].charAt(index);
+        char replacement = current == 'A' ? 'B' : 'A';
+        String tamperedSignature =
+                parts[2].substring(0, index) + replacement + parts[2].substring(index + 1);
+        return parts[0] + "." + parts[1] + "." + tamperedSignature;
     }
 
     private String tokenFor(String userId) {
