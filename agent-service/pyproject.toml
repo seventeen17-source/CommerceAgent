@@ -30,7 +30,10 @@ testpaths = ["tests"]
 # 与 Java 侧保持一致的行宽取向；Python 社区主流为 88/100，这里取 100
 line-length = 100
 target-version = "py313"
-src = ["app", "tests"]
+# 导入根是项目根目录：包名是 `app.*`（因为 `app/__init__.py` 存在），
+# 不是 `agent.*`。曾误配为 ["app", "tests"]，导致 ruff 把项目自己的
+# `app.*` 判成第三方库，进而给出"把 app 与 pytest 合并为一组"的错误建议。
+src = ["."]
 
 [tool.ruff.lint]
 select = [
@@ -52,6 +55,10 @@ allowed-confusables = [
     "（", "）", "【", "】", "《", "》",
     "“", "”", "‘", "’", "—", "…",
 ]
+
+[tool.ruff.lint.isort]
+# 显式声明项目自身的一等包，避免再次被 src 推断误导。
+known-first-party = ["app"]
 
 [tool.ruff.lint.per-file-ignores]
 # 测试里允许 assert。
