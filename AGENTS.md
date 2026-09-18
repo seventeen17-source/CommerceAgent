@@ -49,6 +49,36 @@
 
 对 B-class 样板工作可以加速，但仍必须说明它在总图哪一层、连接谁、为什么存在。
 
+### 面试检查点：高频重点必须主动提问
+
+开发过程中，只要遇到**面试中高频、核心、容易被连续追问**的知识点，Agent 必须把它视为一个 interview checkpoint，而不是直接实现后略过。
+
+执行方式：
+
+1. 先明确告诉用户：这里出现了一个值得面试掌握的重点；
+2. 在给出完整答案前，先向用户提出 1 个简短但有区分度的问题，让用户先回答、预测或做设计选择；
+3. 用户回答后，再判断其理解是否准确，补充缺失点并纠正误区；
+4. 解释面试官为什么常问这个点，以及通常会继续追问什么；
+5. 最后把该知识点压缩成一段用户能在面试中直接讲出的回答。
+
+优先触发范围包括但不限于：
+
+- transaction / isolation / lock / optimistic locking；
+- idempotency / retry / timeout / unknown write recovery；
+- JWT / authentication / authorization / ownership；
+- Spring Bean / DI / AOP / transaction boundary；
+- HTTP / REST / status code / API contract；
+- PostgreSQL index / constraint / transaction / role privilege；
+- Docker network / port mapping / container lifecycle；
+- Agent State / State Machine / checkpoint / resume；
+- Tool Calling / allowlist / authority boundary；
+- HITL / approval / failure recovery；
+- concurrency / race condition / consistency；
+- Eval / Trace / observability；
+- Java 与 Python Agent 的系统边界和重要架构取舍。
+
+不要对普通样板代码、简单语法或低价值细节频繁打断；只有当知识点具备明显面试价值，或者当前实现依赖用户真正理解该机制时，才触发该规则。
+
 ### 通用教学要求
 
 - 默认中文解释；代码、类名、字段、API、命令和错误信息保持原始技术语言；
@@ -59,6 +89,7 @@
 - A-class（Agent State、Tool Calling、authority boundary、JWT/ownership、transaction/idempotency、retry/timeout、checkpoint/resume、HITL、failure recovery、Eval/Trace、重要架构取舍）至少让用户完成一次预测、设计选择、解释原因或错误方案判断。
 
 自定义 `project-coding-tutor` Skill 仍统一维护在 `skills_` 分支或本地/全局安装；不要复制 Skill 源码污染功能分支。
+
 ## 3. 每次开发先看“现在该干嘛”
 
 开始一次开发会话前：
@@ -150,3 +181,21 @@
 - 非必要微服务拆分。
 
 所有量化成功率、性能、安全、成本结论都必须来自真实可复现 Eval，不得把目标值写成已达成结果。
+
+## 9. Java 质量门禁规则
+
+Java 代码的任务验收必须以完整质量门禁为准，而不是“代码写完”或“测试通过”即完成。
+
+固定规则：
+
+1. 新增或修改 Java 文件时，提交前必须按仓库 Spotless / Palantir Java Format 约定整理；不要把格式修复长期留给用户本地。
+2. `mvnw.cmd verify` 是 Java 任务的最终验收命令；只有看到 **BUILD SUCCESS** 才能把对应 Txxx 标记为完成。
+3. 单元/集成测试全部通过但 Spotless 或 SpotBugs 失败时，任务仍然是“待验收”，不得提前勾选。
+4. SpotBugs 告警必须先判断是否代表真实设计问题：
+   - 如果是领域对象可变引用泄漏、序列化问题、并发/资源问题等真实缺陷，应优先修设计；
+   - 如果是框架约定导致的可证明误报（例如 Spring singleton 构造器注入被 `EI_EXPOSE_REP2` 误判），允许做**最窄范围**的 exclude/suppression，并在代码或配置中写清理由；
+   - 禁止为了过门禁全局关闭整个 SpotBugs bug pattern。
+5. 不允许通过修改 `verify` 生命周期让 Spotless/SpotBugs 自动忽略失败；`verify` 保持“检查而不偷偷修源代码”的验收语义。
+6. 用户本地是最终构建事实来源；远端提交成功不等于本地验收成功。
+
+本规则适用于后续所有 Java Txxx 任务，无需用户重复提醒。
