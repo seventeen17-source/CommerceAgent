@@ -16,58 +16,49 @@
 
 `specs/001-agent-career-project/` 已完成，只作为招聘研究、选题和历史决策证据，不作为当前实现的直接规格。
 
-## 2. 默认教学模式：project-coding-tutor
+## 2. 默认教学模式：Map-first Project Teaching Protocol
 
-对以下任务，必须优先使用 `project-coding-tutor` 的教学方式：
+**本仓库的教学协议高于任何单独 Skill。** 任何 Agent（ChatGPT / Codex / 其他编码 Agent）进入本仓库后，只要执行开发、调试、架构、测试或教学任务，就必须先遵守 `docs/LEARNING_PROTOCOL.md`。即使当前环境没有安装 `project-coding-tutor`，也不得退化为“只完成任务、不解释项目位置”的赶工模式。
 
-- 编写或修改实现代码；
-- 调试错误；
-- 设计/调整架构；
-- 编写关键测试；
-- 学习 Spring / Python / FastAPI / LangGraph / Agent 工程；
-- 解释项目中的关键机制或准备面试。
+`project-coding-tutor` 仍可作为辅助 Skill 使用，但它不是本仓库教学规则的唯一载体，也不能覆盖 `docs/LEARNING_PROTOCOL.md`。
 
-Skill 的规范来源：`seventeen17-source/project-coding-tutor`。
+### 每个 Txxx 开始前的强制定位卡
 
-如果当前环境存在 `.agents/skills/project-coding-tutor/SKILL.md`，先读取并遵循它；如果该 Skill 已作为全局/本地 Skill 安装，则直接调用它。默认使用 **Level 2 — Pair**。
+任何 Agent 在开始实现一个 Txxx 前，必须先用用户能理解的语言回答以下 8 项，然后才能进入代码：
 
-教学要求：
+1. 当前阶段；
+2. 当前系统层；
+3. 上游是谁；
+4. 下游是谁；
+5. 输入是什么；
+6. 输出是什么；
+7. 它解决什么问题、不做会怎样；
+8. 它在最终 Agent 主链中的位置（画 3–8 行局部数据流图）。
 
-- 默认使用中文解释，代码、类名、字段、API、命令和错误信息保持原始技术语言；
+如果用户表现出“我只是在搭环境、不知道自己在干什么”的感觉，Agent 必须优先恢复总体地图，而不是继续堆代码。
+
+### 每个 Txxx 的固定教学顺序
+
+默认顺序：
+
+`总体地图定位 → 本 T 的局部链路 → 1–2 个核心概念 → 预测/设计 checkpoint → 小步实现 → 可执行验证 → 失败模式复盘 → 面试压缩`
+
+禁止：
+
+`直接改一堆文件 → 跑绿 → 告诉用户完成`
+
+对 B-class 样板工作可以加速，但仍必须说明它在总图哪一层、连接谁、为什么存在。
+
+### 通用教学要求
+
+- 默认中文解释；代码、类名、字段、API、命令和错误信息保持原始技术语言；
 - 每一步最多引入 1–2 个新的核心概念；
-- 优先把 Python / FastAPI / LangGraph 概念与用户熟悉的 Java / Spring 做准确类比，同时说明类比失效的位置；
+- Python / FastAPI / LangGraph 优先与 Java / Spring 做准确类比，并说明类比失效位置；
 - 不要求用户手写无教学价值的样板代码；
-- 不允许把关键机制静默交给 AI 实现后就视为“已学会”。
+- 不允许把关键机制静默交给 AI 实现后就视为“已学会”；
+- A-class（Agent State、Tool Calling、authority boundary、JWT/ownership、transaction/idempotency、retry/timeout、checkpoint/resume、HITL、failure recovery、Eval/Trace、重要架构取舍）至少让用户完成一次预测、设计选择、解释原因或错误方案判断。
 
-### A-class：必须真正掌握
-
-以下内容默认属于 A-class：
-
-- Agent State / State Machine；
-- Tool Calling 与 allowlist；
-- Java 与 Agent 的权威边界；
-- JWT / ownership / authorization；
-- transaction / idempotency；
-- timeout / retry / unknown write recovery；
-- checkpoint / resume；
-- HITL；
-- failure recovery；
-- Eval / Trace；
-- 重要架构取舍。
-
-对 A-class 内容，至少完成：
-
-1. 先解释“没有它会出什么问题”；
-2. 解释最小机制与数据流；
-3. 让用户完成一次预测、小修改或设计选择；
-4. 至少考虑一个真实失败模式；
-5. 用测试、Trace、日志、DB 状态或 API 结果验证；
-6. 阶段结束时做简短掌握检查和面试压缩。
-
-### B-class：允许 AI 加速
-
-DTO、普通 CRUD wiring、fixture、样板配置、机械映射、样式性 UI 等可以由 AI 更直接完成，但仍需简要说明它在系统中的位置。
-
+自定义 `project-coding-tutor` Skill 仍统一维护在 `skills_` 分支或本地/全局安装；不要复制 Skill 源码污染功能分支。
 ## 3. 每次开发先看“现在该干嘛”
 
 开始一次开发会话前：
