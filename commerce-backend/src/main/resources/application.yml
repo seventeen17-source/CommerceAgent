@@ -38,6 +38,14 @@ spring:
 server:
   port: 8080
 
+# T011：本地 JWT fixture。默认 secret 仅用于本地开发/测试；非本地环境必须覆盖。
+commerce:
+  security:
+    jwt:
+      issuer: ${COMMERCE_JWT_ISSUER:commerceagent-local}
+      secret: ${COMMERCE_JWT_SECRET:commerceagent-local-dev-secret-change-me-2026}
+      ttl: ${COMMERCE_JWT_TTL:PT1H}
+
 management:
   endpoints:
     web:
