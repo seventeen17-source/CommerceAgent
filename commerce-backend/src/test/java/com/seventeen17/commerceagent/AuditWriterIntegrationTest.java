@@ -73,9 +73,10 @@ class AuditWriterIntegrationTest {
                 "safeKey", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0wMDEifQ.abcdefghijklmnopqrstuvwxyz123456"));
         assertThrows(IllegalArgumentException.class, () -> auditWriter.writeSecurityEvent(jwtValue));
 
-        AuditEvent embeddedJwt = eventWithMetadata(Map.of(
-                "note",
-                "auth used eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0wMDEifQ.abcdefghijklmnopqrstuvwxyz123456 to call"));
+        AuditEvent embeddedJwt = eventWithMetadata(
+                Map.of(
+                        "note",
+                        "auth used eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0wMDEifQ.abcdefghijklmnopqrstuvwxyz123456 to call"));
         assertThrows(IllegalArgumentException.class, () -> auditWriter.writeSecurityEvent(embeddedJwt));
 
         AuditEvent embeddedBearer = eventWithMetadata(Map.of("note", "request used Bearer secret-token before denial"));
@@ -144,11 +145,10 @@ class AuditWriterIntegrationTest {
             status.setRollbackOnly();
         });
 
-        assertFalse(repository
-                .findByActionAndResourceIdOrderByCreatedAtAsc("REFUND_REQUEST_CREATE", resourceId)
-                .stream()
-                .findAny()
-                .isPresent());
+        assertFalse(
+                repository.findByActionAndResourceIdOrderByCreatedAtAsc("REFUND_REQUEST_CREATE", resourceId).stream()
+                        .findAny()
+                        .isPresent());
     }
 
     @Test
@@ -171,7 +171,9 @@ class AuditWriterIntegrationTest {
 
         assertEquals(
                 1,
-                repository.findByActionAndResourceIdOrderByCreatedAtAsc("ORDER_ACCESS_DENIED", resourceId).size());
+                repository
+                        .findByActionAndResourceIdOrderByCreatedAtAsc("ORDER_ACCESS_DENIED", resourceId)
+                        .size());
     }
 
     @Test
