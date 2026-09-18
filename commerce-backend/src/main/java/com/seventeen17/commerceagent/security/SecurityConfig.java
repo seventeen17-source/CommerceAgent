@@ -25,7 +25,11 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(
-            HttpSecurity http, CommerceJwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
+            HttpSecurity http,
+            CommerceJwtAuthenticationConverter jwtAuthenticationConverter,
+            com.seventeen17.commerceagent.common.error.RestAuthenticationEntryPoint authenticationEntryPoint,
+            com.seventeen17.commerceagent.common.error.RestAccessDeniedHandler accessDeniedHandler)
+            throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -35,8 +39,13 @@ public class SecurityConfig {
                         .permitAll()
                         .anyRequest()
                         .authenticated())
-                .oauth2ResourceServer(resourceServer ->
-                        resourceServer.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
+                .oauth2ResourceServer(resourceServer -> resourceServer
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler)
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
         return http.build();
     }
 
