@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T015
+- **当前 Tasks**：T016
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -16,8 +16,10 @@
   - T007 — `application.yml`（含 dev profile，应用身份 `commerce_app` / 迁移身份 `migrator` 分离）、`application-test.yml`（数据源由 Testcontainers 注入）、`app/config/settings.py`。实测 `mvnw spring-boot:run` **Started CommerceBackendApplication in 4.538 seconds**，Flyway 以 `migrator` 身份把 history 表建在 `commerce` schema
   - T008 — `V001__core_schema.sql` 创建 9 张核心表并建立约束/索引；本地 `mvnw.cmd verify` **BUILD SUCCESS**；`infra/postgres/verify-t008.sql` 返回 **`T008_ACCEPTANCE_OK`**；`agent_app` 对 `commerce.*` 无权限，`commerce_app` / `agent_app` 各自在所属 schema 具备所需权限；`vector` extension 未启用
   - T009 — `user/`、`order/`、`logistics/` 共 5 个 JPA Entity + 5 个 Repository；`@Version` 乐观锁与 ownership 不可变由映射层表达；新增 `OrderConcurrencyGuaranteesTest` **用可执行测试证明**"乐观锁防丢失更新、唯一约束防重复插入"；`mvnw verify` → **Tests run: 7, Failures: 0, Errors: 0 / BUILD SUCCESS**
-- **当前优先任务**：T015 — 显式 `AgentState`
-- **下一 Gate**：完成 T013–T014 的 Audit / Fixture 基础能力后，再进入 T015–T018 Agent State / Client / Run / Security skeleton
+  - T010–T014 — 见「Phase 2 — 当前执行顺序」第 3–7 项的验收证据（`AfterSalesRule` 持久化 / JWT role-aware principal / 统一 Error Envelope / 结构化 Audit Writer / dev-eval Fixture Loader）
+  - T015 — 显式 `AgentState`（`agent-service/app/agent/state.py`）：Pydantic 状态 schema + `PrincipalRole`/`RunStatus`/`WriteStatus`/`VerificationStatus` 四个枚举，`extra="forbid"` 拒绝未声明字段（含 raw credential），model validator 对 step/retry budget fail closed；Python 门禁四条命令全部通过：`ruff check` **All checks passed**、`ruff format --check` **7 files**、`mypy app` **Success 5 files**、`pytest -q` **11 passed**
+- **当前优先任务**：T016 — 类型化 Java API Client（`agent-service/app/clients/commerce_client.py`）
+- **下一 Gate**：T016–T018 完成 Commerce Client / Run+Trace 持久化 / FastAPI security skeleton 后，Phase 2 收口，进入 US1 MVP
 - **当前 Blocker**：无
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
@@ -27,9 +29,11 @@
   - 启动数据库：`docker compose -f infra/docker-compose.yml up -d`（首次可 `cp .env.example .env` 覆盖默认值）
   - Java 侧两条命令：`mvnw.cmd spotless:apply` 修复格式；`mvnw.cmd verify` 跑 compile + test + spotless check + SpotBugs + JaCoCo
   - Testcontainers PostgreSQL 已固定为 `postgres:18`，避免 `latest` 漂移破坏可复现性
-  - Python 侧三条命令：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`
+  - Python 侧验收命令：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`、`uv run pytest -q`（四条全绿才算通过）
 - **未决项**：
   - `.specify/feature.json` 本地仍指向 `specs/001-agent-career-project`，后续应切换为 `specs/002-commerce-after-sales-agent`
+  - T015 评审留了 3 个未处置发现（详见 `docs/devlog/2026-09-18.md` 的「T015 review findings」）：有界取值集改 `StrEnum`；写清 `current_node` / `model_*` / token / 时间戳属于 T017 持久化字段而非 `AgentState`；`max_steps` / `max_retries` 移入 `settings.py`
+  - 根 `.gitignore` 建议补 `.mypy_cache/`、`.ruff_cache/`（当前靠工具默认行为兜底）
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
 
@@ -39,7 +43,7 @@
 |---|---|---|---|---|
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
-| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T014 ✅，当前 T015） |
+| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T015 ✅，当前 T016） |
 | 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ⬜ |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
@@ -88,7 +92,8 @@
 5. ✅ T012：统一 Error Envelope（本地 `mvnw.cmd verify` → Tests run: 22, Failures: 0, Errors: 0, Skipped: 0 / BUILD SUCCESS；Spotless、SpotBugs 均通过）
 6. ✅ T013：结构化 Audit Writer（本地 `mvnw.cmd verify` → BUILD SUCCESS；测试、Spotless、SpotBugs 均通过）
 7. ✅ T014：dev/eval fixture loader（本地 `mvnw.cmd verify` → BUILD SUCCESS；35 tests、Spotless、SpotBugs 均通过）
-8. ⬜ T015–T018：Agent State / Commerce Client / Run+Trace / FastAPI security skeleton
+8. ✅ T015：显式 `AgentState`（Python 门禁四条命令全部通过：`ruff check` / `ruff format --check` / `mypy app` / `pytest -q` → 11 passed）
+9. ⬜ T016–T018：Commerce Client / Run+Trace / FastAPI security skeleton
 
 ### T008 验收证据
 
