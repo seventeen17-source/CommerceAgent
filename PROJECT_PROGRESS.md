@@ -31,7 +31,7 @@
   - Testcontainers PostgreSQL 已固定为 `postgres:18`，避免 `latest` 漂移破坏可复现性
   - Python 侧验收命令：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`、`uv run pytest -q`（四条全绿才算通过）
 - **未决项**：
-  - `.specify/feature.json` 本地仍指向 `specs/001-agent-career-project`，后续应切换为 `specs/002-commerce-after-sales-agent`
+  - `.specify/feature.json` 仅为本地 Spec Kit 活动 feature 状态，不提交；运行 Spec Kit 前本地确认解析到 `specs/002-commerce-after-sales-agent`
   - T015 后续跨服务审查又发现并已在 `foundation/t016-contract-hardening` 处理：① OpenAPI 的 Java-owned enum 不应让 T016 生成封闭消费端枚举；② `ruleVersion` 契约误写为 string；③ Python 无法仅凭当前 JWT 得到权威 role，因此增加 Java `GET /api/v1/me`；④ Evidence/Verification 开放字典增加递归敏感信息拒绝。T017 另明确要求并发 resume 使用 row lock/CAS/version 防分叉。
   - T015 的 3 个评审发现已全部在 T015 内处置完毕（详见 `docs/devlog/2026-09-18.md` 的「T015 review findings 处置结果」）：②③ 采纳并落地，① 经判断**拒绝**并把"跨服务取值策略"写进 `state.py`（远程拥有的值域不镜像成 `StrEnum`，未知值受控降级为 `SAFE_STOP`）
   - **T017 前置：AgentState 敏感信息拦截覆盖不足（2026-09-18 实测，未实现）**——现有拦截只挂在 `EvidenceItem.data` / `VerificationOutcome.details` 两个字段上；对 16 个自由文本字段注入 JWT/Bearer 共 32 次，**仅 2 个字段被挡（即那两个对照组），26 次进入 state 未被拦**（含 `user_request`、`tool_history[].trace_id`/`error_code`、`write.action`/`resource_id`、`approval.*`、`intent`、`resolved_order_id`、`candidate_order_ids`、`principal.user_id`、`eligibility.reason_codes`/`rule_code`）。今天 `state.py` 除单测外无生产调用者，属**潜在缺陷**，风险在 T017 引入 `state_json` 持久化出口时变为现实。已定设计（含正则误报证据、实现顺序硬依赖、resume 未知数）见 `docs/devlog/2026-09-18.md` 的「T017 前置：AgentState secret-guard 覆盖缺口」。**未实现，不得视为已完成。**
@@ -56,7 +56,7 @@
 ## Phase 1 — 完成记录
 
 1. ✅ 拉取最新 `main` 并确认工作区干净
-2. ⬜ 本地 `.specify/feature.json` 指向 `specs/002-commerce-after-sales-agent`（当前仍为 001）
+2. ℹ️ `.specify/feature.json` 仅为本地 Spec Kit 状态；不提交到仓库。运行 Spec Kit 前本地确认活动 feature 为 `specs/002-commerce-after-sales-agent`
 3. ✅ 创建分支：`setup/official-scaffolds`（已并入 main）；T005 起使用 `setup/postgres-infra`
 4. ✅ T001：建立当前阶段真实需要的项目入口/目录；`eval/` 与 `knowledge/policies/` 延迟到首次有真实内容时创建，不提交空目录
 5. ✅ T002：Spring Initializr 生成 `commerce-backend`（Java 21 / Spring Boot 4.1.1；`mvnw.cmd test` BUILD SUCCESS）
