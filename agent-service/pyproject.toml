@@ -22,6 +22,10 @@ dev = [
     "ruff>=0.16.8",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
 [tool.ruff]
 # 与 Java 侧保持一致的行宽取向；Python 社区主流为 88/100，这里取 100
 line-length = 100
