@@ -36,9 +36,9 @@ Cross-service value policy (why some fields are `str`, not `StrEnum`):
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from enum import StrEnum
-import re
 from typing import Any
 from uuid import UUID
 
