@@ -18,7 +18,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
-/** T011：无状态 Bearer JWT 安全基线。 */
+/** T011 stateless Bearer JWT security baseline. */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
@@ -54,7 +54,7 @@ public class SecurityConfig {
         return decoder;
     }
 
-    /** 只给本地 fixture/dev/eval 使用；生产环境应由独立身份提供方签发 token。 */
+    /** Local fixture encoder only. Production should delegate token issuance to an identity provider. */
     @Bean
     @Profile({"dev", "test", "eval"})
     JwtEncoder localJwtEncoder(SecretKey jwtSecretKey) {

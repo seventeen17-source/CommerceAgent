@@ -7,7 +7,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 测试专用 HTTP probe，用来证明真正注入业务层的是服务端构建的 principal。 */
+/** Test-only HTTP probe proving that business code sees the server-built principal. */
 @RestController
 class SecurityProbeController {
 

@@ -6,7 +6,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.AbstractOAuth2TokenAuthenticationToken;
 
-/** Spring Security Authentication：token 保留 Jwt，业务 principal 则收敛为 {@link CommercePrincipal}。 */
+/** Authentication wrapper that keeps the validated Jwt but exposes a narrow business principal. */
 final class CommerceJwtAuthenticationToken extends AbstractOAuth2TokenAuthenticationToken<Jwt> {
 
     private final CommercePrincipal principal;

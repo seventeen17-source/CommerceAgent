@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** 本地 JWT fixture 配置；完整 OAuth/OIDC 身份产品不属于 V1 范围。 */
+/** Local JWT fixture settings. Full OAuth/OIDC is intentionally outside V1 scope. */
 @ConfigurationProperties(prefix = "commerce.security.jwt")
 public record JwtProperties(String secret, String issuer, Duration ttl) {
 

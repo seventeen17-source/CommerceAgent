@@ -12,10 +12,10 @@ import org.springframework.security.oauth2.server.resource.authentication.Abstra
 import org.springframework.stereotype.Component;
 
 /**
- * JWT -> role-aware principal。
+ * Converts a validated JWT into a role-aware principal.
  *
- * <p>JwtDecoder 先验证签名、issuer 与时间；这里只把已验证的 {@code sub} 当身份索引，再从权威
- * {@code commerce.users} 读取当前 status/role。token 中即使伪造额外 {@code role} claim，也不会成为授权来源。
+ * <p>The JWT proves the subject. Current account status and role are reloaded from the authoritative users table, so a
+ * stale or forged role claim cannot become the authorization source.
  */
 @Component
 public class CommerceJwtAuthenticationConverter implements Converter<Jwt, AbstractOAuth2TokenAuthenticationToken<Jwt>> {
@@ -36,6 +36,7 @@ public class CommerceJwtAuthenticationConverter implements Converter<Jwt, Abstra
         User user = userRepository
                 .findById(userId)
                 .orElseThrow(() -> new BadCredentialsException("JWT subject does not map to a known user"));
+
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BadCredentialsException("User is not active");
         }

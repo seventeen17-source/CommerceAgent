@@ -22,7 +22,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** T011：真实 Bearer JWT -> Spring Security -> role-aware CommercePrincipal 的集成证明。 */
+/** T011 integration proof: Bearer JWT -> Spring Security -> role-aware CommercePrincipal. */
 @ActiveProfiles("test")
 @Import({TestcontainersConfiguration.class, SecurityProbeController.class})
 @SpringBootTest

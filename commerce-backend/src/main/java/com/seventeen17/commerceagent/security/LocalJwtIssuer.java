@@ -7,7 +7,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Component;
 
-/** 本地 fixture token 签发器，不是登录接口。 */
+/** Local fixture token issuer. This is not a login endpoint. */
 @Component
 @Profile({"dev", "test", "eval"})
 public class LocalJwtIssuer {
@@ -32,6 +32,7 @@ public class LocalJwtIssuer {
                 .issuedAt(now)
                 .expiresAt(now.plus(properties.ttl()))
                 .build();
+
         return encoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
     }
 }
