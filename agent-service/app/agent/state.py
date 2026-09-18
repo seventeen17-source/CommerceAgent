@@ -19,6 +19,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class PrincipalRole(StrEnum):
+    """Application role copied from the authenticated principal."""
+
+    CUSTOMER = "CUSTOMER"
+    APPROVER = "APPROVER"
+    SUPPORT = "SUPPORT"
+
+
 class RunStatus(StrEnum):
     """Lifecycle status shared with the persisted AgentRun model."""
 
@@ -57,7 +65,7 @@ class PrincipalContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     user_id: str = Field(min_length=1, max_length=64)
-    role: str = Field(min_length=1, max_length=32)
+    role: PrincipalRole
 
 
 class EvidenceItem(BaseModel):
@@ -134,6 +142,8 @@ class AgentState(BaseModel):
 
     run_id: UUID
     principal: PrincipalContext
+    # Untrusted natural-language input. It may guide intent understanding but never authorization.
+    user_request: str = Field(min_length=1, max_length=4000)
 
     intent: str | None = Field(default=None, max_length=100)
     candidate_order_ids: list[str] = Field(default_factory=list)
