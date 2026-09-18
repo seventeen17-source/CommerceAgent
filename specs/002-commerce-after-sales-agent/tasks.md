@@ -63,7 +63,7 @@
 - [ ] T023 [P] [US1] 实现 customer-scoped order list/detail API：`OrderController.java`、`OrderService.java`。
 - [ ] T024 [P] [US1] 实现物流 API 与权威 stall calculation：`LogisticsController.java`、`LogisticsService.java`。
 - [ ] T025 [US1] 实现 deterministic `EligibilityDecision`：`EligibilityService.java`，返回 `eligible`、`allowed_action`、`max_refund_amount`、`approval_required`、rule code/version、reason codes。
-- [ ] T026 [US1] 新建 `commerce.refund_requests` migration 与 Entity/Repository：`V002__refund_schema.sql`、`refund/`。
+- [ ] T026 [US1] 新建 `commerce.refund_requests` migration 与 Entity/Repository：`V002__refund_schema.sql`、`refund/`；同步扩展 T014 `FixtureLoader.clearFixtureState()`，清理 refund 与本阶段引入的 idempotency state，保证 Eval reset 不残留写入结果。
 - [ ] T027 [US1] 实现 Transactional Refund Create/Status：`RefundService.java`；每次敏感写入前重新校验 ownership、current state、eligibility、amount 和权威 `approvalRequestId`。
 - [ ] T028 [US1] 暴露 Refund 与 After-sales Status API，遵循 `Idempotency-Key`：`RefundController.java`。
 - [ ] T029 [P] [US1] 实现 typed tools：`list_user_orders`、`get_order`、`get_logistics`、`check_after_sales_eligibility`、`create_refund_request`、`get_after_sales_status`；统一使用 `success/data/errorCode/retryable/latencyMs/traceId`。
@@ -82,7 +82,7 @@
 
 - [ ] T036 [P] [US2] 编写 Return eligibility/state/idempotency Java Integration Test：`ReturnIntegrationTest.java`。
 - [ ] T037 [P] [US2] 编写 Python Branching Test，证明 `DELIVERED` 证据会把 refund path 改成 return path：`test_us2_delivered_return.py`。
-- [ ] T038 [US2] 新建 `commerce.return_requests` schema、Entity/Repository：`V003__return_schema.sql`、`returns/`。
+- [ ] T038 [US2] 新建 `commerce.return_requests` schema、Entity/Repository：`V003__return_schema.sql`、`returns/`；同步扩展 T014 fixture reset 清理 return state。
 - [ ] T039 [US2] 扩展 eligibility rules 支持 return window、`RETURN`、`RETURN_REFUND`。
 - [ ] T040 [US2] 实现受保护 Return Create/Status API；如要求审批，与 Refund 一样验证权威 `approvalRequestId`。
 - [ ] T041 [US2] 增加 `create_return_request` Tool，并在 graph/routing 中根据 delivered evidence 进入 Return Path。
@@ -107,7 +107,7 @@
 
 - [ ] T049 [P] [US4] 编写 Approval 状态迁移/Auth/Binding Java Test：`PENDING → APPROVED|DENIED|EXPIRED`、终态不可逆、run/order/action/amount binding、non-approver denial。
 - [ ] T050 [P] [US4] 编写 Python HITL Test，证明 Agent 不能 self-approve、伪造 approval state 或使用其他 run 的 approval id。
-- [ ] T051 [US4] 新建 `commerce.approval_requests` schema 与 Entity/Repository：`V004__approval_schema.sql`、`approval/`。
+- [ ] T051 [US4] 新建 `commerce.approval_requests` schema 与 Entity/Repository：`V004__approval_schema.sql`、`approval/`；同步扩展 T014 fixture reset 清理 approval state。
 - [ ] T052 [US4] 实现 Approval Create/List/Decision API；List/Decision 要求 `APPROVER` role 并写 Audit。
 - [ ] T053 [US4] 实现 `request_human_approval` Tool，返回权威 `approvalRequestId`，并进入 `WAITING_APPROVAL`；Agent 不得生成 approval token/status。
 - [ ] T054 [US4] 实现 owner-authorized Agent Resume；恢复前重新读取 Java Approval 状态并验证 run/order/action/amount binding。
@@ -120,7 +120,7 @@
 
 - [ ] T057 [P] [US5] 编写 retry budget、no-progress loop、dependency timeout、`MANUAL_REVIEW`、safe stop、escalation Python Test。
 - [ ] T058 [P] [US5] 编写 SupportTicket create/ownership/audit Java Test。
-- [ ] T059 [US5] 新建 `commerce.support_tickets` schema 与 Entity/Repository；只保存结构化 evidence summary/reason code。
+- [ ] T059 [US5] 新建 `commerce.support_tickets` schema 与 Entity/Repository；只保存结构化 evidence summary/reason code；同步扩展 T014 fixture reset 清理 support-ticket state。
 - [ ] T060 [US5] 实现受保护 SupportTicket Create API。
 - [ ] T061 [US5] 实现 error contract normalization、no-new-evidence detection、max-step enforcement、`escalate_or_safe_stop` Node。
 - [ ] T062 [US5] 实现 `create_support_ticket` Tool，并附带现有 structured evidence/run id。
@@ -144,7 +144,7 @@
 
 ## Phase 9：Polish / Eval / Reproducibility
 
-- [ ] T071 实现 CLI/file-first Eval Runner：调用 Reset Contract、执行 Agent、采集 final business state / tool trace / latency / token，输出 JSON 到 `eval/reports/`。
+- [ ] T071 实现 CLI/file-first Eval Runner：调用 Reset Contract、执行 Agent、采集 final business state / tool trace / latency / token，输出 JSON 到 `eval/reports/`；验收 reset completeness（副作用写入后再次 reset 必须恢复干净状态），并对 destructive reset 使用独立 test/eval 数据库做 fail-fast guard。
 - [ ] T072 [P] 实现 Scorer：task success、tool selection、parameter correctness、business-state correctness、policy compliance、unsafe action、duplicate write、平均 Tool 数、latency/token；retrieval case 增加 citation/retrieval scorer。
 - [ ] T073 实现诚实的 Fixed-workflow Baseline：`eval/baselines/fixed_workflow.py`；复用同一 Tool Contract 与权限，不故意做残。
 - [ ] T074 冻结 Dataset：不少于 60 cases，目标约 74；`dev/`、`test/`、`manifest.yaml` 分离；安全 case 按 threat category 覆盖而不是只凑数量。
