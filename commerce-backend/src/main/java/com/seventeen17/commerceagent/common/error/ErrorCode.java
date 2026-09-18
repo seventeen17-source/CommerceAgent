@@ -27,6 +27,9 @@ public enum ErrorCode {
     REPEATED_NO_PROGRESS(422, false, "Agent made no progress after repeated attempts"),
     POST_WRITE_VERIFICATION_FAILED(502, false, "Post-write state could not be verified"),
     PROMPT_INJECTION_BLOCKED(403, false, "Protected instructions or permissions cannot be overridden"),
+    EVAL_CASE_NOT_FOUND(404, false, "Eval fixture case was not found"),
+    EVAL_RESET_CONFLICT(409, true, "Another eval fixture reset is already running"),
+    EVAL_RESET_FAILED(500, false, "Eval fixture reset failed"),
     INTERNAL_ERROR(500, false, "Internal server error");
 
     private final int httpStatus;

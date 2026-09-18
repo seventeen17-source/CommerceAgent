@@ -24,4 +24,24 @@
 		<Field name="repository"/>
 		<Bug pattern="EI_EXPOSE_REP2"/>
 	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.fixture.FixtureLoader"/>
+		<Field name="jdbcTemplate"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.fixture.FixtureLoader"/>
+		<Field name="registry"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.fixture.DevelopmentFixtureInitializer"/>
+		<Field name="fixtureLoader"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.fixture.EvalFixtureController"/>
+		<Field name="fixtureLoader"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
 </FindBugsFilter>
