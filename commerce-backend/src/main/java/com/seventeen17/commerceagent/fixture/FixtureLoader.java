@@ -42,9 +42,7 @@ public class FixtureLoader {
                         ErrorCode.EVAL_CASE_NOT_FOUND, "Eval fixture case or dataset version was not found"));
 
         Boolean acquired = jdbcTemplate.queryForObject(
-                "SELECT pg_try_advisory_xact_lock(CAST(hashtext(?) AS BIGINT))",
-                Boolean.class,
-                RESET_LOCK_NAME);
+                "SELECT pg_try_advisory_xact_lock(CAST(hashtext(?) AS BIGINT))", Boolean.class, RESET_LOCK_NAME);
         if (!Boolean.TRUE.equals(acquired)) {
             throw new BusinessException(ErrorCode.EVAL_RESET_CONFLICT);
         }
@@ -70,7 +68,8 @@ public class FixtureLoader {
 
     private void clearFixtureState() {
         jdbcTemplate.update("DELETE FROM commerce.audit_logs");
-        jdbcTemplate.update("DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002')");
         jdbcTemplate.update("DELETE FROM commerce.shipments WHERE order_id IN ('order-001', 'order-002')");
         jdbcTemplate.update("DELETE FROM commerce.order_items WHERE order_id IN ('order-001', 'order-002')");
         jdbcTemplate.update("DELETE FROM commerce.orders WHERE id IN ('order-001', 'order-002')");
@@ -85,19 +84,14 @@ public class FixtureLoader {
     }
 
     private void upsertUser(String id, String username, String role) {
-        jdbcTemplate.update(
-                """
+        jdbcTemplate.update("""
                 INSERT INTO commerce.users (id, username, role, status, created_at)
                 VALUES (?, ?, ?, 'ACTIVE', ?)
                 ON CONFLICT (id) DO UPDATE
                 SET username = EXCLUDED.username,
                     role = EXCLUDED.role,
                     status = EXCLUDED.status
-                """,
-                id,
-                username,
-                role,
-                Timestamp.from(FIXTURE_CREATED_AT));
+                """, id, username, role, Timestamp.from(FIXTURE_CREATED_AT));
     }
 
     private void seedRefundLogisticsCase() {
@@ -143,12 +137,7 @@ public class FixtureLoader {
     }
 
     private void upsertOrderItem(
-            String id,
-            String orderId,
-            String productId,
-            String productName,
-            String productCategory,
-            String unitPrice) {
+            String id, String orderId, String productId, String productName, String productCategory, String unitPrice) {
         jdbcTemplate.update(
                 """
                 INSERT INTO commerce.order_items

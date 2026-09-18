@@ -64,8 +64,7 @@ class FixtureLoaderIntegrationTest {
         assertEquals(2, count("SELECT COUNT(*) FROM commerce.shipments WHERE id IN ('shipment-001','shipment-002')"));
         assertEquals(
                 1,
-                count(
-                        """
+                count("""
                         SELECT COUNT(*) FROM commerce.after_sales_rules
                         WHERE rule_code = 'LOGISTICS_STALLED_REFUND' AND version = 1
                         """));
@@ -160,8 +159,7 @@ class FixtureLoaderIntegrationTest {
     }
 
     private void seedAuthenticatedUser() {
-        jdbcTemplate.update(
-                """
+        jdbcTemplate.update("""
                 INSERT INTO commerce.users (id, username, role, status)
                 VALUES ('customer-001', 'customer-001', 'CUSTOMER', 'ACTIVE')
                 ON CONFLICT (id) DO UPDATE
