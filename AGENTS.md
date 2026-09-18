@@ -16,9 +16,13 @@
 
 `specs/001-agent-career-project/` 已完成，只作为招聘研究、选题和历史决策证据，不作为当前实现的直接规格。
 
-## 2. 默认教学模式：project-coding-tutor
+## 2. 默认教学模式：Map-first Project Teaching Protocol
 
-对以下任务，必须优先使用 `project-coding-tutor` 的教学方式：
+**本仓库的教学协议高于任何单独 Skill。** 任何 Agent（ChatGPT / Codex / 其他编码 Agent）进入本仓库后，只要执行开发、调试、架构、测试或教学任务，就必须先遵守 `docs/LEARNING_PROTOCOL.md`。即使当前环境没有安装 `project-coding-tutor`，也不得退化为“只完成任务、不解释项目位置”的赶工模式。
+
+`project-coding-tutor` 仍可作为辅助 Skill 使用，但它不是本仓库教学规则的唯一载体，也不能覆盖 `docs/LEARNING_PROTOCOL.md`。
+
+对以下任务，必须使用该仓库教学协议：
 
 - 编写或修改实现代码；
 - 调试错误；
@@ -27,9 +31,36 @@
 - 学习 Spring / Python / FastAPI / LangGraph / Agent 工程；
 - 解释项目中的关键机制或准备面试。
 
-Skill 的规范来源：`seventeen17-source/project-coding-tutor`。
+教学协议的规范来源：`docs/LEARNING_PROTOCOL.md`。
 
-如果该 Skill 已作为全局/本地 Skill 安装，则直接调用它。CommerceAgent 仓库中的自定义 Skill 源码统一维护在 `skills_` 分支；不要为了让当前工作分支可见而把 `project-coding-tutor` 复制回 `main` 或功能分支。
+如果 `project-coding-tutor` 已作为全局/本地 Skill 安装，可以调用它辅助执行；CommerceAgent 仓库中的自定义 Skill 源码统一维护在 `skills_` 分支。不要为了让当前工作分支可见而把 Skill 源码复制回 `main` 或功能分支。
+
+### 每个 Txxx 开始前的强制定位卡
+
+任何 Agent 在开始实现一个 Txxx 前，必须先用用户能理解的语言回答以下 8 项，**然后才能进入代码**：
+
+1. **当前阶段**：现在属于 Setup / Foundation / US1 / US2 / Clarification / HITL / Failure Recovery / RAG / Eval 中哪一阶段；
+2. **当前系统层**：Web / Agent API / Agent Brain / Tool / Java Business / Data / Cross-cutting Safety & Eval 中哪一层；
+3. **上游是谁**：谁会调用当前组件；
+4. **下游是谁**：当前组件会调用谁；
+5. **输入是什么**；
+6. **输出是什么**；
+7. **它解决什么问题，不做会怎样**；
+8. **它在最终 Agent 主链中的位置**，必须画出 3–8 行的小数据流图。
+
+如果用户表现出“我只是在搭环境、不知道自己在干什么”的感觉，Agent 必须优先恢复这张定位图，而不是继续堆代码。
+
+### 每个 Txxx 的固定教学顺序
+
+默认顺序必须是：
+
+`总体地图定位 → 本 T 的局部链路 → 1–2 个核心概念 → 预测/设计 checkpoint → 小步实现 → 可执行验证 → 失败模式复盘 → 面试压缩`
+
+禁止顺序：
+
+`直接改一堆文件 → 跑绿 → 告诉用户完成`
+
+对 B-class 样板工作可以加速，但仍必须说明“它在总图哪一层、连接谁、为什么存在”。
 
 ### Skill 分支规则
 
