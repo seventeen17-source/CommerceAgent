@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.ActiveProfiles;
@@ -130,17 +131,37 @@ class OrderConcurrencyGuaranteesTest {
 
         // 第一条：正常落库。注意两条运单的乐观锁版本号都是一样的初始值。
         Shipment first = Shipment.create("t009-ship-1", orderId, "SF", "SF-0001", ShipmentStatus.CREATED);
-        shipmentRepository.save(first);
+        shipmentRepository.saveAndFlush(first);
 
         // 第二条：id 不同、运单号不同，唯一"重复"的是 order_id。
-        // 这里 @Version 完全帮不上忙（两条都是新记录，没有任何共同的版本号可比），
-        // 拦住它的是 V001 里 shipments.order_id 的 UNIQUE 约束。
+        // 这里 @Version 完全帮不上忙（两条都是新记录，没有任何共同的版本号可比）。
+        // saveAndFlush 强制 SQL 在这里执行，然后继续向下钉死 SQLState 与具体约束名，避免测试因其他完整性错误误通过。
         Shipment second = Shipment.create("t009-ship-2", orderId, "SF", "SF-0002", ShipmentStatus.CREATED);
-        assertThrows(
-                DataIntegrityViolationException.class, () -> shipmentRepository.save(second), "同一订单的第二条运单必须被数据库唯一约束拒绝");
+        DataIntegrityViolationException exception = assertThrows(
+                DataIntegrityViolationException.class,
+                () -> shipmentRepository.saveAndFlush(second),
+                "同一订单的第二条运单必须被数据库唯一约束拒绝");
+
+        ConstraintViolationException constraintViolation = findConstraintViolation(exception);
+        assertEquals("23505", constraintViolation.getSQLException().getSQLState(), "必须是 PostgreSQL unique_violation");
+        assertEquals(
+                "shipments_order_id_key",
+                constraintViolation.getConstraintName(),
+                "必须由 UNIQUE(order_id) 拒绝，而不是其他约束");
 
         assertTrue(shipmentRepository.existsByOrderId(orderId), "第一条运单应仍然存在");
         assertEquals(1, shipmentRepository.findByOrderId(orderId).stream().count(), "该订单只能有一条运单");
+    }
+
+    private static ConstraintViolationException findConstraintViolation(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof ConstraintViolationException constraintViolation) {
+                return constraintViolation;
+            }
+            current = current.getCause();
+        }
+        throw new AssertionError("异常链中没有 Hibernate ConstraintViolationException", exception);
     }
 
     private void seedOrder(String orderId) {

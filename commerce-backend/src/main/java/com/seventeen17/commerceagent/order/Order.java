@@ -16,7 +16,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import org.hibernate.annotations.Generated;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
 
 /**
@@ -66,6 +68,8 @@ public class Order {
     @Column(name = "currency", length = 3, nullable = false)
     private String currency;
 
+    /** 数据库 DEFAULT CURRENT_TIMESTAMP 生成；@Generated 让 INSERT 后的实体立即拿到数据库权威值。 */
+    @Generated(event = EventType.INSERT)
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private Instant createdAt;
 

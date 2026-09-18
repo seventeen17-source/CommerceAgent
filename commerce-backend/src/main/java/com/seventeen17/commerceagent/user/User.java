@@ -7,6 +7,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 /**
  * `commerce.users` —— 认证主体，也是所有权（ownership）判定的来源。
@@ -19,8 +21,8 @@ import java.time.Instant;
  *   <li>`id` 由应用分配（fixture 用 `customer-001` 这类稳定可读的 id），不用数据库自增，因此没有
  *       `@GeneratedValue`。
  *   <li>`created_at` 声明为 `insertable/updatable = false`：时间戳的权威在数据库（V001 里有
- *       `DEFAULT CURRENT_TIMESTAMP`），避免应用与数据库时钟不一致。写入后如需读取该值，需要
- *       flush + refresh。
+ *       `DEFAULT CURRENT_TIMESTAMP`），并用 Hibernate `@Generated(INSERT)` 在 INSERT 后把数据库生成值
+ *       同步回 managed entity。注意本实体是应用分配 id 且没有 `@Version`，调用仓储保存时应使用 `save*()` 的返回值。
  *   <li>表名不带 schema：`spring.jpa.properties.hibernate.default_schema = commerce` 已统一指定
  *       （见 T007 的 application.yml）。
  * </ul>
@@ -45,6 +47,7 @@ public class User {
     @Column(name = "status", length = 20, nullable = false)
     private UserStatus status;
 
+    @Generated(event = EventType.INSERT)
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private Instant createdAt;
 
