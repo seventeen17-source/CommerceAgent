@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T012（实现完成，待本地 `mvnw verify` 验收）（实现完成，待本地验收）（实现完成，待本地 `mvnw verify` 验收）
+- **当前 Tasks**：T012（实现完成；22 个测试已通过、Spotless 已通过；SpotBugs DI 误报已做窄范围排除，待最终 `mvnw.cmd verify` 验收）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -17,8 +17,8 @@
   - T008 — `V001__core_schema.sql` 创建 9 张核心表并建立约束/索引；本地 `mvnw.cmd verify` **BUILD SUCCESS**；`infra/postgres/verify-t008.sql` 返回 **`T008_ACCEPTANCE_OK`**；`agent_app` 对 `commerce.*` 无权限，`commerce_app` / `agent_app` 各自在所属 schema 具备所需权限；`vector` extension 未启用
   - T009 — `user/`、`order/`、`logistics/` 共 5 个 JPA Entity + 5 个 Repository；`@Version` 乐观锁与 ownership 不可变由映射层表达；新增 `OrderConcurrencyGuaranteesTest` **用可执行测试证明**"乐观锁防丢失更新、唯一约束防重复插入"；`mvnw verify` → **Tests run: 7, Failures: 0, Errors: 0 / BUILD SUCCESS**
 - **当前优先任务**：验收 T012 — 统一 Error Envelope（`foundation/error-envelope`）
-- **下一 Gate**：完成 T010 后，进入 T011–T014 的 Security / Error / Audit / Fixture 基础能力
-- **当前 Blocker**：无
+- **下一 Gate**：T012 完整 `mvnw.cmd verify` → BUILD SUCCESS 后，正式勾选 T012；再进入 T013 Audit Writer
+- **当前 Blocker**：仅等待 T012 最新 SpotBugs 窄范围排除提交后的本地完整 `mvnw.cmd verify` 结果
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
   - 本机 `core.autocrlf=true`；`infra/` 下的脚本与 `.env*` 已由根 `.gitattributes` 钉为 LF（否则容器内执行会 `bad interpreter`）
