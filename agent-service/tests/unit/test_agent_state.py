@@ -10,6 +10,7 @@ from app.agent.state import (
     EligibilitySnapshot,
     EvidenceItem,
     PrincipalContext,
+    PrincipalRole,
     RunStatus,
     ToolHistoryEntry,
     VerificationOutcome,
@@ -22,7 +23,8 @@ from app.agent.state import (
 def build_state(**overrides: object) -> AgentState:
     values: dict[str, object] = {
         "run_id": uuid4(),
-        "principal": PrincipalContext(user_id="customer-001", role="CUSTOMER"),
+        "principal": PrincipalContext(user_id="customer-001", role=PrincipalRole.CUSTOMER),
+        "user_request": "My shipment has not moved for days. Can I get a refund?",
     }
     values.update(overrides)
     return AgentState.model_validate(values)
@@ -110,6 +112,7 @@ def test_agent_state_rejects_raw_credentials_as_extra_fields() -> None:
                     "role": "CUSTOMER",
                     "raw_jwt": "header.payload.signature",
                 },
+                "user_request": "Check my order",
             }
         )
 
