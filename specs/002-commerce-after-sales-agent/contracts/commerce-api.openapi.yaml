@@ -5,6 +5,17 @@ info:
 servers:
   - url: http://commerce-backend:8080/api/v1
 paths:
+  /me:
+    get:
+      summary: Get authoritative authenticated principal
+      description: Returns the current user id and role resolved by the Java backend from the verified JWT subject and authoritative commerce.users record. Consumers must not trust a caller/model supplied role.
+      responses:
+        '200':
+          description: Current authoritative principal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentPrincipal' }
+        '401': { $ref: '#/components/responses/Error' }
   /orders:
     get:
       summary: List authenticated user's orders
@@ -231,6 +242,14 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
   schemas:
+    CurrentPrincipal:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: string, minLength: 1, maxLength: 64 }
+        role:
+          type: string
+          enum: [CUSTOMER, APPROVER, SUPPORT]
     OrderSummary:
       type: object
       required: [orderId, productSummary, status, createdAt]
@@ -273,16 +292,16 @@ components:
         reasonCode: { type: string }
     EligibilityDecision:
       type: object
-      required: [eligible, allowedAction, approvalRequired, ruleCode]
+      required: [eligible, allowedAction, approvalRequired, ruleCode, ruleVersion]
       properties:
         eligible: { type: boolean }
         allowedAction:
           type: string
-          enum: [REFUND_ONLY, RETURN, RETURN_REFUND, MANUAL_REVIEW, DENY]
+          description: Java-owned forward-compatible action value. Known V1 values are REFUND_ONLY, RETURN, RETURN_REFUND, MANUAL_REVIEW, DENY. Consumers must fail closed / SAFE_STOP on an unknown value instead of treating an additive backend value as a transport parse failure.
         maxRefundAmount: { type: [number, 'null'] }
         approvalRequired: { type: boolean }
-        ruleCode: { type: string }
-        ruleVersion: { type: string }
+        ruleCode: { type: string, minLength: 1 }
+        ruleVersion: { type: integer, minimum: 1 }
         reasonCodes:
           type: array
           items: { type: string }
@@ -348,7 +367,9 @@ components:
         actionType: { type: string }
         amount: { type: [number, 'null'] }
         riskReason: { type: [string, 'null'] }
-        status: { type: string, enum: [PENDING, APPROVED, DENIED, EXPIRED] }
+        status:
+          type: string
+          description: Java-owned forward-compatible approval status. Known V1 values are PENDING, APPROVED, DENIED, EXPIRED; consumers must fail closed on unknown values.
         decidedBy: { type: [string, 'null'] }
         decidedAt: { type: [string, 'null'], format: date-time }
     AfterSalesStatus:
