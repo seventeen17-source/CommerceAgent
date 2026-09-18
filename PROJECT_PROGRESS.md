@@ -2,15 +2,44 @@
 
 > 这是项目的唯一阶段导航文件。每次开始开发先看这里，再去 `tasks.md` 找当前阶段任务。
 
+## main 的定位与活跃分支（务必先读这一段）
+
+`main` 只保留**已经合并**的里程碑，所以本文件与 `tasks.md` 在 `main` 上**天然滞后于实际开发**。这不是笔误，也不代表工作没做。
+
+- **已合并进 `main`**：Phase 0 设计冻结、Phase 1 官方脚手架（`098e3fc`）。
+- **未合并**：Phase 1 收尾（T005–T007）与整个 Phase 2 Foundation（T008–T016）目前只存在于 `setup/*` / `foundation/*` 分支上。
+- **直接后果**：在 `main` 上你会看到「T005–T007 待做」，但它们已在 `setup/postgres-infra` 验收完成；`tasks.md` 在 `main` 上只有 3 个勾选，在 `foundation/t016-contract-hardening` 上有 15 个。
+
+**因此：要看真实进度，先切到下面的活跃分支，再读它自己的 `PROJECT_PROGRESS.md`；不要在 `main` 上重做已经完成的任务。**
+
+分支是一条**线性栈**，每个分支基于前一个分支的收尾 checkpoint：
+
+```text
+setup/official-scaffolds            T002–T004 脚手架          → 已合并进 main
+  └─ setup/postgres-infra           T005–T007 数据库/质量门禁/环境   → Phase 1 收口，未合并
+      └─ foundation/core-schema     T008–T009 Schema + Entity       → 未合并
+          └─ foundation/after-sales-rule    T010                   → 未合并
+              └─ foundation/jwt-security    T011                   → 未合并
+                  └─ foundation/error-envelope   T012             → 未合并
+                      └─ foundation/audit-writer     T013         → 未合并
+                          └─ foundation/fixture-loader   T014     → 未合并
+                              └─ foundation/agent-state      T015 → 未合并
+                                  └─ foundation/t016-contract-hardening
+                                        T016 前置契约加固 + T017 secret-guard 缺口记录
+                                        👈 当前活跃分支（领先 main 119 个提交），未合并
+```
+
+按 `AGENTS.md` §6，合并到 `main` 前需要用户明确确认；`main` 的滞后是**预期行为**，不是需要「修复」的状态。
+
 ## 当前状态
 
-- **当前 Phase**：Phase 1 — 项目脚手架
-- **当前 Tasks**：T001–T007
+- **当前 Phase（仅就 `main` 已并入的内容而言）**：Phase 1 — 项目脚手架
+- **当前 Tasks（`main` 上）**：剩余 T005–T007 尚未并入 `main`；真实活跃任务是 T016，见上方「main 的定位与活跃分支」
 - **已完成**：
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS（用户本地复核）
   - T003 — `uv init` 生成 `agent-service/`、依赖已加入、`uv.lock`（58 包）；复核通过：`uv run python --version` → `Python 3.13.14`、关键导入 smoke test `imports OK`（用户本地复核）
   - T004 — Vite 生成 `web/`、`npm install` 完成、`npm run build` 成功产出 `dist/`（用户本地复核，用 `npm.cmd`，见下）
-- **当前优先任务**：T005–T007（PostgreSQL / Docker Compose / 环境基础配置）
+- **当前优先任务（就 `main` 而言）**：T005–T007（PostgreSQL / Docker Compose / 环境基础配置）尚未并入 `main`；真实活跃任务是 T016，见上方「main 的定位与活跃分支」
 - **下一 Gate**：Java / Python / Web 三个官方脚手架均可启动，基础目录与依赖符合 Plan，Git diff 干净
 - **当前 Blocker**：无（JDK 21 / Docker Desktop / Maven 本地仓库 / npm 代理 7892 均已就绪）
 - **环境注意**：本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1`；**前端命令一律使用 `npm.cmd` / `npx.cmd`**。
@@ -24,8 +53,8 @@
 | Phase | 目标 | Tasks | Gate | 状态 |
 |---|---|---|---|---|
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
-| 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | 👉 Current（T002/T003/T004 ✅） |
-| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ⬜ |
+| 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | 🟡 T002–T004 已并入 `main`；T005–T007 在 `setup/postgres-infra` 完成待合并 |
+| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 🟡 T008–T015 完成、T016 前置契约加固已验证（`foundation/*` 分支，未合并） |
 | 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ⬜ |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
