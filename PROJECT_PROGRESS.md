@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T009–T010
+- **当前 Tasks**：T010
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -15,8 +15,9 @@
   - T006 — Java 侧 Spotless 3.10.2（palantirJavaFormat）+ SpotBugs 4.10.4.1 + JaCoCo 0.8.15；Python 侧 ruff 0.16.8 + mypy 2.3.1。`mvnw verify` **BUILD SUCCESS**；`ruff check` / `ruff format --check` / `mypy app` 全部通过
   - T007 — `application.yml`（含 dev profile，应用身份 `commerce_app` / 迁移身份 `migrator` 分离）、`application-test.yml`（数据源由 Testcontainers 注入）、`app/config/settings.py`。实测 `mvnw spring-boot:run` **Started CommerceBackendApplication in 4.538 seconds**，Flyway 以 `migrator` 身份把 history 表建在 `commerce` schema
   - T008 — `V001__core_schema.sql` 创建 9 张核心表并建立约束/索引；本地 `mvnw.cmd verify` **BUILD SUCCESS**；`infra/postgres/verify-t008.sql` 返回 **`T008_ACCEPTANCE_OK`**；`agent_app` 对 `commerce.*` 无权限，`commerce_app` / `agent_app` 各自在所属 schema 具备所需权限；`vector` extension 未启用
-- **当前优先任务**：T009 + T010 — Java JPA 领域模型与 `AfterSalesRule` 持久化
-- **下一 Gate**：完成 T009/T010 后，进入 T011–T014 的 Security / Error / Audit / Fixture 基础能力
+  - T009 — `user/`、`order/`、`logistics/` 共 5 个 JPA Entity + 5 个 Repository；`@Version` 乐观锁与 ownership 不可变由映射层表达；新增 `OrderConcurrencyGuaranteesTest` **用可执行测试证明**"乐观锁防丢失更新、唯一约束防重复插入"；`mvnw verify` → **Tests run: 6, Failures: 0, Errors: 0 / BUILD SUCCESS**
+- **当前优先任务**：T010 — `AfterSalesRule` 持久化（`eligibility/`）
+- **下一 Gate**：完成 T010 后，进入 T011–T014 的 Security / Error / Audit / Fixture 基础能力
 - **当前 Blocker**：无
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
@@ -81,7 +82,7 @@
 ## Phase 2 — 当前执行顺序
 
 1. ✅ T008：初始 Flyway migration（核心业务表 + Agent Run/Trace 表）
-2. ⬜ T009：User / Order / OrderItem / Shipment / LogisticsEvent JPA Entity/Repository
+2. ✅ T009：User / Order / OrderItem / Shipment / LogisticsEvent JPA Entity/Repository
 3. ⬜ T010：AfterSalesRule 持久化
 4. ⬜ T011：JWT / role-aware principal
 5. ⬜ T012：统一 Error Envelope
@@ -97,6 +98,14 @@
 - PostgreSQL / Adminer 对宿主机均仅绑定 `127.0.0.1`
 - Flyway 测试检查的是 **V001 存在且 success=true**，不再错误要求“最新 migration 必须永远是 V001”
 - Testcontainers 固定 `postgres:18`，避免 `latest` 漂移
+
+### T009 验收证据
+
+- `mvnw verify` → **Tests run: 6, Failures: 0, Errors: 0 / BUILD SUCCESS**（Spotless 21 文件 clean、SpotBugs 通过、JaCoCo 报告产出）
+- **乐观锁真的生效**：`OrderConcurrencyGuaranteesTest.staleUpdateIsRejectedByOptimisticLocking` —— 两个读者拿到同一快照，先写者成功且版本号自增，后写者被 `ObjectOptimisticLockingFailureException` 拒绝，且先写结果未被覆盖
+- **唯一约束真的在拦重复**：`duplicateShipmentForSameOrderIsRejectedByUniqueConstraint` —— 同一订单第二条运单被 `DataIntegrityViolationException` 拒绝（两条新记录的版本号相同，`@Version` 在此毫无作用）
+- **映射与数据库一致由 `ddl-auto: validate` 保证**：本次它抓出并修正了 `CHAR(3)` 与 `TEXT` 两处类型不匹配（实体如实声明，**未改动已执行的 V001**）
+- **两个状态枚举明确不是数据库约束**：`shipments.status` / `orders.after_sales_status` 在库中无 CHECK，枚举只是 Java 侧护栏；取值为 V1 最小集，待 T024/T026 扩展
 
 ## 维护规则
 
