@@ -70,12 +70,11 @@ class AuditWriterIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> auditWriter.write(rawToken));
 
         AuditEvent jwtValue = eventWithMetadata(Map.of(
-                "safeKey",
-                "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0wMDEifQ.abcdefghijklmnopqrstuvwxyz123456"));
+                "safeKey", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0wMDEifQ.abcdefghijklmnopqrstuvwxyz123456"));
         assertThrows(IllegalArgumentException.class, () -> auditWriter.write(jwtValue));
 
-        AuditEvent hiddenReasoning = eventWithMetadata(
-                Map.of("nested", Map.of("chainOfThought", List.of("private reasoning"))));
+        AuditEvent hiddenReasoning =
+                eventWithMetadata(Map.of("nested", Map.of("chainOfThought", List.of("private reasoning"))));
         assertThrows(IllegalArgumentException.class, () -> auditWriter.write(hiddenReasoning));
     }
 
@@ -110,18 +109,16 @@ class AuditWriterIntegrationTest {
             status.setRollbackOnly();
         });
 
-        assertFalse(repository
-                .findByActionAndResourceIdOrderByCreatedAtAsc("REFUND_REQUEST_CREATE", resourceId)
-                .stream()
-                .findAny()
-                .isPresent());
+        assertFalse(
+                repository.findByActionAndResourceIdOrderByCreatedAtAsc("REFUND_REQUEST_CREATE", resourceId).stream()
+                        .findAny()
+                        .isPresent());
     }
 
     @Test
     void allowsStructuredReasonCodesWithoutHiddenReasoning() {
-        long id = auditWriter.write(eventWithMetadata(Map.of(
-                "reasonCodes", List.of("LOGISTICS_STALLED", "WITHIN_AMOUNT_LIMIT"),
-                "eligible", true)));
+        long id = auditWriter.write(eventWithMetadata(
+                Map.of("reasonCodes", List.of("LOGISTICS_STALLED", "WITHIN_AMOUNT_LIMIT"), "eligible", true)));
 
         AuditLog saved = repository.findById(id).orElseThrow();
         assertTrue(saved.getMetadataJson().containsKey("reasonCodes"));

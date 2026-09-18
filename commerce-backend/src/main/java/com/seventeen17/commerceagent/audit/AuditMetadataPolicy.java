@@ -63,7 +63,8 @@ final class AuditMetadataPolicy {
         }
         if (value instanceof CharSequence sequence) {
             String text = sequence.toString().trim();
-            if (text.regionMatches(true, 0, "Bearer ", 0, "Bearer ".length()) || JWT_PATTERN.matcher(text).matches()) {
+            if (text.regionMatches(true, 0, "Bearer ", 0, "Bearer ".length())
+                    || JWT_PATTERN.matcher(text).matches()) {
                 throw new IllegalArgumentException("Raw authentication token is not allowed in audit metadata");
             }
         }
