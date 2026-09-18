@@ -8,6 +8,8 @@
 
 在普通 `dev` 或 production-like profile 下必须完全不注册。
 
+Reset 是破坏性操作，必须连接专用、可丢弃的 test/eval 数据库；不得把 `test` / `eval` profile 指向共享、预生产或生产业务库。当前实现会清理必要的 audit/test state，因此 profile gate 不是数据库隔离的替代品。
+
 ## Reset Fixture
 
 ```text
