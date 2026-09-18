@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+	<!--
+		Spring singleton collaborators are intentionally constructor-injected and kept in private final fields.
+		These references are not exposed through the public API. Keep EI_EXPOSE_REP2 enabled everywhere else.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.common.error.RestAccessDeniedHandler"/>
+		<Field name="responseWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.common.error.RestAuthenticationEntryPoint"/>
+		<Field name="responseWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.common.error.SecurityErrorResponseWriter"/>
+		<Field name="jsonMapper"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+</FindBugsFilter>
