@@ -133,3 +133,28 @@ def test_terminal_status_is_explicit(status: RunStatus, expected_terminal: bool)
     state = build_state(status=status)
 
     assert state.is_terminal is expected_terminal
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"authorization": "Bearer secret-token"},
+        {"nested": {"chainOfThought": "private reasoning"}},
+        {"note": "request used Bearer secret-token before denial"},
+        {
+            "note": (
+                "auth used eyJhbGciOiJIUzI1NiJ9."
+                "eyJzdWIiOiJjdXN0b21lci0wMDEifQ."
+                "abcdefghijklmnopqrstuvwxyz123456"
+            )
+        },
+    ],
+)
+def test_evidence_rejects_sensitive_persisted_values(payload: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        EvidenceItem(evidence_type="TEST", source="unit-test", data=payload)
+
+
+def test_verification_details_reject_sensitive_persisted_values() -> None:
+    with pytest.raises(ValidationError):
+        VerificationOutcome(details={"nested": {"access_token": "should-never-persist"}})
