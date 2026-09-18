@@ -49,7 +49,8 @@ class AfterSalesRulePersistenceTest {
         AfterSalesRule saved = repository.saveAndFlush(rule);
         assertNotNull(saved.getId());
 
-        AfterSalesRule loaded = repository.findByRuleCodeAndVersion("T010-ROUNDTRIP", 1).orElseThrow();
+        AfterSalesRule loaded =
+                repository.findByRuleCodeAndVersion("T010-ROUNDTRIP", 1).orElseThrow();
         assertEquals("ELECTRONICS", loaded.getProductCategory());
         assertEquals(OrderStatus.SHIPPED, loaded.getRequiredOrderStatus());
         assertEquals(48, loaded.getLogisticsStalledHours());
