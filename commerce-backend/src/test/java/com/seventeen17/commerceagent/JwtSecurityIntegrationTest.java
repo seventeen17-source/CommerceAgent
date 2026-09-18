@@ -57,6 +57,18 @@ class JwtSecurityIntegrationTest {
     }
 
     @Test
+    void currentPrincipalEndpointReturnsAuthoritativeUserAndRole() throws Exception {
+        seedUser("t011-current-principal", "t011-current-principal", UserRole.CUSTOMER, UserStatus.ACTIVE);
+        Instant now = Instant.now();
+        String token = encode("t011-current-principal", now, now.plusSeconds(3600), "APPROVER");
+
+        mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value("t011-current-principal"))
+                .andExpect(jsonPath("$.role").value("CUSTOMER"));
+    }
+
+    @Test
     void requestWithoutJwtIsRejected() throws Exception {
         mockMvc.perform(get("/__test/security/principal")).andExpect(status().isUnauthorized());
     }
