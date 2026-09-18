@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T010
+- **当前 Tasks**：T010（实现完成，待本地 `mvnw verify` 验收）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -16,7 +16,7 @@
   - T007 — `application.yml`（含 dev profile，应用身份 `commerce_app` / 迁移身份 `migrator` 分离）、`application-test.yml`（数据源由 Testcontainers 注入）、`app/config/settings.py`。实测 `mvnw spring-boot:run` **Started CommerceBackendApplication in 4.538 seconds**，Flyway 以 `migrator` 身份把 history 表建在 `commerce` schema
   - T008 — `V001__core_schema.sql` 创建 9 张核心表并建立约束/索引；本地 `mvnw.cmd verify` **BUILD SUCCESS**；`infra/postgres/verify-t008.sql` 返回 **`T008_ACCEPTANCE_OK`**；`agent_app` 对 `commerce.*` 无权限，`commerce_app` / `agent_app` 各自在所属 schema 具备所需权限；`vector` extension 未启用
   - T009 — `user/`、`order/`、`logistics/` 共 5 个 JPA Entity + 5 个 Repository；`@Version` 乐观锁与 ownership 不可变由映射层表达；新增 `OrderConcurrencyGuaranteesTest` **用可执行测试证明**"乐观锁防丢失更新、唯一约束防重复插入"；`mvnw verify` → **Tests run: 7, Failures: 0, Errors: 0 / BUILD SUCCESS**
-- **当前优先任务**：T010 — `AfterSalesRule` 持久化（`eligibility/`）
+- **当前优先任务**：验收 T010 — `AfterSalesRule` 持久化（`foundation/after-sales-rule`）
 - **下一 Gate**：完成 T010 后，进入 T011–T014 的 Security / Error / Audit / Fixture 基础能力
 - **当前 Blocker**：无
 - **环境事实（重要）**：
@@ -83,7 +83,7 @@
 
 1. ✅ T008：初始 Flyway migration（核心业务表 + Agent Run/Trace 表）
 2. ✅ T009：User / Order / OrderItem / Shipment / LogisticsEvent JPA Entity/Repository
-3. ⬜ T010：AfterSalesRule 持久化
+3. 🟨 T010：AfterSalesRule 持久化（代码已提交，待本地 verify 后勾选 tasks.md）
 4. ⬜ T011：JWT / role-aware principal
 5. ⬜ T012：统一 Error Envelope
 6. ⬜ T013：结构化 Audit Writer
