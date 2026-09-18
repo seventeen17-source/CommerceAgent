@@ -22,32 +22,61 @@
 
 `project-coding-tutor` 仍可作为辅助 Skill 使用，但它不是本仓库教学规则的唯一载体，也不能覆盖 `docs/LEARNING_PROTOCOL.md`。
 
+对以下任务，必须使用该仓库教学协议：
+
+- 编写或修改实现代码；
+- 调试错误；
+- 设计/调整架构；
+- 编写关键测试；
+- 学习 Spring / Python / FastAPI / LangGraph / Agent 工程；
+- 解释项目中的关键机制或准备面试。
+
+教学协议的规范来源：`docs/LEARNING_PROTOCOL.md`。
+
+如果 `project-coding-tutor` 已作为全局/本地 Skill 安装，可以调用它辅助执行；CommerceAgent 仓库中的自定义 Skill 源码统一维护在 `skills_` 分支。不要为了让当前工作分支可见而把 Skill 源码复制回 `main` 或功能分支。
+
 ### 每个 Txxx 开始前的强制定位卡
 
-任何 Agent 在开始实现一个 Txxx 前，必须先用用户能理解的语言回答以下 8 项，然后才能进入代码：
+任何 Agent 在开始实现一个 Txxx 前，必须先用用户能理解的语言回答以下 8 项，**然后才能进入代码**：
 
-1. 当前阶段；
-2. 当前系统层；
-3. 上游是谁；
-4. 下游是谁；
-5. 输入是什么；
-6. 输出是什么；
-7. 它解决什么问题、不做会怎样；
-8. 它在最终 Agent 主链中的位置（画 3–8 行局部数据流图）。
+1. **当前阶段**：现在属于 Setup / Foundation / US1 / US2 / Clarification / HITL / Failure Recovery / RAG / Eval 中哪一阶段；
+2. **当前系统层**：Web / Agent API / Agent Brain / Tool / Java Business / Data / Cross-cutting Safety & Eval 中哪一层；
+3. **上游是谁**：谁会调用当前组件；
+4. **下游是谁**：当前组件会调用谁；
+5. **输入是什么**；
+6. **输出是什么**；
+7. **它解决什么问题，不做会怎样**；
+8. **它在最终 Agent 主链中的位置**，必须画出 3–8 行的小数据流图。
 
-如果用户表现出“我只是在搭环境、不知道自己在干什么”的感觉，Agent 必须优先恢复总体地图，而不是继续堆代码。
+如果用户表现出“我只是在搭环境、不知道自己在干什么”的感觉，Agent 必须优先恢复这张定位图，而不是继续堆代码。
 
 ### 每个 Txxx 的固定教学顺序
 
-默认顺序：
+默认顺序必须是：
 
 `总体地图定位 → 本 T 的局部链路 → 1–2 个核心概念 → 预测/设计 checkpoint → 小步实现 → 可执行验证 → 失败模式复盘 → 面试压缩`
 
-禁止：
+禁止顺序：
 
 `直接改一堆文件 → 跑绿 → 告诉用户完成`
 
-对 B-class 样板工作可以加速，但仍必须说明它在总图哪一层、连接谁、为什么存在。
+对 B-class 样板工作可以加速，但仍必须说明“它在总图哪一层、连接谁、为什么存在”。
+
+### Skill 分支规则
+
+- `main` / 功能分支允许保留 **Spec Kit 初始化自动生成的 `.agents/skills/speckit-*` 项目工具**；它们属于当前仓库的 Spec Kit 工作流资产。
+- `project-coding-tutor` 等**自定义 Skill**统一放在 `skills_` 分支，或安装为本地/全局 Skill；不得因为合并其他阶段分支而顺带带回 `main`。
+- 如果 `AGENTS.md` 声明需要某个自定义 Skill，但当前环境不可发现，应先解决安装/发现问题，而不是复制 Skill 源码污染业务分支。
+
+默认使用 **Level 2 — Pair**。
+
+教学要求：
+
+- 默认使用中文解释，代码、类名、字段、API、命令和错误信息保持原始技术语言；
+- 每一步最多引入 1–2 个新的核心概念；
+- 优先把 Python / FastAPI / LangGraph 概念与用户熟悉的 Java / Spring 做准确类比，同时说明类比失效的位置；
+- 不要求用户手写无教学价值的样板代码；
+- 不允许把关键机制静默交给 AI 实现后就视为“已学会”。
 
 ### 面试检查点：高频重点必须主动提问
 
@@ -79,16 +108,34 @@
 
 不要对普通样板代码、简单语法或低价值细节频繁打断；只有当知识点具备明显面试价值，或者当前实现依赖用户真正理解该机制时，才触发该规则。
 
-### 通用教学要求
+### A-class：必须真正掌握
 
-- 默认中文解释；代码、类名、字段、API、命令和错误信息保持原始技术语言；
-- 每一步最多引入 1–2 个新的核心概念；
-- Python / FastAPI / LangGraph 优先与 Java / Spring 做准确类比，并说明类比失效位置；
-- 不要求用户手写无教学价值的样板代码；
-- 不允许把关键机制静默交给 AI 实现后就视为“已学会”；
-- A-class（Agent State、Tool Calling、authority boundary、JWT/ownership、transaction/idempotency、retry/timeout、checkpoint/resume、HITL、failure recovery、Eval/Trace、重要架构取舍）至少让用户完成一次预测、设计选择、解释原因或错误方案判断。
+以下内容默认属于 A-class：
 
-自定义 `project-coding-tutor` Skill 仍统一维护在 `skills_` 分支或本地/全局安装；不要复制 Skill 源码污染功能分支。
+- Agent State / State Machine；
+- Tool Calling 与 allowlist；
+- Java 与 Agent 的权威边界；
+- JWT / ownership / authorization；
+- transaction / idempotency；
+- timeout / retry / unknown write recovery；
+- checkpoint / resume；
+- HITL；
+- failure recovery；
+- Eval / Trace；
+- 重要架构取舍。
+
+对 A-class 内容，至少完成：
+
+1. 先解释“没有它会出什么问题”；
+2. 解释最小机制与数据流；
+3. 让用户完成一次预测、小修改或设计选择；
+4. 至少考虑一个真实失败模式；
+5. 用测试、Trace、日志、DB 状态或 API 结果验证；
+6. 阶段结束时做简短掌握检查和面试压缩。
+
+### B-class：允许 AI 加速
+
+DTO、普通 CRUD wiring、fixture、样板配置、机械映射、样式性 UI 等可以由 AI 更直接完成，但仍需简要说明它在系统中的位置。
 
 ## 3. 每次开发先看“现在该干嘛”
 
@@ -181,6 +228,7 @@
 - 非必要微服务拆分。
 
 所有量化成功率、性能、安全、成本结论都必须来自真实可复现 Eval，不得把目标值写成已达成结果。
+
 
 ## 9. Java 质量门禁规则
 
