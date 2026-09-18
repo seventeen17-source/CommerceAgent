@@ -21,8 +21,7 @@ public class TraceIdFilter extends OncePerRequestFilter {
     private static final String MDC_KEY = "traceId";
 
     @Override
-    protected void doFilterInternal(
-            HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String traceId = currentOrCreate(request);
         response.setHeader(HEADER_NAME, traceId);

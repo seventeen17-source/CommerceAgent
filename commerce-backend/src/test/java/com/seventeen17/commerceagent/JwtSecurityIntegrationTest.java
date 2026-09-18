@@ -111,8 +111,7 @@ class JwtSecurityIntegrationTest {
         int index = parts[2].length() / 2;
         char current = parts[2].charAt(index);
         char replacement = current == 'A' ? 'B' : 'A';
-        String tamperedSignature =
-                parts[2].substring(0, index) + replacement + parts[2].substring(index + 1);
+        String tamperedSignature = parts[2].substring(0, index) + replacement + parts[2].substring(index + 1);
         return parts[0] + "." + parts[1] + "." + tamperedSignature;
     }
 

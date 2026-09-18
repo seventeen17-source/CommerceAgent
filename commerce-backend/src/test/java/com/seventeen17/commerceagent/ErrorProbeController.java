@@ -28,5 +28,6 @@ class ErrorProbeController {
         throw new IllegalStateException("sensitive-internal-message-must-not-leak");
     }
 
-    record ValidationRequest(@NotBlank(message = "value must not be blank") String value) {}
+    record ValidationRequest(
+            @NotBlank(message = "value must not be blank") String value) {}
 }

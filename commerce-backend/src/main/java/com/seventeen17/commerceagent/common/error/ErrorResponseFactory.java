@@ -14,10 +14,6 @@ public class ErrorResponseFactory {
     public ErrorResponse create(
             HttpServletRequest request, ErrorCode errorCode, String message, Map<String, Object> details) {
         return new ErrorResponse(
-                errorCode,
-                message,
-                errorCode.retryable(),
-                TraceIdFilter.currentOrCreate(request),
-                details);
+                errorCode, message, errorCode.retryable(), TraceIdFilter.currentOrCreate(request), details);
     }
 }

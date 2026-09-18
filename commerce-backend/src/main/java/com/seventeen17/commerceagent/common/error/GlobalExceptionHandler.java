@@ -32,8 +32,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     ResponseEntity<ErrorResponse> handleBusinessException(BusinessException exception, HttpServletRequest request) {
         ErrorCode errorCode = exception.getErrorCode();
-        ErrorResponse body =
-                errorResponseFactory.create(request, errorCode, exception.getMessage(), Map.of());
+        ErrorResponse body = errorResponseFactory.create(request, errorCode, exception.getMessage(), Map.of());
         return ResponseEntity.status(errorCode.httpStatus()).body(body);
     }
 
@@ -47,10 +46,7 @@ public class GlobalExceptionHandler {
 
         ErrorCode errorCode = ErrorCode.INVALID_PARAMETER;
         ErrorResponse body = errorResponseFactory.create(
-                request,
-                errorCode,
-                errorCode.defaultMessage(),
-                Map.of("fieldErrors", fieldErrors));
+                request, errorCode, errorCode.defaultMessage(), Map.of("fieldErrors", fieldErrors));
         return ResponseEntity.status(errorCode.httpStatus()).body(body);
     }
 
@@ -74,24 +70,20 @@ public class GlobalExceptionHandler {
     })
     ResponseEntity<ErrorResponse> handleMalformedRequest(Exception exception, HttpServletRequest request) {
         ErrorCode errorCode = ErrorCode.INVALID_PARAMETER;
-        return ResponseEntity.status(errorCode.httpStatus())
-                .body(errorResponseFactory.create(request, errorCode));
+        return ResponseEntity.status(errorCode.httpStatus()).body(errorResponseFactory.create(request, errorCode));
     }
 
     @ExceptionHandler(AuthenticationException.class)
     ResponseEntity<ErrorResponse> handleAuthenticationException(
             AuthenticationException exception, HttpServletRequest request) {
         ErrorCode errorCode = ErrorCode.AUTH_REQUIRED;
-        return ResponseEntity.status(errorCode.httpStatus())
-                .body(errorResponseFactory.create(request, errorCode));
+        return ResponseEntity.status(errorCode.httpStatus()).body(errorResponseFactory.create(request, errorCode));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    ResponseEntity<ErrorResponse> handleAccessDenied(
-            AccessDeniedException exception, HttpServletRequest request) {
+    ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException exception, HttpServletRequest request) {
         ErrorCode errorCode = ErrorCode.ACCESS_DENIED;
-        return ResponseEntity.status(errorCode.httpStatus())
-                .body(errorResponseFactory.create(request, errorCode));
+        return ResponseEntity.status(errorCode.httpStatus()).body(errorResponseFactory.create(request, errorCode));
     }
 
     @ExceptionHandler(Exception.class)
@@ -99,7 +91,6 @@ public class GlobalExceptionHandler {
         ErrorCode errorCode = ErrorCode.INTERNAL_ERROR;
         String traceId = TraceIdFilter.currentOrCreate(request);
         log.error("Unhandled request failure traceId={}", traceId, exception);
-        return ResponseEntity.status(errorCode.httpStatus())
-                .body(errorResponseFactory.create(request, errorCode));
+        return ResponseEntity.status(errorCode.httpStatus()).body(errorResponseFactory.create(request, errorCode));
     }
 }

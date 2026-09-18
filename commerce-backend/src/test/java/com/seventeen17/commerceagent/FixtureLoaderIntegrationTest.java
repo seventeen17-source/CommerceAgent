@@ -63,9 +63,7 @@ class FixtureLoaderIntegrationTest {
                         "SELECT COUNT(*) FROM commerce.users WHERE id IN ('customer-001','customer-002','approver-001')"));
         assertEquals(2, count("SELECT COUNT(*) FROM commerce.orders WHERE id IN ('order-001','order-002')"));
         assertEquals(2, count("SELECT COUNT(*) FROM commerce.shipments WHERE id IN ('shipment-001','shipment-002')"));
-        assertEquals(
-                1,
-                count("""
+        assertEquals(1, count("""
                         SELECT COUNT(*) FROM commerce.after_sales_rules
                         WHERE rule_code = 'LOGISTICS_STALLED_REFUND' AND version = 1
                         """));
@@ -86,17 +84,12 @@ class FixtureLoaderIntegrationTest {
 
         assertEquals(
                 "SHIPPED",
-                jdbcTemplate.queryForObject(
-                        "SELECT status FROM commerce.orders WHERE id = 'order-001'", String.class));
+                jdbcTemplate.queryForObject("SELECT status FROM commerce.orders WHERE id = 'order-001'", String.class));
         assertEquals(0, auditLogRepository.count());
-        assertEquals(
-                "2026-09-12 08:00:00+00",
-                jdbcTemplate.queryForObject(
-                        """
+        assertEquals("2026-09-12 08:00:00+00", jdbcTemplate.queryForObject("""
                         SELECT to_char(last_event_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') || '+00'
                         FROM commerce.shipments WHERE id = 'shipment-001'
-                        """,
-                        String.class));
+                        """, String.class));
     }
 
     @Test

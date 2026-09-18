@@ -66,8 +66,7 @@ class ErrorEnvelopeIntegrationTest {
         String token = localJwtIssuer.issue("t012-invalid-token");
         String tampered = tamperSignature(token);
 
-        MvcResult result = mockMvc.perform(
-                        get("/__test/errors/business").header("Authorization", "Bearer " + tampered))
+        MvcResult result = mockMvc.perform(get("/__test/errors/business").header("Authorization", "Bearer " + tampered))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.errorCode").value("AUTH_REQUIRED"))
                 .andReturn();
@@ -79,8 +78,7 @@ class ErrorEnvelopeIntegrationTest {
     void businessExceptionUsesStableCodeAndHttpStatus() throws Exception {
         String token = tokenFor("t012-business");
 
-        MvcResult result = mockMvc.perform(
-                        get("/__test/errors/business").header("Authorization", "Bearer " + token))
+        MvcResult result = mockMvc.perform(get("/__test/errors/business").header("Authorization", "Bearer " + token))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.errorCode").value("INVALID_ORDER_STATE"))
                 .andExpect(jsonPath("$.message").value("Order state does not allow the requested action"))
@@ -111,8 +109,7 @@ class ErrorEnvelopeIntegrationTest {
     void unexpectedExceptionDoesNotLeakInternalMessage() throws Exception {
         String token = tokenFor("t012-internal");
 
-        MvcResult result = mockMvc.perform(
-                        get("/__test/errors/internal").header("Authorization", "Bearer " + token))
+        MvcResult result = mockMvc.perform(get("/__test/errors/internal").header("Authorization", "Bearer " + token))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.errorCode").value("INTERNAL_ERROR"))
                 .andExpect(jsonPath("$.message").value("Internal server error"))
@@ -148,8 +145,7 @@ class ErrorEnvelopeIntegrationTest {
         int index = parts[2].length() / 2;
         char current = parts[2].charAt(index);
         char replacement = current == 'A' ? 'B' : 'A';
-        String tamperedSignature =
-                parts[2].substring(0, index) + replacement + parts[2].substring(index + 1);
+        String tamperedSignature = parts[2].substring(0, index) + replacement + parts[2].substring(index + 1);
         return parts[0] + "." + parts[1] + "." + tamperedSignature;
     }
 
