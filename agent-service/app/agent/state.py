@@ -38,10 +38,58 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
+import re
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+_FORBIDDEN_PERSISTED_KEYS = {
+    "authorization",
+    "token",
+    "rawtoken",
+    "accesstoken",
+    "refreshtoken",
+    "idtoken",
+    "password",
+    "secret",
+    "apikey",
+    "cookie",
+    "setcookie",
+    "chainofthought",
+    "cot",
+    "reasoning",
+    "internalreasoning",
+    "rawprompt",
+}
+_BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+_JWT_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])"
+)
+
+
+def _normalize_sensitive_key(key: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", key).lower()
+
+
+def _validate_persistable_value(value: Any, path: str) -> None:
+    """Reject raw credentials/hidden reasoning before arbitrary structured state can be persisted."""
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            normalized = _normalize_sensitive_key(str(key))
+            if normalized in _FORBIDDEN_PERSISTED_KEYS:
+                raise ValueError(f"sensitive state key is not allowed at {path}.{key}")
+            _validate_persistable_value(nested, f"{path}.{key}")
+        return
+    if isinstance(value, (list, tuple, set)):
+        for index, nested in enumerate(value):
+            _validate_persistable_value(nested, f"{path}[{index}]")
+        return
+    if isinstance(value, str) and (
+        _BEARER_PATTERN.search(value) is not None or _JWT_PATTERN.search(value) is not None
+    ):
+        raise ValueError(f"raw authentication token is not allowed at {path}")
 
 
 class PrincipalRole(StrEnum):
@@ -102,6 +150,12 @@ class EvidenceItem(BaseModel):
     source: str = Field(min_length=1, max_length=100)
     data: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("data")
+    @classmethod
+    def reject_sensitive_persisted_data(cls, value: dict[str, Any]) -> dict[str, Any]:
+        _validate_persistable_value(value, "evidence.data")
+        return value
+
 
 class EligibilitySnapshot(BaseModel):
     """Deterministic eligibility result returned by the Java backend."""
@@ -114,8 +168,8 @@ class EligibilitySnapshot(BaseModel):
     allowed_action: str = Field(min_length=1, max_length=32)
     max_refund_amount: Decimal | None = None
     approval_required: bool
-    rule_code: str | None = Field(default=None, max_length=100)
-    rule_version: int | None = Field(default=None, ge=1)
+    rule_code: str = Field(min_length=1, max_length=100)
+    rule_version: int = Field(ge=1)
     reason_codes: list[str] = Field(default_factory=list)
 
 
@@ -165,6 +219,12 @@ class VerificationOutcome(BaseModel):
     status: VerificationStatus = VerificationStatus.NOT_RUN
     resource_id: str | None = Field(default=None, max_length=128)
     details: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("details")
+    @classmethod
+    def reject_sensitive_persisted_details(cls, value: dict[str, Any]) -> dict[str, Any]:
+        _validate_persistable_value(value, "verification.details")
+        return value
 
 
 class AgentState(BaseModel):
