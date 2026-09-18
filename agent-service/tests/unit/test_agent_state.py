@@ -2,7 +2,6 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
 
 from app.agent.state import (
     AgentState,
@@ -18,6 +17,7 @@ from app.agent.state import (
     WriteOutcome,
     WriteStatus,
 )
+from pydantic import ValidationError
 
 
 def build_state(**overrides: object) -> AgentState:
