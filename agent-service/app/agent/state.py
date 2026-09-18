@@ -19,6 +19,19 @@ Persistence boundary (T017) -- this object is deliberately NOT the `agent.agent_
   `state_json`) is the authoritative copy of the *runtime* state. T017 owns writing both in one
   transaction and must not let the two drift.
 - Being stored here still grants nothing: `AgentRun.status` is not business authorization.
+
+Cross-service value policy (why some fields are `str`, not `StrEnum`):
+- `StrEnum` is used only for value sets this service owns and must branch on exhaustively
+  (run lifecycle, write/verification status, principal role).
+- Values owned by the Java backend (`allowed_action`, approval `status`, `error_code`) stay open
+  strings on purpose. Mirroring a remote enum here would turn an additive Java change into a
+  Python parse failure and would add a fourth copy of a set already declared in
+  `AllowedAction.java`, the V001 CHECK constraint, and `data-model.md`.
+- An unknown remote value must degrade controllably (`SAFE_STOP` plus a reason code), never into
+  "the response failed to parse": a strict enum cannot distinguish a benign additive rollout
+  from a corrupt payload, and both would surface as an unhandled validation error.
+- Never infer permission from an unknown or absent value: a write is unlocked only by an
+  explicit positive confirmation from the backend.
 """
 
 from __future__ import annotations
@@ -96,6 +109,8 @@ class EligibilitySnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     eligible: bool
+    # Owned by Java `AllowedAction` + the V001 CHECK constraint. Open string on purpose: see the
+    # cross-service value policy in the module docstring. Unknown values must safe-stop.
     allowed_action: str = Field(min_length=1, max_length=32)
     max_refund_amount: Decimal | None = None
     approval_required: bool
@@ -110,6 +125,8 @@ class ApprovalSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     approval_request_id: str | None = Field(default=None, max_length=128)
+    # Owned by the Java approval state machine. Only a positively confirmed value may unlock a
+    # write; unknown/absent must never be read as approval.
     status: str | None = Field(default=None, max_length=32)
 
 
@@ -121,6 +138,8 @@ class ToolHistoryEntry(BaseModel):
     step_index: int = Field(ge=0)
     tool_name: str = Field(min_length=1, max_length=100)
     success: bool
+    # Java `ErrorCode` / tool-contract code. Python branches on the few codes it understands and
+    # safe-stops on the rest; it deliberately does not mirror the full error catalogue.
     error_code: str | None = Field(default=None, max_length=100)
     retryable: bool = False
     trace_id: str | None = Field(default=None, max_length=128)
@@ -134,6 +153,7 @@ class WriteOutcome(BaseModel):
     status: WriteStatus = WriteStatus.NOT_ATTEMPTED
     action: str | None = Field(default=None, max_length=100)
     resource_id: str | None = Field(default=None, max_length=128)
+    # See `ToolHistoryEntry.error_code`: same cross-service code space, same policy.
     error_code: str | None = Field(default=None, max_length=100)
 
 

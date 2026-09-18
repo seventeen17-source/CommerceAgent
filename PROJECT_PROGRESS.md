@@ -32,7 +32,7 @@
   - Python 侧验收命令：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`、`uv run pytest -q`（四条全绿才算通过）
 - **未决项**：
   - `.specify/feature.json` 本地仍指向 `specs/001-agent-career-project`，后续应切换为 `specs/002-commerce-after-sales-agent`
-  - T015 评审留了 3 个未处置发现（详见 `docs/devlog/2026-09-18.md` 的「T015 review findings」）：有界取值集改 `StrEnum`；写清 `current_node` / `model_*` / token / 时间戳属于 T017 持久化字段而非 `AgentState`；`max_steps` / `max_retries` 移入 `settings.py`
+  - T015 的 3 个评审发现已全部在 T015 内处置完毕（详见 `docs/devlog/2026-09-18.md` 的「T015 review findings 处置结果」）：②③ 采纳并落地，① 经判断**拒绝**并把"跨服务取值策略"写进 `state.py`（远程拥有的值域不镜像成 `StrEnum`，未知值受控降级为 `SAFE_STOP`）
   - 根 `.gitignore` 建议补 `.mypy_cache/`、`.ruff_cache/`（当前靠工具默认行为兜底）
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
