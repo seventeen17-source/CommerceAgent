@@ -15,11 +15,11 @@ import com.seventeen17.commerceagent.user.UserRepository;
 import com.seventeen17.commerceagent.user.UserRole;
 import java.math.BigDecimal;
 import java.time.Instant;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.ActiveProfiles;
@@ -145,9 +145,7 @@ class OrderConcurrencyGuaranteesTest {
         ConstraintViolationException constraintViolation = findConstraintViolation(exception);
         assertEquals("23505", constraintViolation.getSQLException().getSQLState(), "必须是 PostgreSQL unique_violation");
         assertEquals(
-                "shipments_order_id_key",
-                constraintViolation.getConstraintName(),
-                "必须由 UNIQUE(order_id) 拒绝，而不是其他约束");
+                "shipments_order_id_key", constraintViolation.getConstraintName(), "必须由 UNIQUE(order_id) 拒绝，而不是其他约束");
 
         assertTrue(shipmentRepository.existsByOrderId(orderId), "第一条运单应仍然存在");
         assertEquals(1, shipmentRepository.findByOrderId(orderId).stream().count(), "该订单只能有一条运单");

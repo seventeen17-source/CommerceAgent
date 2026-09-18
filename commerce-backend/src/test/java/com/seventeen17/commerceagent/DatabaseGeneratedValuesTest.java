@@ -33,13 +33,8 @@ class DatabaseGeneratedValuesTest {
         User savedUser = userRepository.saveAndFlush(user);
         assertNotNull(savedUser.getCreatedAt(), "User.createdAt 应在 INSERT 后从数据库回填到 saveAndFlush 返回的实体");
 
-        Order order =
-                Order.create(
-                        "t009-generated-order",
-                        savedUser.getId(),
-                        OrderStatus.PAID,
-                        new BigDecimal("19.90"),
-                        "CNY");
+        Order order = Order.create(
+                "t009-generated-order", savedUser.getId(), OrderStatus.PAID, new BigDecimal("19.90"), "CNY");
         orderRepository.saveAndFlush(order);
         assertNotNull(order.getCreatedAt(), "Order.createdAt 应在 INSERT 后回填到当前 Order 实例");
     }
