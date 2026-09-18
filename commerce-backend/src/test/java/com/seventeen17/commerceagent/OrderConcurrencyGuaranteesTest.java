@@ -90,7 +90,6 @@ class OrderConcurrencyGuaranteesTest {
                 "先写入的结果不能被后写入者覆盖：这正是丢失更新要防的事");
     }
 
-
     @Test
     void staleShipmentUpdateIsRejectedByOptimisticLocking() {
         String orderId = "t009-order-shipment-lock";
