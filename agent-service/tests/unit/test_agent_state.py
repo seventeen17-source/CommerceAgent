@@ -158,3 +158,15 @@ def test_evidence_rejects_sensitive_persisted_values(payload: dict[str, object])
 def test_verification_details_reject_sensitive_persisted_values() -> None:
     with pytest.raises(ValidationError):
         VerificationOutcome(details={"nested": {"access_token": "should-never-persist"}})
+
+
+def test_java_owned_allowed_action_remains_forward_compatible() -> None:
+    snapshot = EligibilitySnapshot(
+        eligible=True,
+        allowed_action="EXCHANGE",
+        approval_required=False,
+        rule_code="FUTURE-RULE",
+        rule_version=2,
+    )
+
+    assert snapshot.allowed_action == "EXCHANGE"
