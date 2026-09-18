@@ -910,40 +910,48 @@ T083  最终作品集 README
 
 ## 13. 当前阶段怎么映射到总图
 
-当前项目导航文件把实现起点定义为 Phase 1 / T001–T007。
+实际当前 Task 必须以 `PROJECT_PROGRESS.md` 为准，不在本架构文档硬编码长期不变的“当前任务”。
+
+截至 T016 前后的 Foundation 阶段，可以这样定位：
 
 ```text
-T002
-Spring Initializr
-→ 把“Java Backend”框搭出来
+① Web
+   目前主要还是脚手架
 
-T003
-uv init
-→ 把“Agent Service”框搭出来
+② Agent 接入层
+   T018 将补 FastAPI Auth / Run API
 
-T004
-Vite React TS
-→ 把“Web”框搭出来
+③ Agent 大脑层
+   T015 AgentState ✅
+   T030–T032 才进入理解 / 路由 / LangGraph 核心
 
-T005
-PostgreSQL + Docker Compose
-→ 把“DB + Infra”框搭出来
+④ Tool / Client 层
+   T016 CommerceClient ← 当前附近
+   T029 Typed Tools     ← 后续第一次明显有 Tool Calling 感
 
-T006/T007
-→ 给这些空壳补开发质量和配置基础
+⑤ Java 业务权威层
+   T009–T014 已完成大量基础
+   T023–T028 会补 US1 真正业务 API
+
+⑥ PostgreSQL
+   T005/T008 已建立基础边界
 ```
 
-因此 T002/T003/T004 完成时，项目依然只是**三个可运行空壳**，不是业务功能已完成。
+因此，Foundation 后半段看起来仍有很多“基础设施”，但它已经不是单纯环境搭建。T015–T018 正在建立 **Agent runtime 与真实业务系统之间的运行边界**。
 
-Phase 1 Gate 至少要求：
+学习时不要只看 `T016 / 83`，而应同时看：
 
-- Java 官方脚手架与 Maven Wrapper 可用；
-- Python 官方 uv 项目、Python 3.13、`uv.lock` 可复现；
-- React + TypeScript Vite 工程能 build；
-- PostgreSQL / Docker Compose 基础环境可启动；
-- 三端最小启动/构建成功；
-- 没有提前引入 MCP / Multi-Agent 等非当前依赖；
-- devlog 记录真实证据。
+```text
+工程骨架             已建立
+业务权威基础         已建立主要部分
+Agent Runtime        正在建立
+Agent 决策 / Routing 尚未开始
+Tool Execution       尚未开始
+HITL / Resume        尚未开始
+Eval                 仅有基础 fixture，完整评估未开始
+```
+
+具体教学方式见 `docs/LEARNING_PROTOCOL.md`。
 
 ---
 
