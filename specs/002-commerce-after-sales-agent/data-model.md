@@ -247,6 +247,8 @@ Python **不得直接读写 `commerce` 业务表**；它访问权威业务状态
 - 必须持久化足够状态支持 clarification/approval resume；
 - 业务真相仅引用，不复制为 Agent 权威；
 - Run 查询/恢复接口必须验证 authenticated ownership 或明确 operational role。
+- `current_node` / `next_action` / `final_action` / `model_name` / `model_temperature` / `prompt_version` / `input_tokens` / `output_tokens` / `started_at` / `completed_at` 属于 `agent_runs` 行本身，**不属于** Python `AgentState`；`state_json` 只承载 `AgentState` 的字段（见 `agent-service/app/agent/state.py` 的 persistence boundary 说明）。
+- `status` / `intent` / `resolved_order_id` / `step_count` / `retry_count` 在行与 `state_json` 中**同时存在且刻意重复**：行是"可查询投影"（便于按状态/用户查询），`state_json` 是运行时状态的权威副本。两者必须由 T017 在**同一次写入**中保持一致，不允许出现"行显示 COMPLETED、payload 仍是 RUNNING"这类漂移。
 
 ## 13. ToolExecution
 

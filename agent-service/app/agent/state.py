@@ -7,6 +7,18 @@ Security boundary:
 - Keep only derived principal context (user_id / role), never a raw JWT or credential.
 - Store verified business evidence and backend decisions as structured snapshots.
 - Persisting/restoring this state is a T017 concern.
+
+Persistence boundary (T017) -- this object is deliberately NOT the `agent.agent_runs` row:
+- Row-only run metadata belongs to the table, not here: `current_node`, `next_action`,
+  `final_action`, run-level `error_code`, `model_name`, `model_temperature`, `prompt_version`,
+  `input_tokens`, `output_tokens`, `started_at`, `completed_at`. See
+  `commerce-backend/src/main/resources/db/migration/V001__core_schema.sql` and
+  `specs/002-commerce-after-sales-agent/data-model.md` section 12.
+- `status`, `intent`, `resolved_order_id`, `step_count`, `retry_count` intentionally exist in
+  both places: the row column is the *queryable projection*, this object (serialized into
+  `state_json`) is the authoritative copy of the *runtime* state. T017 owns writing both in one
+  transaction and must not let the two drift.
+- Being stored here still grants nothing: `AgentRun.status` is not business authorization.
 """
 
 from __future__ import annotations
@@ -154,6 +166,10 @@ class AgentState(BaseModel):
     approval: ApprovalSnapshot | None = None
     tool_history: list[ToolHistoryEntry] = Field(default_factory=list)
 
+    # Safety budgets. The configurable values live in `app.config.settings`
+    # (`agent_max_steps` / `agent_max_retries`) and are injected by run creation (T017/T018);
+    # these defaults are only a last-resort safety net so a directly constructed state can
+    # never be unbounded. A restored checkpoint keeps the budgets it was created with.
     step_count: int = Field(default=0, ge=0)
     max_steps: int = Field(default=12, ge=1)
     retry_count: int = Field(default=0, ge=0)

@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     commerce_api_base_url: str = "http://localhost:8080"
     commerce_api_timeout_seconds: float = 5.0
 
+    # ---- Agent 运行安全预算（run 创建时注入 AgentState，见 T017/T018）----
+    # 放在这里而不是写死在 state.py：Eval 需要按 case 收紧预算来验证"步数耗尽则 SAFE_STOP"，
+    # 而测试要验证的是机制而不是某个魔数。
+    agent_max_steps: int = 12
+    agent_max_retries: int = 2
+
     # ---- 模型供应商（research.md 决策 15：不写死供应商，但先支持一个 OpenAI-compatible）----
     model_provider: str = "openai"
     model_name: str = "gpt-4o-mini"
