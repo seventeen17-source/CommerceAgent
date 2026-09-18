@@ -96,8 +96,7 @@ class OrderConcurrencyGuaranteesTest {
         String orderId = "t009-order-shipment-lock";
         String shipmentId = "t009-shipment-lock";
         seedOrder(orderId);
-        shipmentRepository.save(
-                Shipment.create(shipmentId, orderId, "SF", "SF-LOCK-0001", ShipmentStatus.CREATED));
+        shipmentRepository.save(Shipment.create(shipmentId, orderId, "SF", "SF-LOCK-0001", ShipmentStatus.CREATED));
 
         Shipment firstReader = shipmentRepository.findById(shipmentId).orElseThrow();
         Shipment secondReader = shipmentRepository.findById(shipmentId).orElseThrow();
