@@ -23,7 +23,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** T013：验证结构化审计持久化、敏感数据护栏和业务事务回滚语义。 */
+/** T013：验证结构化审计持久化、敏感数据护栏和两类事务边界。 */
 @ActiveProfiles("test")
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest
@@ -41,7 +41,7 @@ class AuditWriterIntegrationTest {
     @Test
     void writesStructuredAuditEvent() {
         UUID runId = UUID.randomUUID();
-        long id = auditWriter.write(new AuditEvent(
+        long id = auditWriter.writeBusinessEvent(new AuditEvent(
                 AuditActorType.USER,
                 "customer-t013",
                 "REFUND_REQUEST_CREATE",
@@ -67,15 +67,50 @@ class AuditWriterIntegrationTest {
     @Test
     void rejectsRawCredentialsAndHiddenReasoningRecursively() {
         AuditEvent rawToken = eventWithMetadata(Map.of("authorization", "Bearer secret-token"));
-        assertThrows(IllegalArgumentException.class, () -> auditWriter.write(rawToken));
+        assertThrows(IllegalArgumentException.class, () -> auditWriter.writeSecurityEvent(rawToken));
 
         AuditEvent jwtValue = eventWithMetadata(Map.of(
                 "safeKey", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0wMDEifQ.abcdefghijklmnopqrstuvwxyz123456"));
-        assertThrows(IllegalArgumentException.class, () -> auditWriter.write(jwtValue));
+        assertThrows(IllegalArgumentException.class, () -> auditWriter.writeSecurityEvent(jwtValue));
+
+        AuditEvent embeddedJwt = eventWithMetadata(Map.of(
+                "note",
+                "auth used eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjdXN0b21lci0wMDEifQ.abcdefghijklmnopqrstuvwxyz123456 to call"));
+        assertThrows(IllegalArgumentException.class, () -> auditWriter.writeSecurityEvent(embeddedJwt));
+
+        AuditEvent embeddedBearer = eventWithMetadata(Map.of("note", "request used Bearer secret-token before denial"));
+        assertThrows(IllegalArgumentException.class, () -> auditWriter.writeSecurityEvent(embeddedBearer));
 
         AuditEvent hiddenReasoning =
                 eventWithMetadata(Map.of("nested", Map.of("chainOfThought", List.of("private reasoning"))));
-        assertThrows(IllegalArgumentException.class, () -> auditWriter.write(hiddenReasoning));
+        assertThrows(IllegalArgumentException.class, () -> auditWriter.writeSecurityEvent(hiddenReasoning));
+    }
+
+    @Test
+    void rejectsRawCredentialsInTopLevelAuditFields() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new AuditEvent(
+                        AuditActorType.USER,
+                        "customer Bearer short-secret",
+                        "SECURITY_DECISION",
+                        "ORDER",
+                        "order-t013",
+                        null,
+                        "DENIED",
+                        Map.of()));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new AuditEvent(
+                        AuditActorType.USER,
+                        "customer-t013",
+                        "SECURITY_DECISION",
+                        "ORDER",
+                        "prefix eyJhbGciOiJIUzI1NiJ9.abcdefghijk.lmnopqrstuv suffix",
+                        null,
+                        "DENIED",
+                        Map.of()));
     }
 
     @Test
@@ -85,19 +120,19 @@ class AuditWriterIntegrationTest {
         AuditEvent event = eventWithMetadata(metadata);
         metadata.put("traceId", "trace-mutated-after-event-created");
 
-        long id = auditWriter.write(event);
+        long id = auditWriter.writeSecurityEvent(event);
 
         AuditLog saved = repository.findById(id).orElseThrow();
         assertEquals("trace-original", saved.getMetadataJson().get("traceId"));
     }
 
     @Test
-    void auditJoinsBusinessTransactionAndRollsBackWithIt() {
-        String resourceId = "order-t013-rollback";
+    void businessAuditJoinsOuterTransactionAndRollsBackWithIt() {
+        String resourceId = "order-t013-business-rollback";
         TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
 
         transactionTemplate.executeWithoutResult(status -> {
-            auditWriter.write(new AuditEvent(
+            auditWriter.writeBusinessEvent(new AuditEvent(
                     AuditActorType.SYSTEM,
                     "commerce-backend",
                     "REFUND_REQUEST_CREATE",
@@ -105,19 +140,43 @@ class AuditWriterIntegrationTest {
                     resourceId,
                     null,
                     "SUCCESS",
-                    Map.of("traceId", "trace-rollback")));
+                    Map.of("traceId", "trace-business-rollback")));
             status.setRollbackOnly();
         });
 
-        assertFalse(
-                repository.findByActionAndResourceIdOrderByCreatedAtAsc("REFUND_REQUEST_CREATE", resourceId).stream()
-                        .findAny()
-                        .isPresent());
+        assertFalse(repository
+                .findByActionAndResourceIdOrderByCreatedAtAsc("REFUND_REQUEST_CREATE", resourceId)
+                .stream()
+                .findAny()
+                .isPresent());
+    }
+
+    @Test
+    void securityAuditSurvivesOuterTransactionRollback() {
+        String resourceId = "order-t013-security-denied";
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+
+        transactionTemplate.executeWithoutResult(status -> {
+            auditWriter.writeSecurityEvent(new AuditEvent(
+                    AuditActorType.SYSTEM,
+                    "commerce-backend",
+                    "ORDER_ACCESS_DENIED",
+                    "ORDER",
+                    resourceId,
+                    null,
+                    "DENIED",
+                    Map.of("traceId", "trace-security-denied")));
+            status.setRollbackOnly();
+        });
+
+        assertEquals(
+                1,
+                repository.findByActionAndResourceIdOrderByCreatedAtAsc("ORDER_ACCESS_DENIED", resourceId).size());
     }
 
     @Test
     void allowsStructuredReasonCodesWithoutHiddenReasoning() {
-        long id = auditWriter.write(eventWithMetadata(
+        long id = auditWriter.writeSecurityEvent(eventWithMetadata(
                 Map.of("reasonCodes", List.of("LOGISTICS_STALLED", "WITHIN_AMOUNT_LIMIT"), "eligible", true)));
 
         AuditLog saved = repository.findById(id).orElseThrow();

@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** 防止原始凭据和隐藏推理被写入持久化 audit metadata。 */
+/** 防止原始凭据和隐藏推理被写入持久化 audit 字段或 metadata。 */
 final class AuditMetadataPolicy {
 
     private static final Set<String> FORBIDDEN_KEYS = Set.of(
@@ -26,13 +26,23 @@ final class AuditMetadataPolicy {
             "internalreasoning",
             "rawprompt");
 
-    private static final Pattern JWT_PATTERN =
-            Pattern.compile("^[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}$");
+    private static final Pattern BEARER_PATTERN = Pattern.compile("(?i)\\bbearer\\s+[^\\s,;]+");
+    private static final Pattern JWT_PATTERN = Pattern.compile(
+            "(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])");
 
     private AuditMetadataPolicy() {}
 
     static void validate(Map<String, Object> metadata) {
         validateValue(metadata);
+    }
+
+    static void validateText(String field, String value) {
+        if (value == null) {
+            return;
+        }
+        if (BEARER_PATTERN.matcher(value).find() || JWT_PATTERN.matcher(value).find()) {
+            throw new IllegalArgumentException("Raw authentication token is not allowed in audit field: " + field);
+        }
     }
 
     private static void validateValue(Object value) {
@@ -62,11 +72,7 @@ final class AuditMetadataPolicy {
             return;
         }
         if (value instanceof CharSequence sequence) {
-            String text = sequence.toString().trim();
-            if (text.regionMatches(true, 0, "Bearer ", 0, "Bearer ".length())
-                    || JWT_PATTERN.matcher(text).matches()) {
-                throw new IllegalArgumentException("Raw authentication token is not allowed in audit metadata");
-            }
+            validateText("metadata", sequence.toString());
         }
     }
 

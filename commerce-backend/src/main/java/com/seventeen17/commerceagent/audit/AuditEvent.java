@@ -18,21 +18,22 @@ public record AuditEvent(
 
     public AuditEvent {
         Objects.requireNonNull(actorType, "actorType must not be null");
-        actorId = requireText(actorId, "actorId", 128);
-        action = requireText(action, "action", 100);
-        resourceType = requireText(resourceType, "resourceType", 100);
-        resourceId = requireText(resourceId, "resourceId", 128);
-        result = requireText(result, "result", 32);
+        actorId = requireSafeText(actorId, "actorId", 128);
+        action = requireSafeText(action, "action", 100);
+        resourceType = requireSafeText(resourceType, "resourceType", 100);
+        resourceId = requireSafeText(resourceId, "resourceId", 128);
+        result = requireSafeText(result, "result", 32);
         metadata = metadata == null ? Map.of() : Map.copyOf(new LinkedHashMap<>(metadata));
     }
 
-    private static String requireText(String value, String field, int maxLength) {
+    private static String requireSafeText(String value, String field, int maxLength) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " must not be blank");
         }
         if (value.length() > maxLength) {
             throw new IllegalArgumentException(field + " exceeds max length " + maxLength);
         }
+        AuditMetadataPolicy.validateText(field, value);
         return value;
     }
 }
