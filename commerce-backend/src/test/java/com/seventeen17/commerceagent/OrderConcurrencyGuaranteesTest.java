@@ -14,6 +14,7 @@ import com.seventeen17.commerceagent.user.User;
 import com.seventeen17.commerceagent.user.UserRepository;
 import com.seventeen17.commerceagent.user.UserRole;
 import java.math.BigDecimal;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,8 +33,8 @@ import org.springframework.test.context.ActiveProfiles;
  * <p>它编码了本项目最关键的一组区分（见 docs/devlog 的 T009 面试知识点）：
  *
  * <ul>
- *   <li><b>乐观锁管"更新冲突"</b>：{@link #staleUpdateIsRejectedByOptimisticLocking()} —— 基于过期快照的写入必须
- *       被拒绝，而不是静默覆盖。
+ *   <li><b>乐观锁管"更新冲突"</b>：{@link #staleUpdateIsRejectedByOptimisticLocking()} 验证订单；
+ *       {@link #staleShipmentUpdateIsRejectedByOptimisticLocking()} 验证物流。基于过期快照的写入必须被拒绝，而不是静默覆盖。
  *   <li><b>唯一约束管"重复创建"</b>：{@link #duplicateShipmentForSameOrderIsRejectedByUniqueConstraint()} —— 两条
  *       新记录的乐观锁版本号都是一样的初始值，`@Version` 在这里毫无作用；拦住重复的是数据库 UNIQUE 约束。
  * </ul>
@@ -89,6 +90,41 @@ class OrderConcurrencyGuaranteesTest {
                 "先写入的结果不能被后写入者覆盖：这正是丢失更新要防的事");
     }
 
+
+    @Test
+    void staleShipmentUpdateIsRejectedByOptimisticLocking() {
+        String orderId = "t009-order-shipment-lock";
+        String shipmentId = "t009-shipment-lock";
+        seedOrder(orderId);
+        shipmentRepository.save(
+                Shipment.create(shipmentId, orderId, "SF", "SF-LOCK-0001", ShipmentStatus.CREATED));
+
+        Shipment firstReader = shipmentRepository.findById(shipmentId).orElseThrow();
+        Shipment secondReader = shipmentRepository.findById(shipmentId).orElseThrow();
+        Long snapshotVersion = firstReader.getVersion();
+        assertEquals(snapshotVersion, secondReader.getVersion(), "两个物流读者应看到同一个版本号");
+
+        Instant firstEventAt = Instant.parse("2026-09-18T06:00:00Z");
+        firstReader.setStatus(ShipmentStatus.IN_TRANSIT);
+        firstReader.setLastEventAt(firstEventAt);
+        shipmentRepository.save(firstReader);
+
+        Shipment afterFirstWrite = shipmentRepository.findById(shipmentId).orElseThrow();
+        assertEquals(snapshotVersion + 1, afterFirstWrite.getVersion(), "物流写入成功后版本号必须自增");
+        assertEquals(ShipmentStatus.IN_TRANSIT, afterFirstWrite.getStatus());
+        assertEquals(firstEventAt, afterFirstWrite.getLastEventAt());
+
+        secondReader.setStatus(ShipmentStatus.DELIVERED);
+        assertThrows(
+                ObjectOptimisticLockingFailureException.class,
+                () -> shipmentRepository.save(secondReader),
+                "基于过期物流快照的写入必须被拒绝");
+
+        Shipment current = shipmentRepository.findById(shipmentId).orElseThrow();
+        assertEquals(ShipmentStatus.IN_TRANSIT, current.getStatus(), "先写入的物流状态不能被过期快照覆盖");
+        assertEquals(firstEventAt, current.getLastEventAt(), "先写入的物流时间也不能被过期快照覆盖");
+    }
+
     @Test
     void duplicateShipmentForSameOrderIsRejectedByUniqueConstraint() {
         String orderId = "t009-order-dup";
@@ -105,8 +141,8 @@ class OrderConcurrencyGuaranteesTest {
         assertThrows(
                 DataIntegrityViolationException.class, () -> shipmentRepository.save(second), "同一订单的第二条运单必须被数据库唯一约束拒绝");
 
-        assertTrue(shipmentRepository.existsByOrder_Id(orderId), "第一条运单应仍然存在");
-        assertEquals(1, shipmentRepository.findByOrder_Id(orderId).stream().count(), "该订单只能有一条运单");
+        assertTrue(shipmentRepository.existsByOrderId(orderId), "第一条运单应仍然存在");
+        assertEquals(1, shipmentRepository.findByOrderId(orderId).stream().count(), "该订单只能有一条运单");
     }
 
     private void seedOrder(String orderId) {

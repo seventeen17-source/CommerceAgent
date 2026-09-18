@@ -4,10 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.time.Instant;
@@ -18,12 +15,11 @@ import java.time.Instant;
  * <p>三个映射要点：
  *
  * <ul>
- *   <li><b>关系方向是 OneToOne，不是 OneToMany</b>：V001 里 `order_id` 是 UNIQUE，V1 契约为"一个订单最多一个
- *       包裹"。若顺手写成 `@OneToMany`，编译与启动检查都不会报错，但语义已经错了 —— 数据库约束管得住数据，
- *       管不住映射方向。
- *   <li><b>刻意不在 {@code Order} 上放反向引用</b>：`order` 包不需要依赖 `logistics` 包，读订单时也不该顺带加载物流。
- *       需要物流信息时通过 {@link ShipmentRepository#findByOrder_Id} 查。聚合边界画在这里。
- *   <li>有 `version` 列，因此做乐观锁：物流状态同样会被"读取后并发修改"。
+ *   <li><b>订单引用直接保存不可变 id</b>：`order_id` 映射为普通 String，而不是再为 `orders` 表创建第二个轻量实体。
+ *       V001 的 FOREIGN KEY 保证订单存在，UNIQUE 保证 V1 的“一个订单最多一个包裹”；JPA 不需要重复表达这两个数据库事实。
+ *   <li><b>刻意不在 {@code Order} 上放物流反向引用</b>：`order` 包不依赖 `logistics` 包，物流包也不依赖订单实体。
+ *       需要物流信息时通过 {@link ShipmentRepository#findByOrderId} 查，避免重复映射同一张 `orders` 表。
+ *   <li>有 `version` 列，因此做乐观锁：物流状态同样会被“读取后并发修改”。
  * </ul>
  */
 @Entity
@@ -34,9 +30,9 @@ public class Shipment {
     @Column(name = "id", length = 64, nullable = false, updatable = false)
     private String id;
 
-    @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "order_id", nullable = false, updatable = false)
-    private OrderRef order;
+    /** 订单外键值不可变；引用完整性与 0/1 基数由 V001 的 FK + UNIQUE 在数据库层强制。 */
+    @Column(name = "order_id", length = 64, nullable = false, updatable = false)
+    private String orderId;
 
     @Column(name = "carrier", length = 100, nullable = false)
     private String carrier;
@@ -47,15 +43,15 @@ public class Shipment {
     /**
      * 物流状态。
      *
-     * <p>注意：数据库该列**没有** CHECK 约束，枚举只是 Java 侧护栏，不是完整性保证（详见
-     * {@link ShipmentStatus} 的说明）。数据库确实强制的是"同一 (carrier, tracking_number) 不能重复出现"，
+     * <p>注意：数据库该列<b>没有</b> CHECK 约束，枚举只是 Java 侧护栏，不是完整性保证（详见
+     * {@link ShipmentStatus} 的说明）。数据库确实强制的是“同一 (carrier, tracking_number) 不能重复出现”，
      * 那条由 V001 的 UNIQUE 约束保证，不需要在实体上重复声明。
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 32, nullable = false)
     private ShipmentStatus status;
 
-    /** 最近一次有效物流事件时间 —— "物流停滞时长"的权威计算基准。 */
+    /** 最近一次有效物流事件时间 —— “物流停滞时长”的权威计算基准。 */
     @Column(name = "last_event_at")
     private Instant lastEventAt;
 
@@ -73,7 +69,7 @@ public class Shipment {
             String id, String orderId, String carrier, String trackingNumber, ShipmentStatus status) {
         Shipment shipment = new Shipment();
         shipment.id = id;
-        shipment.order = new OrderRef(orderId);
+        shipment.orderId = orderId;
         shipment.carrier = carrier;
         shipment.trackingNumber = trackingNumber;
         shipment.status = status;
@@ -85,7 +81,7 @@ public class Shipment {
     }
 
     public String getOrderId() {
-        return order == null ? null : order.getId();
+        return orderId;
     }
 
     public String getCarrier() {

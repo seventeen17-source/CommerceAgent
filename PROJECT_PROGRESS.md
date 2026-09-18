@@ -39,7 +39,7 @@
 |---|---|---|---|---|
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
-| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008 ✅，当前 T009–T010） |
+| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008 ✅，当前 T010） |
 | 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ⬜ |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
@@ -101,8 +101,9 @@
 
 ### T009 验收证据
 
-- `mvnw verify` → **Tests run: 6, Failures: 0, Errors: 0 / BUILD SUCCESS**（Spotless 21 文件 clean、SpotBugs 通过、JaCoCo 报告产出）
-- **乐观锁真的生效**：`OrderConcurrencyGuaranteesTest.staleUpdateIsRejectedByOptimisticLocking` —— 两个读者拿到同一快照，先写者成功且版本号自增，后写者被 `ObjectOptimisticLockingFailureException` 拒绝，且先写结果未被覆盖
+- T009 初始验收：`mvnw verify` → **Tests run: 6, Failures: 0, Errors: 0 / BUILD SUCCESS**（Spotless 21 文件 clean、SpotBugs 通过、JaCoCo 报告产出）；后续 review 补充了 Shipment 乐观锁测试，需在本地再次执行 `mvnw verify` 复验
+- **订单乐观锁已实测生效**：`OrderConcurrencyGuaranteesTest.staleUpdateIsRejectedByOptimisticLocking` —— 两个读者拿到同一快照，先写者成功且版本号自增，后写者被 `ObjectOptimisticLockingFailureException` 拒绝，且先写结果未被覆盖
+- **Shipment 乐观锁补充测试**：新增 `staleShipmentUpdateIsRejectedByOptimisticLocking`，对 `Shipment.version` 做同样的 stale-update 验证；该补充测试需要本地再次跑 `mvnw verify` 后才能升级为已验证证据
 - **唯一约束真的在拦重复**：`duplicateShipmentForSameOrderIsRejectedByUniqueConstraint` —— 同一订单第二条运单被 `DataIntegrityViolationException` 拒绝（两条新记录的版本号相同，`@Version` 在此毫无作用）
 - **映射与数据库一致由 `ddl-auto: validate` 保证**：本次它抓出并修正了 `CHAR(3)` 与 `TEXT` 两处类型不匹配（实体如实声明，**未改动已执行的 V001**）
 - **两个状态枚举明确不是数据库约束**：`shipments.status` / `orders.after_sales_status` 在库中无 CHECK，枚举只是 Java 侧护栏；取值为 V1 最小集，待 T024/T026 扩展
