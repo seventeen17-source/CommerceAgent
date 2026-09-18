@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T014
+- **当前 Tasks**：T014（实现完成，待本地 `mvnw.cmd verify` 验收）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -16,7 +16,7 @@
   - T007 — `application.yml`（含 dev profile，应用身份 `commerce_app` / 迁移身份 `migrator` 分离）、`application-test.yml`（数据源由 Testcontainers 注入）、`app/config/settings.py`。实测 `mvnw spring-boot:run` **Started CommerceBackendApplication in 4.538 seconds**，Flyway 以 `migrator` 身份把 history 表建在 `commerce` schema
   - T008 — `V001__core_schema.sql` 创建 9 张核心表并建立约束/索引；本地 `mvnw.cmd verify` **BUILD SUCCESS**；`infra/postgres/verify-t008.sql` 返回 **`T008_ACCEPTANCE_OK`**；`agent_app` 对 `commerce.*` 无权限，`commerce_app` / `agent_app` 各自在所属 schema 具备所需权限；`vector` extension 未启用
   - T009 — `user/`、`order/`、`logistics/` 共 5 个 JPA Entity + 5 个 Repository；`@Version` 乐观锁与 ownership 不可变由映射层表达；新增 `OrderConcurrencyGuaranteesTest` **用可执行测试证明**"乐观锁防丢失更新、唯一约束防重复插入"；`mvnw verify` → **Tests run: 7, Failures: 0, Errors: 0 / BUILD SUCCESS**
-- **当前优先任务**：T014 — dev/eval fixture loader
+- **当前优先任务**：验收 T014 — dev/eval fixture loader（`foundation/fixture-loader`）
 - **下一 Gate**：完成 T013–T014 的 Audit / Fixture 基础能力后，再进入 T015–T018 Agent State / Client / Run / Security skeleton
 - **当前 Blocker**：无
 - **环境事实（重要）**：
@@ -87,7 +87,7 @@
 4. ✅ T011：JWT / role-aware principal（本地 `mvnw.cmd verify` → BUILD SUCCESS；Spotless/SpotBugs 均通过）
 5. ✅ T012：统一 Error Envelope（本地 `mvnw.cmd verify` → Tests run: 22, Failures: 0, Errors: 0, Skipped: 0 / BUILD SUCCESS；Spotless、SpotBugs 均通过）
 6. ✅ T013：结构化 Audit Writer（本地 `mvnw.cmd verify` → BUILD SUCCESS；测试、Spotless、SpotBugs 均通过）
-7. ⬜ T014：dev/eval fixture loader
+7. 🟨 T014：dev/eval fixture loader（代码与测试已提交，待本地 verify 后勾选 tasks.md）
 8. ⬜ T015–T018：Agent State / Commerce Client / Run+Trace / FastAPI security skeleton
 
 ### T008 验收证据
