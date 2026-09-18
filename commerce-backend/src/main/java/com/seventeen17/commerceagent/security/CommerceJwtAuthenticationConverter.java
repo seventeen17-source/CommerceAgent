@@ -41,7 +41,8 @@ public class CommerceJwtAuthenticationConverter implements Converter<Jwt, Abstra
         }
 
         CommercePrincipal principal = new CommercePrincipal(user.getId(), user.getRole());
-        SimpleGrantedAuthority authority = new SimpleGrantedAuthority("ROLE_" + user.getRole().name());
+        SimpleGrantedAuthority authority =
+                new SimpleGrantedAuthority("ROLE_" + user.getRole().name());
         return new CommerceJwtAuthenticationToken(jwt, principal, List.of(authority));
     }
 }

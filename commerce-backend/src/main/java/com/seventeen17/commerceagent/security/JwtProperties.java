@@ -10,7 +10,8 @@ public record JwtProperties(String secret, String issuer, Duration ttl) {
 
     public JwtProperties {
         if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32) {
-            throw new IllegalArgumentException("commerce.security.jwt.secret must be at least 32 UTF-8 bytes for HS256");
+            throw new IllegalArgumentException(
+                    "commerce.security.jwt.secret must be at least 32 UTF-8 bytes for HS256");
         }
         if (issuer == null || issuer.isBlank()) {
             throw new IllegalArgumentException("commerce.security.jwt.issuer must not be blank");

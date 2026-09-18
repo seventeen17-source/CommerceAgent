@@ -12,8 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 class SecurityProbeController {
 
     @GetMapping("/__test/security/principal")
-    Map<String, String> principal(
-            @AuthenticationPrincipal CommercePrincipal principal, Authentication authentication) {
+    Map<String, String> principal(@AuthenticationPrincipal CommercePrincipal principal, Authentication authentication) {
         String authority = authentication.getAuthorities().iterator().next().getAuthority();
         return Map.of(
                 "userId", principal.userId(),
