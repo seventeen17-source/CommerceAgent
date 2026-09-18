@@ -44,7 +44,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 _FORBIDDEN_PERSISTED_KEYS = {
     "authorization",
     "token",
@@ -74,7 +73,7 @@ def _normalize_sensitive_key(key: str) -> str:
 
 
 def _validate_persistable_value(value: Any, path: str) -> None:
-    """Reject raw credentials/hidden reasoning before arbitrary structured state can be persisted."""
+    """Reject raw credentials or hidden reasoning before any structured state is persisted."""
     if isinstance(value, dict):
         for key, nested in value.items():
             normalized = _normalize_sensitive_key(str(key))
