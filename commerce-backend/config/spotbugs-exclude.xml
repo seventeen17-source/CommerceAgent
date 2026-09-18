@@ -19,4 +19,9 @@
 		<Field name="jsonMapper"/>
 		<Bug pattern="EI_EXPOSE_REP2"/>
 	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.audit.AuditWriter"/>
+		<Field name="repository"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
 </FindBugsFilter>
