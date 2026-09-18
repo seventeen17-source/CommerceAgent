@@ -5,6 +5,8 @@ import com.seventeen17.commerceagent.common.error.ErrorCode;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -15,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Profile({"dev", "test", "eval"})
 public class FixtureLoader {
 
+    private static final Logger log = LoggerFactory.getLogger(FixtureLoader.class);
     private static final String RESET_LOCK_NAME = "commerceagent-eval-fixture-reset";
     private static final Instant FIXTURE_CREATED_AT = Instant.parse("2026-09-01T00:00:00Z");
     private static final Instant ORDER_SHIPPED_AT = Instant.parse("2026-09-10T08:00:00Z");
@@ -56,12 +59,19 @@ public class FixtureLoader {
         } catch (BusinessException exception) {
             throw exception;
         } catch (RuntimeException exception) {
-            throw new BusinessException(ErrorCode.EVAL_RESET_FAILED, "Eval fixture reset failed");
+            log.error(
+                    "Eval fixture reset failed caseId={} datasetVersion={}",
+                    caseId,
+                    fixtureCase.datasetVersion(),
+                    exception);
+            throw new BusinessException(ErrorCode.EVAL_RESET_FAILED, "Eval fixture reset failed", exception);
         }
     }
 
     @Transactional
     public void seedDevelopmentFixtures() {
+        jdbcTemplate.queryForObject(
+                "SELECT pg_advisory_xact_lock(CAST(hashtext(?) AS BIGINT))", Boolean.class, RESET_LOCK_NAME);
         seedBaseUsers();
         seedRefundLogisticsCase();
     }
@@ -179,6 +189,10 @@ public class FixtureLoader {
                 signedAt == null ? null : Timestamp.from(signedAt));
     }
 
+    /*
+     * Check-then-insert is safe only because every fixture mutation path acquires RESET_LOCK_NAME
+     * for the surrounding database transaction. Do not reuse this method outside that boundary.
+     */
     private void ensureLogisticsEvent(String shipmentId, String eventType, String description, Instant occurredAt) {
         Integer count =
                 jdbcTemplate.queryForObject("""
