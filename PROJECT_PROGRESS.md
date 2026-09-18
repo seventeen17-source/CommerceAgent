@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T012（实现完成；22 个测试已通过、Spotless 已通过；SpotBugs DI 误报已做窄范围排除，待最终 `mvnw.cmd verify` 验收）
+- **当前 Tasks**：T013
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -16,9 +16,9 @@
   - T007 — `application.yml`（含 dev profile，应用身份 `commerce_app` / 迁移身份 `migrator` 分离）、`application-test.yml`（数据源由 Testcontainers 注入）、`app/config/settings.py`。实测 `mvnw spring-boot:run` **Started CommerceBackendApplication in 4.538 seconds**，Flyway 以 `migrator` 身份把 history 表建在 `commerce` schema
   - T008 — `V001__core_schema.sql` 创建 9 张核心表并建立约束/索引；本地 `mvnw.cmd verify` **BUILD SUCCESS**；`infra/postgres/verify-t008.sql` 返回 **`T008_ACCEPTANCE_OK`**；`agent_app` 对 `commerce.*` 无权限，`commerce_app` / `agent_app` 各自在所属 schema 具备所需权限；`vector` extension 未启用
   - T009 — `user/`、`order/`、`logistics/` 共 5 个 JPA Entity + 5 个 Repository；`@Version` 乐观锁与 ownership 不可变由映射层表达；新增 `OrderConcurrencyGuaranteesTest` **用可执行测试证明**"乐观锁防丢失更新、唯一约束防重复插入"；`mvnw verify` → **Tests run: 7, Failures: 0, Errors: 0 / BUILD SUCCESS**
-- **当前优先任务**：验收 T012 — 统一 Error Envelope（`foundation/error-envelope`）
-- **下一 Gate**：T012 完整 `mvnw.cmd verify` → BUILD SUCCESS 后，正式勾选 T012；再进入 T013 Audit Writer
-- **当前 Blocker**：仅等待 T012 最新 SpotBugs 窄范围排除提交后的本地完整 `mvnw.cmd verify` 结果
+- **当前优先任务**：T013 — 结构化业务/安全 Audit Writer
+- **下一 Gate**：完成 T013–T014 的 Audit / Fixture 基础能力后，再进入 T015–T018 Agent State / Client / Run / Security skeleton
+- **当前 Blocker**：无
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
   - 本机 `core.autocrlf=true`；`infra/` 下的脚本与 `.env*` 已由根 `.gitattributes` 钉为 LF（否则容器内执行会 `bad interpreter`）
@@ -39,7 +39,7 @@
 |---|---|---|---|---|
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
-| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T011 ✅，当前 T012） |
+| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T012 ✅，当前 T013） |
 | 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ⬜ |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
@@ -85,7 +85,7 @@
 2. ✅ T009：User / Order / OrderItem / Shipment / LogisticsEvent JPA Entity/Repository
 3. ✅ T010：AfterSalesRule 持久化（`mvnw.cmd verify` → Tests run: 10, Failures: 0, Errors: 0 / BUILD SUCCESS）
 4. ✅ T011：JWT / role-aware principal（本地 `mvnw.cmd verify` → BUILD SUCCESS；Spotless/SpotBugs 均通过）
-5. 🟨 T012：统一 Error Envelope（代码已提交，待本地 verify 后勾选 tasks.md）
+5. ✅ T012：统一 Error Envelope（本地 `mvnw.cmd verify` → Tests run: 22, Failures: 0, Errors: 0, Skipped: 0 / BUILD SUCCESS；Spotless、SpotBugs 均通过）
 6. ⬜ T013：结构化 Audit Writer
 7. ⬜ T014：dev/eval fixture loader
 8. ⬜ T015–T018：Agent State / Commerce Client / Run+Trace / FastAPI security skeleton

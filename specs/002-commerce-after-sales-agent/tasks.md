@@ -37,7 +37,7 @@
 - [X] T009 [P] 实现 User、Order、OrderItem、Shipment、LogisticsEvent JPA Entity/Repository：`commerce-backend/src/main/java/com/seventeen17/commerceagent/order/`、`logistics/`；保留 immutable ownership、optimistic `version`、权威价格/状态。
 - [X] T010 [P] 实现 `AfterSalesRule` 持久化：`eligibility/`；包含唯一 `rule_code`、version/effective dates、物流/退货/金额/审批阈值、`allowed_action`、`active`。
 - [X] T011 实现本地 JWT 认证和 role-aware principal：`security/`；Customer API 只能从 principal 推导 ownership。
-- [ ] T012 [P] 实现与 `contracts/error-contracts.md` 对齐的统一 Error Envelope：`common/error/`。
+- [X] T012 [P] 实现与 `contracts/error-contracts.md` 对齐的统一 Error Envelope：`common/error/`。
 - [ ] T013 [P] 实现结构化业务/安全 Audit Writer：`audit/`；禁止保存 hidden chain-of-thought 和 raw token。
 - [ ] T014 创建 dev/eval fixture loader，预置 `customer-001`、`customer-002`、`approver-001`、订单/物流/规则，以及 `contracts/eval-internal-api.md` 的 reset endpoint；只能在 test/eval profile 注册。
 - [ ] T015 [P] 定义显式 `AgentState`：`agent-service/app/agent/state.py`；包含 run id、principal context、intent、candidate/resolved order、evidence、eligibility、approval、tool history、step/retry budget、write/verification、terminal status。
