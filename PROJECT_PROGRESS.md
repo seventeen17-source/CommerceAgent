@@ -16,7 +16,7 @@
 - **环境注意**：本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1`；**前端命令一律使用 `npm.cmd` / `npx.cmd`**。
 - **未决项**：
   - T001 的目录部分（`eval/`、`knowledge/policies/`、`infra/`）按决策交由各自产出任务创建，故 T001 暂不勾选
-  - `.specify/feature.json` 本地仍指向 `specs/001-agent-career-project`，按执行顺序第 2 步应指向 002
+  - `.specify/feature.json` 是 Spec Kit 的**本地活动 feature 状态**，不作为仓库 Source of Truth、也不提交；运行 Spec Kit 前应在本地确认它解析到 `specs/002-commerce-after-sales-agent`
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
 
 ## 阶段总览
@@ -36,7 +36,7 @@
 ## Phase 1 — 当前执行顺序
 
 1. ✅ 拉取最新 `main` 并确认工作区干净
-2. ⬜ 本地 `.specify/feature.json` 指向 `specs/002-commerce-after-sales-agent`（当前仍为 001）
+2. ℹ️ `.specify/feature.json` 仅为本地 Spec Kit 状态；不提交到仓库。运行 Spec Kit 前本地确认活动 feature 为 `specs/002-commerce-after-sales-agent`
 3. ✅ 创建分支：`setup/official-scaffolds`
 4. 🟡 T001：仓库目录 / README / ignore 基础检查（README 已满足且未新建；6 个根目录交由各产出任务创建，故本任务暂不勾选）
 5. ✅ T002：用 Spring Initializr 生成 `commerce-backend`（Java 21 / Spring Boot 4.1.1；`mvnw.cmd test` BUILD SUCCESS）
