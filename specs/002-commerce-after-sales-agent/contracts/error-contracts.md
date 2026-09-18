@@ -44,7 +44,7 @@
 | `REPEATED_NO_PROGRESS` | 相同 Tool/参数重复且无新证据 | 否 | Circuit Break + 安全停止/升级 |
 | `POST_WRITE_VERIFICATION_FAILED` | 写入返回成功但最终状态无法验证 | 禁止盲重试 | 查询权威状态；仍无法确认则标记未知并升级 |
 | `PROMPT_INJECTION_BLOCKED` | 输入/检索内容试图修改受保护权限或策略 | 否 | 仅按正常权限继续，否则安全停止 |
-| `INTERNAL_ERROR` | 未分类内部错误 | 条件 | 不进行不安全续跑，记录 trace 并失败关闭 |
+| `EVAL_CASE_NOT_FOUND` | Eval fixture case/version 不存在 | 否 | Eval Runner 将 case 标为 dataset/config error |\n| `EVAL_RESET_CONFLICT` | 另一个 reset transaction 正在执行 | 有限 | Eval Runner 延迟后有限重试 |\n| `EVAL_RESET_FAILED` | fixture reset 基础设施失败 | 否 | 标记 infrastructure failure，不归因于模型 |\n| `INTERNAL_ERROR` | 未分类内部错误 | 条件 | 不进行不安全续跑，记录 trace 并失败关闭 |
 
 ## Handling Rules
 

@@ -5,6 +5,7 @@ import com.seventeen17.commerceagent.common.error.ErrorCode;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,7 @@ public class FixtureLoader {
     private final FixtureCaseRegistry registry;
     private final Clock clock;
 
+    @Autowired
     public FixtureLoader(JdbcTemplate jdbcTemplate, FixtureCaseRegistry registry) {
         this(jdbcTemplate, registry, Clock.systemUTC());
     }
