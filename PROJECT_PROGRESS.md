@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T011（实现完成，待本地验收）（实现完成，待本地 `mvnw verify` 验收）
+- **当前 Tasks**：T011（实现完成，待本地 `mvnw verify` 验收）（实现完成，待本地验收）（实现完成，待本地 `mvnw verify` 验收）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
