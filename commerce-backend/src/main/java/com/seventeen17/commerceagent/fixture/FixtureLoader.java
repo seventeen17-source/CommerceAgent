@@ -138,8 +138,7 @@ public class FixtureLoader {
 
     private void upsertOrderItem(
             String id, String orderId, String productId, String productName, String productCategory, String unitPrice) {
-        jdbcTemplate.update(
-                """
+        jdbcTemplate.update("""
                 INSERT INTO commerce.order_items
                     (id, order_id, product_id, product_name, product_category, unit_price, quantity)
                 VALUES (?, ?, ?, ?, ?, CAST(? AS NUMERIC), 1)
@@ -150,13 +149,7 @@ public class FixtureLoader {
                     product_category = EXCLUDED.product_category,
                     unit_price = EXCLUDED.unit_price,
                     quantity = EXCLUDED.quantity
-                """,
-                id,
-                orderId,
-                productId,
-                productName,
-                productCategory,
-                unitPrice);
+                """, id, orderId, productId, productName, productCategory, unitPrice);
     }
 
     private void upsertShipment(String id, String orderId, String carrier, String trackingNumber, String status) {
@@ -187,33 +180,23 @@ public class FixtureLoader {
     }
 
     private void ensureLogisticsEvent(String shipmentId, String eventType, String description, Instant occurredAt) {
-        Integer count = jdbcTemplate.queryForObject(
-                """
+        Integer count =
+                jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
                 FROM commerce.logistics_events
                 WHERE shipment_id = ? AND event_type = ? AND occurred_at = ?
-                """,
-                Integer.class,
-                shipmentId,
-                eventType,
-                Timestamp.from(occurredAt));
+                """, Integer.class, shipmentId, eventType, Timestamp.from(occurredAt));
         if (count != null && count == 0) {
-            jdbcTemplate.update(
-                    """
+            jdbcTemplate.update("""
                     INSERT INTO commerce.logistics_events
                         (shipment_id, event_type, description, occurred_at)
                     VALUES (?, ?, ?, ?)
-                    """,
-                    shipmentId,
-                    eventType,
-                    description,
-                    Timestamp.from(occurredAt));
+                    """, shipmentId, eventType, description, Timestamp.from(occurredAt));
         }
     }
 
     private void upsertAfterSalesRule() {
-        jdbcTemplate.update(
-                """
+        jdbcTemplate.update("""
                 INSERT INTO commerce.after_sales_rules
                     (rule_code, version, product_category, required_order_status,
                      logistics_stalled_hours, return_window_days, max_refund_amount,
@@ -223,7 +206,6 @@ public class FixtureLoader {
                      48, 7, 500.00, 300.00, 'REFUND_ONLY', TRUE, ?, NULL)
                 ON CONFLICT (rule_code, version) DO UPDATE
                 SET active = TRUE
-                """,
-                Timestamp.from(FIXTURE_CREATED_AT));
+                """, Timestamp.from(FIXTURE_CREATED_AT));
     }
 }

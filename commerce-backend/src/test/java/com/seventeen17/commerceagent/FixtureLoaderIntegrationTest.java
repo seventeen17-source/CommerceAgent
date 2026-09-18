@@ -59,7 +59,8 @@ class FixtureLoaderIntegrationTest {
 
         assertEquals(
                 3,
-                count("SELECT COUNT(*) FROM commerce.users WHERE id IN ('customer-001','customer-002','approver-001')"));
+                count(
+                        "SELECT COUNT(*) FROM commerce.users WHERE id IN ('customer-001','customer-002','approver-001')"));
         assertEquals(2, count("SELECT COUNT(*) FROM commerce.orders WHERE id IN ('order-001','order-002')"));
         assertEquals(2, count("SELECT COUNT(*) FROM commerce.shipments WHERE id IN ('shipment-001','shipment-002')"));
         assertEquals(
@@ -119,8 +120,8 @@ class FixtureLoaderIntegrationTest {
 
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "SELECT pg_advisory_xact_lock(CAST(hashtext(?) AS BIGINT))")) {
+            try (PreparedStatement statement =
+                    connection.prepareStatement("SELECT pg_advisory_xact_lock(CAST(hashtext(?) AS BIGINT))")) {
                 statement.setString(1, "commerceagent-eval-fixture-reset");
                 statement.execute();
             }
