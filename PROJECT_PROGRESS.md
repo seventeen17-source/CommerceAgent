@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T016
+- **当前 Tasks**：T017
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -18,7 +18,8 @@
   - T009 — `user/`、`order/`、`logistics/` 共 5 个 JPA Entity + 5 个 Repository；`@Version` 乐观锁与 ownership 不可变由映射层表达；新增 `OrderConcurrencyGuaranteesTest` **用可执行测试证明**"乐观锁防丢失更新、唯一约束防重复插入"；`mvnw verify` → **Tests run: 7, Failures: 0, Errors: 0 / BUILD SUCCESS**
   - T010–T014 — 见「Phase 2 — 当前执行顺序」第 3–7 项的验收证据（`AfterSalesRule` 持久化 / JWT role-aware principal / 统一 Error Envelope / 结构化 Audit Writer / dev-eval Fixture Loader）
   - T015 — 显式 `AgentState`（`agent-service/app/agent/state.py`）：Pydantic 状态 schema + `PrincipalRole`/`RunStatus`/`WriteStatus`/`VerificationStatus` 四个枚举，`extra="forbid"` 拒绝未声明字段（含 raw credential），model validator 对 step/retry budget fail closed；Python 门禁四条命令全部通过：`ruff check` **All checks passed**、`ruff format --check` **7 files**、`mypy app` **Success 5 files**、`pytest -q` **11 passed**
-- **当前优先任务**：T016 — 类型化 Java API Client（`agent-service/app/clients/commerce_client.py`）
+  - T016 — 类型化 Java API Client（`agent-service/app/clients/`：`auth.py` / `models.py` / `errors.py` / `identity.py` / `commerce_client.py`）+ Java `TraceIdFilter` 收紧 + `FixtureLoader` advisory lock 修复；Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 52, Failures: 0, Errors: 0；Spotless 64 files clean / 0 needs changes；SpotBugs BugInstance 0）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **17 files**、`mypy app` **Success 11 files**、`pytest -q` **86 passed**）。验收证据见「T016 验收证据」
+- **当前优先任务**：T017 — 持久化 Agent Run/Checkpoint/Structured Tool Trace（`agent-service/app/trace/`）
 - **下一 Gate**：T016–T018 完成 Commerce Client / Run+Trace 持久化 / FastAPI security skeleton 后，Phase 2 收口，进入 US1 MVP
 - **当前 Blocker**：无；T016 前置 contract hardening 已在 `foundation/t016-contract-hardening` **本地复验通过**：修复 eligibility `ruleVersion` 类型、Java-owned enum 前向兼容策略，并新增 `GET /api/v1/me` 作为 Python 获取权威 principal role 的边界。复验证据：Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 36, Failures: 0, Errors: 0；Spotless 63 files clean / 0 needs changes；SpotBugs BugInstance size 0）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **7 files**、`mypy app` **Success 5 files**、`pytest -q` **17 passed**）。首次复验发现 `a8be62c` 引入 2 处 ruff 违规（I001/E501），由 `ded8a45` 修复后才达全绿。
 - **环境事实（重要）**：
@@ -45,7 +46,7 @@
 |---|---|---|---|---|
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
-| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T015 ✅，当前 T016） |
+| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T016 ✅，当前 T017） |
 | 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ⬜ |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
@@ -95,7 +96,8 @@
 6. ✅ T013：结构化 Audit Writer（本地 `mvnw.cmd verify` → BUILD SUCCESS；测试、Spotless、SpotBugs 均通过）
 7. ✅ T014：dev/eval fixture loader（本地 `mvnw.cmd verify` → BUILD SUCCESS；35 tests、Spotless、SpotBugs 均通过）
 8. ✅ T015：显式 `AgentState`（Python 门禁四条命令全部通过：`ruff check` / `ruff format --check` / `mypy app` / `pytest -q` → 11 passed）
-9. ⬜ T016–T018：Commerce Client / Run+Trace / FastAPI security skeleton
+9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
+10. ⬜ T017–T018：Run+Trace 持久化 / FastAPI security skeleton
 
 ### T008 验收证据
 
@@ -115,6 +117,23 @@
 - **映射与数据库一致由 `ddl-auto: validate` 保证**：本次它抓出并修正了 `CHAR(3)` 与 `TEXT` 两处类型不匹配（实体如实声明，**未改动已执行的 V001**）
 - **两个状态枚举明确不是数据库约束**：`shipments.status` / `orders.after_sales_status` 在库中无 CHECK，枚举只是 Java 侧护栏；取值为 V1 最小集，待 T024/T026 扩展
 - **Post-review hardening 已本地复验通过**：`Order.createdAt` / `User.createdAt` 增加 Hibernate `@Generated(INSERT)`，`DatabaseGeneratedValuesTest` 验证写后立即可读；重复 Shipment 测试使用 `saveAndFlush` 并同时断言 SQLState `23505` 与约束名 `shipments_order_id_key`，避免因其他完整性错误产生 false positive；最终 `mvnw verify` → **Tests run: 8, Failures: 0, Errors: 0 / BUILD SUCCESS**
+
+### T016 验收证据
+
+- **Java `mvnw.cmd verify` → BUILD SUCCESS**（本机实测 2026-09-20 19:48：Tests run: 52, Failures: 0, Errors: 0, Skipped: 0；Spotless 64 files clean / 0 needs changes；SpotBugs BugInstance size 0 / Error size 0；JaCoCo 分析 42 classes）
+- **Python 四条门禁全绿**：`ruff check` **All checks passed** / `ruff format --check` **17 files** / `mypy app` **Success 11 files** / `pytest -q` **86 passed**
+- **交付内容**：`agent-service/app/clients/` 五个模块 —— `auth.py`（`AuthContext`）、`models.py`（读/评估面响应模型）、`errors.py`（两类远端失败 + 两个本地前置失败）、`identity.py`（wire role → `PrincipalRole` 的 fail-closed 映射）、`commerce_client.py`（httpx 传输、per-call Bearer、timeout、trace 关联、响应校验）
+- **端点范围**：只做读/评估面（`/me`、`/orders`、`/orders/{id}`、`/orders/{id}/logistics`、`/after-sales/eligibility`）；写面（`/refunds`、`/returns`、`/approvals`）留给 T026/T038
+- **"答了" 与 "没答" 是两种类型**（可执行证据）：`CommerceApiError.blind_retry_allowed == envelope.retryable`；`CommerceTransportError.blind_retry_allowed == request_was_safe`。`request_was_safe` 由**操作语义**决定而非 HTTP 方法 —— `POST /after-sales/eligibility` 是确定性、无副作用的评估，必须保持可安全重试；用 `method == "GET"` 推导会把这个读接口的 retry budget 砍掉
+- **client 自身从不重试**：`retryable=true` 不是重试授权，retry budget 属于 Tool 层；client 里放重试循环会把 unknown-outcome 藏起来，让唯一有权决定处置的层看不见它
+- **契约外的错误响应按"没有答案"处理**：即使是 5xx，只要 body 不符合 error envelope，就归为 `CommerceTransportError`（结果未知）而非"已知失败"——裸状态码不能证明写操作没提交，把它当"已知"会为盲目重试发放许可
+- **前向兼容**：`allowedAction` 与 wire `role` 都是开放字符串；Java 新增取值不会变成解析失败，未知 role 由 `identity.resolve_principal` 显式拒绝（`UnknownPrincipalRoleError` → `ACCESS_DENIED`）而不是猜一个默认角色
+- **token 不可进 prompt 由类型保证**：`SecretStr` 的 `repr`/`str` 脱敏，且 `AuthContext` 刻意不含 `user_id` —— 身份只能来自 Java `GET /me`，无法被断言；token 里的 CR/LF 也在构造期被拒（否则可注入额外 HTTP 头）
+- **模型输出的 `order_id` 不能改写 URL**：`_safe_path_segment` 在发请求前拒绝含 `/`、`?`、`#`、空白的路径段（`UnsafeRequestParameterError`，本地失败、无未知结果）
+- **实测缺陷修复（活体冒烟发现）**：
+  - `trust_env=False`：httpx 会从环境**及 Windows 注册表**解析代理，实测 `127.0.0.1:7892` 接管了 `http://localhost:8080`、收到转发的 Bearer token、并返回契约外的 502。代价已写明：`trust_env=False` 同时不再读 `SSL_CERT_FILE` / `SSL_CERT_DIR`
+  - `FixtureLoader` advisory lock：`pg_advisory_xact_lock` 返回 `void` 却按 `Boolean.class` 取值，驱动抛 "cannot cast to boolean"，导致 dev profile 下 `spring-boot:run` 起不来（`DevelopmentFixtureInitializer` 是 `@Profile("dev")`，`mvnw verify` 从不覆盖该路径，故该缺陷从 T014 存活至今）；已补直接调用 loader 的回归测试
+- **Java `TraceIdFilter` 已收紧**：只接受格式/长度校验通过的入站 correlation id，否则生成新的 server trace id；新增 15 个 `TraceIdFilterTest` 用例
 
 ## 维护规则
 
