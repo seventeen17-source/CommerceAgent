@@ -24,8 +24,8 @@ set is owned by Java (``UserRole.java`` plus the ``commerce.users`` CHECK constr
 unrecognized role must therefore reach the caller so authorization can *deny* it explicitly, rather
 than turning an additive backend role into a parse failure that prevents a run from being created at
 all -- with no ``SAFE_STOP``, no reason code and no audit record. The wire-to-``PrincipalRole``
-mapping that performs that denial belongs to the identity layer (the next step of T016), so this
-module stays free of authorization semantics.
+mapping that performs that denial is :func:`app.clients.identity.resolve_principal`, so this module
+stays free of authorization semantics.
 """
 
 from __future__ import annotations
