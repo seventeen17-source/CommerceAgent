@@ -70,8 +70,12 @@ public class FixtureLoader {
 
     @Transactional
     public void seedDevelopmentFixtures() {
+        // pg_advisory_xact_lock returns `void`, not boolean -- unlike pg_try_advisory_xact_lock in
+        // reset(). Mapping a void result to Boolean makes the driver read an empty string and throw
+        // "cannot cast to boolean", so the blocking form is read as Object and its value ignored:
+        // the lock is held for the rest of this transaction either way.
         jdbcTemplate.queryForObject(
-                "SELECT pg_advisory_xact_lock(CAST(hashtext(?) AS BIGINT))", Boolean.class, RESET_LOCK_NAME);
+                "SELECT pg_advisory_xact_lock(CAST(hashtext(?) AS BIGINT))", Object.class, RESET_LOCK_NAME);
         seedBaseUsers();
         seedRefundLogisticsCase();
     }

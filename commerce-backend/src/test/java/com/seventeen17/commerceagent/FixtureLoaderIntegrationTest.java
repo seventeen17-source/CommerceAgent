@@ -11,6 +11,7 @@ import com.seventeen17.commerceagent.audit.AuditActorType;
 import com.seventeen17.commerceagent.audit.AuditEvent;
 import com.seventeen17.commerceagent.audit.AuditLogRepository;
 import com.seventeen17.commerceagent.audit.AuditWriter;
+import com.seventeen17.commerceagent.fixture.FixtureLoader;
 import com.seventeen17.commerceagent.security.LocalJwtIssuer;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -40,6 +41,9 @@ class FixtureLoaderIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private FixtureLoader fixtureLoader;
 
     @Autowired
     private DataSource dataSource;
@@ -138,6 +142,20 @@ class FixtureLoaderIntegrationTest {
                         .content("{\"datasetVersion\":\"v1\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.errorCode").value("AUTH_REQUIRED"));
+    }
+
+    @Test
+    void developmentSeedingAcquiresTheBlockingLockAndRunsUnderTheTestProfile() {
+        // DevelopmentFixtureInitializer is @Profile("dev"), so `mvnw verify` never exercised this
+        // path -- which is how a void-returning advisory lock mapped to Boolean survived T014 and
+        // broke `spring-boot:run`. Calling the loader directly pins the behaviour for every profile.
+        fixtureLoader.seedDevelopmentFixtures();
+
+        assertEquals(
+                3,
+                count(
+                        "SELECT COUNT(*) FROM commerce.users WHERE id IN ('customer-001','customer-002','approver-001')"));
+        assertEquals(2, count("SELECT COUNT(*) FROM commerce.orders WHERE id IN ('order-001','order-002')"));
     }
 
     private void performReset(String token) throws Exception {
