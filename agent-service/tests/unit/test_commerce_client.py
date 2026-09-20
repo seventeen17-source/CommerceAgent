@@ -269,6 +269,53 @@ async def test_error_envelope_becomes_a_known_failure_with_the_backend_retry_dec
 
 
 @pytest.mark.asyncio
+async def test_error_uses_validated_response_header_trace_id_when_envelope_disagrees() -> None:
+    """Persist the correlation id Java exposed in the response header, not a drifting JSON value."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {
+                "errorCode": "ORDER_FORBIDDEN",
+                "message": "Order is not accessible to the authenticated user",
+                "retryable": False,
+                "traceId": "different-envelope-trace",
+            },
+            status_code=403,
+            headers={TRACE_ID_HEADER: "java-trace-403"},
+        )
+
+    async with _client(handler) as client:
+        with pytest.raises(CommerceApiError) as exc_info:
+            await client.get_order(_AUTH, "order-001")
+
+    assert exc_info.value.trace_id == "java-trace-403"
+
+
+@pytest.mark.asyncio
+async def test_error_envelope_cannot_override_a_safe_correlation_id_with_control_text() -> None:
+    """An error-body trace id is remote JSON and must not become persisted correlation metadata."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {
+                "errorCode": "ORDER_FORBIDDEN",
+                "retryable": False,
+                "traceId": "evil\r\nFAKE: yes",
+            },
+            status_code=403,
+            headers={TRACE_ID_HEADER: "java-trace-safe"},
+        )
+
+    async with _client(handler) as client:
+        with pytest.raises(CommerceApiError) as exc_info:
+            await client.get_order(_AUTH, "order-001")
+
+    assert exc_info.value.trace_id == "java-trace-safe"
+    assert "\r" not in exc_info.value.trace_id
+    assert "\n" not in exc_info.value.trace_id
+
+
+@pytest.mark.asyncio
 async def test_retryable_envelope_keeps_the_backend_retry_decision() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return _json_response(
