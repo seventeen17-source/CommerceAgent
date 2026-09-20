@@ -519,3 +519,26 @@ async def test_from_settings_joins_the_contract_path_prefix() -> None:
         await client.get_principal(_AUTH)
 
     assert str(seen[0].url) == "http://localhost:8080/api/v1/me"
+
+
+@pytest.mark.asyncio
+async def test_ambient_proxy_configuration_cannot_reroute_the_authority_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``trust_env=False`` is a security decision, not a convenience.
+
+    httpx resolves proxies from the environment, and on Windows that resolution also reads the
+    *registry* proxy -- so no ``HTTP_PROXY`` variable has to exist for a machine-level setting to
+    put itself between the Agent and Java and receive the forwarded Bearer token. That is what
+    happened on the first live run of this client: a system proxy answered ``502`` outside the
+    error contract.
+
+    ``trust_env`` is httpx's public property, so this pins the decision without depending on how
+    httpx happens to store proxy mounts.
+    """
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+
+    async with CommerceClient(
+        base_url="http://commerce.test/api/v1", timeout_seconds=1.0
+    ) as client:
+        assert client._http.trust_env is False

@@ -6,8 +6,8 @@ T016 scope: ``GET /me``, ``GET /orders``, ``GET /orders/{orderId}``,
 and write-after-read verification machinery, and adding it here early would invite exactly the blind
 retry that ``errors.py`` exists to prevent.
 
-Four rules this module enforces once, instead of once per tool
--------------------------------------------------------------
+Five rules this module enforces once, instead of once per tool
+---------------------------------------------------------------
 1. **Forward a credential, never assert an identity.** Every call carries the caller's Bearer token
    (:class:`~app.clients.auth.AuthContext`); ``userId``/``role`` come back from Java. There is no
    ``user_id`` parameter here to get wrong.
@@ -18,6 +18,9 @@ Four rules this module enforces once, instead of once per tool
 4. **This client never retries.** ``retryable=true`` is not authority to retry: error-contracts rule
    1 gives every Tool a finite retry budget, and a retry loop in here would hide the unknown-outcome
    case from the only layer allowed to decide what to do about it.
+5. **Ambient configuration cannot reroute the call.** The client is built with ``trust_env=False``,
+   so no environment or OS-level proxy can silently put itself between the Agent and the one service
+   allowed to state business facts -- and receive the forwarded Bearer token on the way.
 
 Java analogy: a singleton ``RestClient`` bean -- one connection pool, lifecycle owned by the
 application (here the FastAPI lifespan, T018), ``Authorization`` set per exchange rather than as a
@@ -166,6 +169,17 @@ class CommerceClient:
             base_url=base_url,
             timeout=httpx.Timeout(timeout_seconds),
             transport=transport,
+            # Fail closed on ambient routing: httpx would otherwise resolve a proxy from the
+            # environment -- and on Windows `urllib.request.getproxies()` also reads the *registry*
+            # proxy, so no HTTP_PROXY variable has to exist for a machine-level setting to take
+            # over. Observed live on 2026-09-20: a system proxy at 127.0.0.1:7892 answered for
+            # `http://localhost:8080`, received the user's Bearer token, and returned its own 502
+            # outside the error contract. Reaching Java is the Agent's only authority channel, so a
+            # proxy must be a deliberate choice here, not whatever the machine is configured with.
+            # Cost, stated for whoever needs it: `trust_env=False` also stops httpx from honouring
+            # SSL_CERT_FILE / SSL_CERT_DIR, so a private CA for an HTTPS Java endpoint has to be
+            # passed explicitly instead of through the environment.
+            trust_env=False,
         )
 
     @classmethod
