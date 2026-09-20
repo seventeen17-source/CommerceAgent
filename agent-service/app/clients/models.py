@@ -19,9 +19,13 @@ can degrade to ``SAFE_STOP`` with a reason code, exactly as the cross-service va
 ``app/agent/state.py`` requires. A strict enum here would turn a benign additive backend rollout
 into an unparseable response.
 
-``PrincipalRole`` is the one value set taken as a strict enum, imported rather than re-declared so
-there is only one copy. That follows T015's explicit decision that the principal role is a set this
-service owns and must branch on exhaustively for authorization.
+The principal role is open on the wire for exactly the same reason as ``allowed_action``: the value
+set is owned by Java (``UserRole.java`` plus the ``commerce.users`` CHECK constraint). An
+unrecognized role must therefore reach the caller so authorization can *deny* it explicitly, rather
+than turning an additive backend role into a parse failure that prevents a run from being created at
+all -- with no ``SAFE_STOP``, no reason code and no audit record. The wire-to-``PrincipalRole``
+mapping that performs that denial belongs to the identity layer (the next step of T016), so this
+module stays free of authorization semantics.
 """
 
 from __future__ import annotations
@@ -30,8 +34,6 @@ from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from app.agent.state import PrincipalRole
 
 __all__ = [
     "CurrentPrincipal",
@@ -51,12 +53,16 @@ _REQUEST = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class CurrentPrincipal(BaseModel):
-    """``GET /me`` -- authoritative identity resolved by Java from the verified JWT subject."""
+    """``GET /me`` -- authoritative identity resolved by Java from the verified JWT subject.
+
+    ``role`` is a shape-validated open string: the value set is Java-owned, so an unrecognized role
+    must be denied explicitly by the identity layer instead of failing here as a parse error.
+    """
 
     model_config = _RESPONSE
 
     user_id: str = Field(alias="userId", min_length=1, max_length=64)
-    role: PrincipalRole
+    role: str = Field(min_length=1, max_length=32)
 
 
 class OrderSummary(BaseModel):

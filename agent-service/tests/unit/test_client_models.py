@@ -13,7 +13,6 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.agent.state import PrincipalRole
 from app.clients.models import (
     CurrentPrincipal,
     EligibilityDecision,
@@ -25,15 +24,26 @@ from app.clients.models import (
 )
 
 
-def test_current_principal_parses_camel_case_and_reuses_principal_role() -> None:
+def test_current_principal_parses_camel_case() -> None:
     principal = CurrentPrincipal.model_validate({"userId": "customer-001", "role": "CUSTOMER"})
 
     assert principal.user_id == "customer-001"
-    assert principal.role is PrincipalRole.CUSTOMER
+    assert principal.role == "CUSTOMER"
+
+
+def test_unrecognised_principal_role_reaches_the_caller() -> None:
+    """The identity layer, not the parser, decides what an unknown role means.
+
+    Failing here would stop the run from being created at all: no SAFE_STOP, no reason code and no
+    audit record. The value must survive so authorization can deny it explicitly.
+    """
+    principal = CurrentPrincipal.model_validate({"userId": "u-1", "role": "ADMIN"})
+
+    assert principal.role == "ADMIN"
 
 
 def test_models_accept_python_field_names_too() -> None:
-    principal = CurrentPrincipal(user_id="customer-001", role=PrincipalRole.APPROVER)
+    principal = CurrentPrincipal(user_id="customer-001", role="APPROVER")
 
     assert principal.user_id == "customer-001"
 
