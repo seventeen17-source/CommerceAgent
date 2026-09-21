@@ -134,7 +134,7 @@
   - `trust_env=False`：httpx 会从环境**及 Windows 注册表**解析代理，实测 `127.0.0.1:7892` 接管了 `http://localhost:8080`、收到转发的 Bearer token、并返回契约外的 502。代价已写明：`trust_env=False` 同时不再读 `SSL_CERT_FILE` / `SSL_CERT_DIR`
   - `FixtureLoader` advisory lock：`pg_advisory_xact_lock` 返回 `void` 却按 `Boolean.class` 取值，驱动抛 "cannot cast to boolean"，导致 dev profile 下 `spring-boot:run` 起不来（`DevelopmentFixtureInitializer` 是 `@Profile("dev")`，`mvnw verify` 从不覆盖该路径，故该缺陷从 T014 存活至今）；已补直接调用 loader 的回归测试
 - **Java `TraceIdFilter` 已收紧**：只接受格式/长度校验通过的入站 correlation id，否则生成新的 server trace id；新增 15 个 `TraceIdFilterTest` 用例
-- **T016 post-review trace hardening 已提交，待本地复验**：错误响应现在与成功响应共用 `_correlate()` 产出的已校验 correlation id；JSON error envelope 的 `traceId` 不再覆盖最终 `CommerceApiError.trace_id`。新增 mismatch / 控制字符回归测试。注意：当前文档中的 Python **86 passed** 是 hardening 前的最后一次实测，不能把新增修改自动算作已验收；需本地重新跑四条 Python 门禁后更新测试总数。
+- **T016 post-review hardening**：错误响应现在与成功响应共用 `_correlate()` 产出的已校验 correlation id；JSON error envelope 的 `traceId` 不再覆盖最终 `CommerceApiError.trace_id`。用户随后已反馈 Python 四条门禁重新全绿，但当时未记录新的 pytest 总数，因此这里不伪造统计值。2026-09-21 又补充 `test_client_auth.py`，直接钉死 credential ≠ identity、CR/LF/whitespace 拒绝、SecretStr 脱敏、额外 `user_id/role` 拒绝；**这一个新提交尚需再跑一次 Python 四条门禁作为最终封账证据**。
 
 ## 维护规则
 
