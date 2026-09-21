@@ -56,3 +56,10 @@ htmlcov/
 .cache/
 .temp/
 tmp/
+
+# uv 的包缓存默认在 %LOCALAPPDATA%\uv\cache，本机受限沙箱下不可写；
+# 开发时可用 `UV_CACHE_DIR=.uv-cache` 把它指到工作区内。缓存不入库。
+.uv-cache/
+# 静态检查工具缓存（此前靠工具默认行为兜底，见 PROJECT_PROGRESS 未决项）
+.mypy_cache/
+.ruff_cache/

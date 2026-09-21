@@ -30,6 +30,7 @@ from app.agent.state import RunStatus
 __all__ = [
     "IllegalRunTransitionError",
     "ResumeRefusalReason",
+    "RunForbiddenError",
     "RunNotFoundError",
     "RunResumeConflictError",
     "RunStoreError",
@@ -40,6 +41,26 @@ __all__ = [
 
 class RunStoreError(Exception):
     """Base class for every failure raised by the run/checkpoint store."""
+
+
+class RunForbiddenError(RunStoreError):
+    """The run exists and belongs to a different principal.
+
+    Separate from :class:`RunNotFoundError` on purpose, and the pair is a decision rather than an
+    accident. Scoping the lookup by owner (T018) turns "someone else's run" into "no such run" at
+    the SQL level, which is the safe default; but the *store* is also asked the question directly by
+    callers that legitimately need to distinguish them (an operator view, an audit path, and the
+    T018 API, which must return 403 -- the contract publishes a 403 for this endpoint).
+
+    ``owner_id`` is the caller's own id as derived from the authenticated principal; the run's owner
+    is deliberately not carried, because a value that lets a caller learn *whose* run an id belongs
+    to is exactly the enumeration oracle the 404-shaped path exists to avoid.
+    """
+
+    def __init__(self, *, run_id: str, owner_id: str) -> None:
+        super().__init__(f"agent run {run_id} is not owned by the requesting principal")
+        self.run_id = run_id
+        self.owner_id = owner_id
 
 
 class RunNotFoundError(RunStoreError):

@@ -1,6 +1,6 @@
-"""Security primitives shared by the Agent runtime (T017/T018).
+"""Inbound security for the Agent API (T018).
 
-``secrets`` owns the persistence-boundary guard: the single rule that decides whether a structure
-may be written to durable storage. It lives here rather than in ``app/agent`` or ``app/trace``
-because both of those need it, and a rule with two copies is two rules.
+``credentials`` answers "is this a token this project issued, and is it still valid?" and returns a
+value that deliberately cannot answer "who". ``dependencies`` chains that local check into the
+authoritative ``GET /me`` lookup, which is the only source of identity.
 """

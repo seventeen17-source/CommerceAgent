@@ -4,8 +4,8 @@
 
 ## 当前状态
 
-- **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T018
+- **当前 Phase**：Phase 2 — Foundational ✅ 收口
+- **当前 Tasks**：T019（Phase 3 — US1 MVP）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -20,8 +20,9 @@
   - T015 — 显式 `AgentState`（`agent-service/app/agent/state.py`）：Pydantic 状态 schema + `PrincipalRole`/`RunStatus`/`WriteStatus`/`VerificationStatus` 四个枚举，`extra="forbid"` 拒绝未声明字段（含 raw credential），model validator 对 step/retry budget fail closed；Python 门禁四条命令全部通过：`ruff check` **All checks passed**、`ruff format --check` **7 files**、`mypy app` **Success 5 files**、`pytest -q` **11 passed**
   - T016 — 类型化 Java API Client（`agent-service/app/clients/`：`auth.py` / `models.py` / `errors.py` / `identity.py` / `commerce_client.py`）+ Java `TraceIdFilter` 收紧 + `FixtureLoader` advisory lock 修复；Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 52, Failures: 0, Errors: 0；Spotless 64 files clean / 0 needs changes；SpotBugs BugInstance 0）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **17 files**、`mypy app` **Success 11 files**、`pytest -q` **86 passed**）。验收证据见「T016 验收证据」
   - T017 — Run/Checkpoint/Structured Tool Trace 持久化：`agent-service/app/trace/`（`checkpoint.py` / `db.py` / `store.py` / `retention.py` / `errors.py`）+ `app/security/secrets.py`（持久化边界护栏）+ `V002__agent_run_checkpoint.sql`；Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 61, Failures: 0, Errors: 0；Spotless 65 files clean / 0 needs changes；SpotBugs BugInstance size 0；JaCoCo 42 classes）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **30 files**、`mypy app` **Success 19 files**、`pytest -q` **195 passed, 13 skipped**，其中 **21 个真实 PostgreSQL 集成用例**证明并发 resume 只产生一个赢家。验收证据见「T017 验收证据」
-- **当前优先任务**：T018 — FastAPI JWT 验证、principal context、run ownership 与 run/status/event skeleton endpoint（`agent-service/app/security/`、`api/runs.py`、`main.py`）
-- **下一 Gate**：T018 完成后 Phase 2 收口，进入 US1 MVP
+  - T018 — FastAPI 认证 / Principal / Run Ownership / Run 骨架接口：`app/security/credentials.py`（只证明"合法"不证明"是谁"）、`app/security/dependencies.py`、`app/api/runs.py`（6 个端点，认证声明在 router 级）、`app/main.py`（`create_app` 工厂 + lifespan 单例）、`app/trace/store.py` 增补 `get_run_for_owner`（owner 进 SQL 谓词）、`web/vite.config.ts`（dev proxy + rewrite）、`web/src/App.tsx`（最小验证页）、`scripts/mint_dev_token.py`、`scripts/run_chain_check.py`；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **39 files**、`mypy app` **Success 24 files**、`pytest -q` **234 passed, 13 skipped**）；Web `npm.cmd run build` 成功、`npm.cmd run lint` 0 warnings/0 errors。**5173 真实端到端流转测试通过**（见「T018 验收证据」）
+- **当前优先任务**：T019 — ownership-scoped order/logistics read 与 stall calculation Java Test（US1 MVP，先写测试）
+- **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
@@ -50,8 +51,8 @@
 |---|---|---|---|---|
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
-| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T017 ✅，当前 T018） |
-| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ⬜ |
+| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ✅ Complete（T008–T018 ✅） |
+| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（当前 T019） |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
 | 6 | 安全降级 | T057–T063 | 依赖失败 / 规则冲突时 Safe Stop 或转人工 | ⬜ |
@@ -102,7 +103,8 @@
 8. ✅ T015：显式 `AgentState`（Python 门禁四条命令全部通过：`ruff check` / `ruff format --check` / `mypy app` / `pytest -q` → 11 passed）
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
 10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
-11. ⬜ T018：FastAPI security skeleton（JWT 验证 / principal context / run ownership / run-status-event skeleton）
+11. ✅ T018：FastAPI 认证 / principal / run ownership / run 骨架接口（Python 四条门禁全绿 → 234 passed；Web build + lint 通过；**5173 端到端流转实测通过**）—— Phase 2 收口
+12. ⬜ T019–T035：US1 物流异常退款 MVP（当前 T019）
 
 ### T008 验收证据
 
@@ -160,6 +162,35 @@
 - **集成测试的连接与清理语义**：无可用数据库时 **skip 而非 fail**；每个用例用随机 `run_id` 并在 teardown 删除（checkpoint/trace 级联），实测跑完后 `agent_checkpoints` 计数回到 **0**，不污染开发库。
 - **环境说明（非代码问题）**：本沙箱下 `uv run` 无法写 `%LOCALAPPDATA%\uv\cache`，四条门禁以等价的 `.venv\Scripts\python.exe -m ...` 形式执行；Java Testcontainers 需要 Docker 命名管道（工作区之外），首次 `verify` 的 44 个错误全部是 `Could not find a valid Docker environment`，提权重跑即通过。
 - **V002 已在开发库实际应用**（实测 `Successfully applied 1 migration to schema "commerce", now at version v002`），因此 Python 集成测试跑在真实迁移后的 schema 上，而非仅靠 Testcontainer。
+
+### T018 验收证据
+
+- **Python 四条门禁全绿**：`ruff check` **All checks passed** / `ruff format --check` **39 files** / `mypy app` **Success 24 files** / `pytest -q` **234 passed, 13 skipped**（其中 T018 集成 18 个、凭据单测 21 个）。
+- **Web**：`npm.cmd run build` 成功（`dist/` 产出）；`npm.cmd run lint`（oxlint）**0 warnings / 0 errors**。
+- **5173 真实端到端流转测试（实测通过）** —— 这是本节的核心验收，链路为 `浏览器 → localhost:5173 (Vite dev proxy) → FastAPI:8000 → stub Java /me → PostgreSQL(agent.*)`：
+
+  | 请求（全部经 `localhost:5173`） | 结果 |
+  |---|---|
+  | `GET /health` | **200** |
+  | `POST /agent/runs` | **201**，返回 `runId` / `status=RUNNING` / `version=1` |
+  | `GET /agent/runs/{id}`（本人 token） | **200** |
+  | `GET /agent/runs/{id}`（customer-002 token） | **403** |
+  | `GET /agent/runs/{id}/events` | **200**，含 `STATE_TRANSITION` checkpoint 事件 |
+  | `GET /agent/runs/{id}`（无 token） | **401** |
+
+  并直接查库确认 `agent.agent_runs` 有该行（`customer-001 / RUNNING / version=1 / created`）、`agent.agent_checkpoints` 1 条；测试后已清理，开发库回到 7 条 demo run。
+- **"本地验签只做快速失败、绝不做授权依据"由类型保证**：`VerifiedCredential` 只有 `issuer` / `expires_at` / `verified_at` 三个字段，**没有 `user_id`/`role`/`subject`**，`test_verified_credential_carries_no_identity` 钉死这一点。因此"从 JWT claim 读 role 去授权"在类型层面写不出来。
+- **凭据验证的四条硬要求各有可执行证据**：HS256 验签、算法固定（`alg: none` 被拒）、issuer 匹配、`exp` 必须存在（无 `exp` 的 JWT 永久有效，缺失即失败）；`iat` 刻意不要求，并有测试说明理由。
+- **失败语义分三档**：缺凭据/验签失败 → **401**；权威服务明确拒绝 → **401**；**权威服务不可达 → 503**（返回 401 会告诉一个认证正确的客户端"你的 token 坏了"，既假又不可操作）。有专门测试（Java 连接失败断言 503）。
+- **403 与 409 分离**：403 = "这个 run 不是你的"（鉴权，owner 进 SQL 谓词）；409 = "你的 run 现在不能推进"（状态合法性）。且**先鉴权再判状态**，否则不拥有者可用状态码差异探测他人 run。
+- **端点全部需要认证由测试枚举验证**（6 个端点逐一断言 401），且认证声明在 **router 级** —— 这是弥补 FastAPI 没有 SecurityFilterChain 的补偿控制：新端点默认需要认证。
+- **本轮抓到的真实缺陷（均由集成/端到端测试发现，非人工检查）**：
+  1. `Depends(get_settings)` 与 app 自身 settings 不一致（`lru_cache` 与 `Settings(...)` 分叉）——同一根因造成两次故障：所有已认证请求 401、以及 run 的 `max_steps` 用了 12 而非 app 的 5（T015"创建时注入预算"静默失效）。根治为 `get_settings_from_app` 单入口。
+  2. lifespan 无条件重建 `CommerceClient`，覆盖测试注入的 stub → 测试**打到了 :8080 上真实运行的 Java**，症状伪装成"验签坏了"。
+  3. Vite proxy 缺 path rewrite → `/agent/runs` 全部 **404**（app 注册在 `/api/v1/agent/runs`）；该 404 看起来像"路由未注册"，只有端到端测试能发现。
+  4. 测试 fixture 第一版 teardown 会删 `user_id LIKE 'customer-%'` 的所有行 —— 对共享开发库具破坏性，已改为只删自己登记的 id。
+- **环境陷阱（记录以免下次误判）**：本机 Vite dev server 只监听 **IPv6 `::1`**，所以 `http://127.0.0.1:5173/` 连不上，必须用 `http://localhost:5173/`；这与 T017 的 PostgreSQL（只绑 IPv4，`localhost` 先试 `::1` 白等 5 秒）**方向恰好相反**。结论：不要记"用 127.0.0.1"或"用 localhost"的口诀，按目标服务实际监听地址决定。
+- **明确未做（不夸大本节范围）**：`/events` 目前返回 JSON 数组而非 `text/event-stream` 流（契约声明 SSE，内容正确、传输留 UI 阶段）；`/input`/`/resume` 只做门禁与 resume，**不解释文本**（理解属 T030）；没有真正调用 LLM、没有查订单、没有退款（T029/T030/T026）。
 
 ## 维护规则
 - 每完成一个 Gate 更新本文件；不要每天机械改百分比。

@@ -56,6 +56,7 @@ from app.trace.db import ConnectionFactory, transaction
 from app.trace.errors import (
     IllegalRunTransitionError,
     ResumeRefusalReason,
+    RunForbiddenError,
     RunNotFoundError,
     RunResumeConflictError,
     RunStoreError,
@@ -262,6 +263,9 @@ class RunStore:
     def get_run(self, run_id: UUID) -> RunRecord:
         raise NotImplementedError
 
+    def get_run_for_owner(self, run_id: UUID, *, owner_id: str) -> RunRecord:
+        raise NotImplementedError
+
     def transition(self, run_id: UUID, transition: Transition) -> RunRecord:
         raise NotImplementedError
 
@@ -366,6 +370,40 @@ class PostgresRunStore(RunStore):
         if row is None:
             raise RunNotFoundError(str(run_id))
         return _row_to_run(row)
+
+    def get_run_for_owner(self, run_id: UUID, *, owner_id: str) -> RunRecord:
+        """Read a run **scoped to its owner**, with no way to observe another principal's run.
+
+        The owner is part of the SQL predicate rather than a check applied after the read. Two
+        consequences, and both are the reason for doing it this way:
+
+        1. A run belonging to someone else never enters this process. An ``if record.user_id !=
+           owner`` check is equally correct about the answer and strictly worse about the exposure:
+           it deserialises a stranger's ``state_json`` -- their order ids, their request text, their
+           collected evidence -- into memory purely to decide whether to discard it.
+        2. The query cannot be forgotten. There is no "read, then authorize" pair to keep in step,
+           so a future endpoint cannot ship the read without the check.
+
+        Because a miss is ambiguous by construction, the method disambiguates explicitly: it asks
+        whether the row exists at all, and reports :class:`RunForbiddenError` only when it does.
+        That costs one extra query on the failing path and keeps 403 versus 404 honest, which the
+        published contract requires.
+        """
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT "
+                + _run_columns()
+                + " FROM agent.agent_runs WHERE run_id = %s AND user_id = %s",
+                (run_id, owner_id),
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                return _row_to_run(row)
+
+            cursor.execute("SELECT 1 FROM agent.agent_runs WHERE run_id = %s", (run_id,))
+            if cursor.fetchone() is None:
+                raise RunNotFoundError(str(run_id))
+        raise RunForbiddenError(run_id=str(run_id), owner_id=owner_id)
 
     def list_tool_traces(self, run_id: UUID) -> list[ToolTraceRecord]:
         """Every recorded tool call for a run, in step order.

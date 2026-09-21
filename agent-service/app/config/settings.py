@@ -47,6 +47,19 @@ class Settings(BaseSettings):
     commerce_api_base_url: str = "http://localhost:8080"
     commerce_api_timeout_seconds: float = 5.0
 
+    # ---- 入站 JWT（T018）：本地验签 + 权威身份 ----
+    # 复用根 `.env.example` 已有的键名。当前 local fixture 明确是 HS256 对称密钥，
+    # 不是生产 OAuth/OIDC（见 research.md 决策 8）。
+    #
+    # 重要：这两个值只用于**本地验签做快速失败**。principal 的 userId/role 永远来自
+    # Java `GET /api/v1/me`，绝不从本服务解出的 claims 里取（T011 已定：role/status 每请求
+    # 从 commerce.users 权威读取）。
+    commerce_jwt_issuer: str = "commerceagent-local"
+    commerce_jwt_secret: str = "commerceagent-local-dev-secret-change-me-2026"
+    #: 允许的时钟偏移。Java 侧签发后由本服务校验 exp/iss，两端机器时钟不严格同步时
+    #: 需要一点余量；给太大会延长已过期 token 的可用窗口，所以是"几秒"而不是"几分钟"。
+    commerce_jwt_leeway_seconds: int = 10
+
     # ---- Agent 运行安全预算（run 创建时注入 AgentState，见 T017/T018）----
     # 放在这里而不是写死在 state.py：Eval 需要按 case 收紧预算来验证"步数耗尽则 SAFE_STOP"，
     # 而测试要验证的是机制而不是某个魔数。
@@ -65,6 +78,17 @@ class Settings(BaseSettings):
             f"postgresql://{self.agent_app_user}:{self.agent_app_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def is_jwt_secret_configured(self) -> bool:
+        """Whether a non-placeholder signing secret is configured.
+
+        ``/health`` reports this instead of the value, so an operator can see "the Agent cannot
+        verify tokens yet" without the secret ever leaving the process. A defaulting secret is a
+        real hazard: it makes a misconfigured deployment look healthy until someone forges a token.
+        """
+        placeholder = "commerceagent-local-dev-secret-change-me-2026"
+        return bool(self.commerce_jwt_secret) and self.commerce_jwt_secret != placeholder
 
 
 @lru_cache

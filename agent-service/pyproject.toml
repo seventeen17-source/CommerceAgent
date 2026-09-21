@@ -11,6 +11,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=3.1.2",
     "psycopg[binary,pool]>=3.3.5",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.10.1",
     "uvicorn>=0.53.0",
 ]
 
@@ -71,6 +72,10 @@ known-first-party = ["app"]
 # （`%s` + 元组/字典）。ruff 只做字符串拼接的启发式判断，看不到这个区别。
 # 只放行这一个文件，其余代码继续受该规则检查；不要因为这里放行就把 S608 从 select 里删掉。
 "app/trace/store.py" = ["S608"]
+# 测试里出现的“硬编码口令”是**测试自己签发的 JWT 密钥**，不是真实凭据：它必须与 app 默认值
+# 不同，否则测试通过只能证明“默认值恰好匹配”，而不能证明验签真的在工作。只放行这几个测试文件。
+"tests/integration/test_run_api.py" = ["S105", "S106"]
+"tests/unit/test_credential_verification.py" = ["S105", "S106"]
 
 [tool.mypy]
 python_version = "3.13"
