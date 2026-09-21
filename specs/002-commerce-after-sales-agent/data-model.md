@@ -249,6 +249,19 @@ Python **不得直接读写 `commerce` 业务表**；它访问权威业务状态
 - Run 查询/恢复接口必须验证 authenticated ownership 或明确 operational role。
 - `current_node` / `next_action` / `final_action` / `model_name` / `model_temperature` / `prompt_version` / `input_tokens` / `output_tokens` / `started_at` / `completed_at` 属于 `agent_runs` 行本身，**不属于** Python `AgentState`；`state_json` 只承载 `AgentState` 的字段（见 `agent-service/app/agent/state.py` 的 persistence boundary 说明）。
 - `status` / `intent` / `resolved_order_id` / `step_count` / `retry_count` 在行与 `state_json` 中**同时存在且刻意重复**：行是"可查询投影"（便于按状态/用户查询），`state_json` 是运行时状态的权威副本。两者必须由 T017 在**同一次写入**中保持一致，不允许出现"行显示 COMPLETED、payload 仍是 RUNNING"这类漂移。
+- 并发写入由 `version`（V002 新增，`NOT NULL DEFAULT 1`）仲裁：**`SELECT ... FOR UPDATE` 只负责串行化，"我读到的那一行是否还是同一行"必须由 version 比较发现**。只有行锁时，第二个请求阻塞结束醒来后仍会按旧快照继续执行 —— 那就是"同一 WAITING 状态分叉"。
+- `completed_at` 与"终态"由 `chk_agent_runs_terminal_has_completion` 绑定（终态 ⟺ `completed_at IS NOT NULL`）：retention 按"终态"决定能否回收，而"COMPLETED 但没有完成时间"是它无法一致处理的矛盾状态。
+- `checkpoint_compacted_at` 记录"详细 payload 已被回收"。它不是删除：run 行的状态/final_action/error_code 永久保留，因此"这次 run 发生过、这样结束"始终可回答。没有这个标记就无法区分"没有状态"和"状态被清理掉了"。
+
+### 12.1 Checkpoint 历史（T017 新增，见 V002）
+
+`agent.agent_checkpoints`：`run_id`、`version`、`status`、`current_node`、`next_action`、`step_count`、`retry_count`、`reason_code`、`state_json`、`created_at`。
+
+规则：
+- 行是"当前可查询投影"，checkpoint 是"某一时刻运行时状态的权威副本"；两者在**同一个事务**里写入，否则 resume 会恢复到一个 run 已经不在的状态。
+- `UNIQUE (run_id, version)`：同一版本不能有第二条 checkpoint，否则"那次 resume 到底写了什么"没有唯一答案。
+- resume 本身也写一条 checkpoint（`current_node` 记录从哪里继续），这是"resume 只发生过一次"的持久证据。
+- retention 清空 `state_json` 但**保留行**，因此"这个版本存在过、被清理了"仍可追溯；`RunRecord.resumable` 要求 payload 非空，**匹配版本号但 payload 为空不算可恢复**。
 
 ## 13. ToolExecution
 
@@ -270,6 +283,10 @@ Python **不得直接读写 `commerce` 业务表**；它访问权威业务状态
 规则：
 - 敏感字段最小化/脱敏；
 - 不保存原始 auth token。
+- T017 落法：`run_id + step_index + trace_id` 是"把 failed run 追回某一次 Java 请求"的索引，三者都必须持久化（`trace_id` 同时来自成功与失败路径）。
+- `input_summary` / `output_summary` 是**摘要**：携带 reviewer 需要的结构化事实（哪个订单、哪个 error code），不携带原始 payload、不携带凭据。该约束由 `app.security.secrets.validate_persistable` 在**写前**强制执行，不靠约定。
+- `(run_id, step_index)` 唯一：同一 step 有两条 trace 会让"第 1 步做了什么"有两个答案。
+- retention：`FAILED` / `SAFE_STOP` run 的 trace 保留最久（90 天），因为那才是会被复盘的对象；成功 run 的 trace 在终态保留期后回收。
 
 ## 14. AuditLog
 

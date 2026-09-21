@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational
-- **当前 Tasks**：T017
+- **当前 Tasks**：T018
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -19,9 +19,10 @@
   - T010–T014 — 见「Phase 2 — 当前执行顺序」第 3–7 项的验收证据（`AfterSalesRule` 持久化 / JWT role-aware principal / 统一 Error Envelope / 结构化 Audit Writer / dev-eval Fixture Loader）
   - T015 — 显式 `AgentState`（`agent-service/app/agent/state.py`）：Pydantic 状态 schema + `PrincipalRole`/`RunStatus`/`WriteStatus`/`VerificationStatus` 四个枚举，`extra="forbid"` 拒绝未声明字段（含 raw credential），model validator 对 step/retry budget fail closed；Python 门禁四条命令全部通过：`ruff check` **All checks passed**、`ruff format --check` **7 files**、`mypy app` **Success 5 files**、`pytest -q` **11 passed**
   - T016 — 类型化 Java API Client（`agent-service/app/clients/`：`auth.py` / `models.py` / `errors.py` / `identity.py` / `commerce_client.py`）+ Java `TraceIdFilter` 收紧 + `FixtureLoader` advisory lock 修复；Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 52, Failures: 0, Errors: 0；Spotless 64 files clean / 0 needs changes；SpotBugs BugInstance 0）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **17 files**、`mypy app` **Success 11 files**、`pytest -q` **86 passed**）。验收证据见「T016 验收证据」
-- **当前优先任务**：T017 — 持久化 Agent Run/Checkpoint/Structured Tool Trace（`agent-service/app/trace/`）
-- **下一 Gate**：T016–T018 完成 Commerce Client / Run+Trace 持久化 / FastAPI security skeleton 后，Phase 2 收口，进入 US1 MVP
-- **当前 Blocker**：无；T016 前置 contract hardening 已在 `foundation/t016-contract-hardening` **本地复验通过**：修复 eligibility `ruleVersion` 类型、Java-owned enum 前向兼容策略，并新增 `GET /api/v1/me` 作为 Python 获取权威 principal role 的边界。复验证据：Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 36, Failures: 0, Errors: 0；Spotless 63 files clean / 0 needs changes；SpotBugs BugInstance size 0）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **7 files**、`mypy app` **Success 5 files**、`pytest -q` **17 passed**）。首次复验发现 `a8be62c` 引入 2 处 ruff 违规（I001/E501），由 `ded8a45` 修复后才达全绿。
+  - T017 — Run/Checkpoint/Structured Tool Trace 持久化：`agent-service/app/trace/`（`checkpoint.py` / `db.py` / `store.py` / `retention.py` / `errors.py`）+ `app/security/secrets.py`（持久化边界护栏）+ `V002__agent_run_checkpoint.sql`；Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 61, Failures: 0, Errors: 0；Spotless 65 files clean / 0 needs changes；SpotBugs BugInstance size 0；JaCoCo 42 classes）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **30 files**、`mypy app` **Success 19 files**、`pytest -q` **195 passed, 13 skipped**，其中 **21 个真实 PostgreSQL 集成用例**证明并发 resume 只产生一个赢家。验收证据见「T017 验收证据」
+- **当前优先任务**：T018 — FastAPI JWT 验证、principal context、run ownership 与 run/status/event skeleton endpoint（`agent-service/app/security/`、`api/runs.py`、`main.py`）
+- **下一 Gate**：T018 完成后 Phase 2 收口，进入 US1 MVP
+- **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
 - **环境事实（重要）**：
   - 本机 PowerShell 执行策略为默认 `Restricted`，`npm` 会命中被拦的 `npm.ps1` → **前端命令一律用 `npm.cmd` / `npx.cmd`**
   - 本机 `core.autocrlf=true`；`infra/` 下的脚本与 `.env*` 已由根 `.gitattributes` 钉为 LF（否则容器内执行会 `bad interpreter`）
@@ -31,11 +32,14 @@
   - Java 侧两条命令：`mvnw.cmd spotless:apply` 修复格式；`mvnw.cmd verify` 跑 compile + test + spotless check + SpotBugs + JaCoCo
   - Testcontainers PostgreSQL 已固定为 `postgres:18`，避免 `latest` 漂移破坏可复现性
   - Python 侧验收命令：`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`、`uv run pytest -q`（四条全绿才算通过）
+  - **本沙箱下 `uv run` 无法写 `%LOCALAPPDATA%\uv\cache`**，等价替代：`agent-service\.venv\Scripts\python.exe -m ruff|mypy|pytest ...`
+  - Python 集成测试默认连 `127.0.0.1:5432`（**不要写 `localhost`**：本机解析到 `::1` 在前，而容器只发布 IPv4，每次连接会等满 `connect_timeout`）；可用 `AGENT_TRACE_TEST_DATABASE_URL` 覆盖；连不上时用例 **skip 而非 fail**
+  - Java Testcontainers 需要 Docker 命名管道（在工作区之外）：受限沙箱下 `mvnw verify` 会以 `Could not find a valid Docker environment` 失败，这**不是代码问题**
 - **未决项**：
   - `.specify/feature.json` 仅为本地 Spec Kit 活动 feature 状态，不提交；运行 Spec Kit 前本地确认解析到 `specs/002-commerce-after-sales-agent`
   - T015 后续跨服务审查又发现并已在 `foundation/t016-contract-hardening` 处理：① OpenAPI 的 Java-owned enum 不应让 T016 生成封闭消费端枚举；② `ruleVersion` 契约误写为 string；③ Python 无法仅凭当前 JWT 得到权威 role，因此增加 Java `GET /api/v1/me`；④ Evidence/Verification 开放字典增加递归敏感信息拒绝。T017 另明确要求并发 resume 使用 row lock/CAS/version 防分叉。
   - T015 的 3 个评审发现已全部在 T015 内处置完毕（详见 `docs/devlog/2026-09-18.md` 的「T015 review findings 处置结果」）：②③ 采纳并落地，① 经判断**拒绝**并把"跨服务取值策略"写进 `state.py`（远程拥有的值域不镜像成 `StrEnum`，未知值受控降级为 `SAFE_STOP`）
-  - **T017 前置：AgentState 敏感信息拦截覆盖不足（2026-09-18 实测，未实现）**——现有拦截只挂在 `EvidenceItem.data` / `VerificationOutcome.details` 两个字段上；对 16 个自由文本字段注入 JWT/Bearer 共 32 次，**仅 2 个字段被挡（即那两个对照组），26 次进入 state 未被拦**（含 `user_request`、`tool_history[].trace_id`/`error_code`、`write.action`/`resource_id`、`approval.*`、`intent`、`resolved_order_id`、`candidate_order_ids`、`principal.user_id`、`eligibility.reason_codes`/`rule_code`）。今天 `state.py` 除单测外无生产调用者，属**潜在缺陷**，风险在 T017 引入 `state_json` 持久化出口时变为现实。已定设计（含正则误报证据、实现顺序硬依赖、resume 未知数）见 `docs/devlog/2026-09-18.md` 的「T017 前置：AgentState secret-guard 覆盖缺口」。**未实现，不得视为已完成。**
+  - **T017 前置：AgentState 敏感信息拦截覆盖不足 —— 已在 T017 内关闭**。原状：拦截只挂在 `EvidenceItem.data` / `VerificationOutcome.details` 两个字段上，16 个自由文本字段注入 32 次仅拦 2 次。处置：规则移入 `app/security/secrets.py` 作为**持久化边界**规则（模型构造 + 落盘前各调一次，同一个函数），并新增遍历 `AgentState.model_fields` 的 meta-test 使新增字段自带用例；`_BEARER_PATTERN` / `_JWT_PATTERN` 先收紧（结构化判定）再扩大覆盖。证据见「T017 验收证据」与 `docs/devlog/2026-09-21.md`。
   - 根 `.gitignore` 建议补 `.mypy_cache/`、`.ruff_cache/`（当前靠工具默认行为兜底）
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
@@ -46,7 +50,7 @@
 |---|---|---|---|---|
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
-| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T016 ✅，当前 T017） |
+| 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | 👉 Current（T008–T017 ✅，当前 T018） |
 | 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ⬜ |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
@@ -97,7 +101,8 @@
 7. ✅ T014：dev/eval fixture loader（本地 `mvnw.cmd verify` → BUILD SUCCESS；35 tests、Spotless、SpotBugs 均通过）
 8. ✅ T015：显式 `AgentState`（Python 门禁四条命令全部通过：`ruff check` / `ruff format --check` / `mypy app` / `pytest -q` → 11 passed）
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
-10. ⬜ T017–T018：Run+Trace 持久化 / FastAPI security skeleton
+10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
+11. ⬜ T018：FastAPI security skeleton（JWT 验证 / principal context / run ownership / run-status-event skeleton）
 
 ### T008 验收证据
 
@@ -136,8 +141,27 @@
 - **Java `TraceIdFilter` 已收紧**：只接受格式/长度校验通过的入站 correlation id，否则生成新的 server trace id；新增 15 个 `TraceIdFilterTest` 用例
 - **T016 post-review hardening**：错误响应现在与成功响应共用 `_correlate()` 产出的已校验 correlation id；JSON error envelope 的 `traceId` 不再覆盖最终 `CommerceApiError.trace_id`。用户随后已反馈 Python 四条门禁重新全绿，但当时未记录新的 pytest 总数，因此这里不伪造统计值。2026-09-21 又补充 `test_client_auth.py`，直接钉死 credential ≠ identity、CR/LF/whitespace 拒绝、SecretStr 脱敏、额外 `user_id/role` 拒绝；**这一个新提交尚需再跑一次 Python 四条门禁作为最终封账证据**。
 
-## 维护规则
+### T017 验收证据
 
+- **Java `mvnw.cmd verify` → BUILD SUCCESS**（本机实测 2026-09-21：Tests run: **61**, Failures: 0, Errors: 0, Skipped: 0；Spotless 65 files clean / **0 needs changes**；SpotBugs **BugInstance size 0**；JaCoCo 分析 42 classes）。其中新增 `AgentRunCheckpointSchemaTests` **9 个用例**，`CoreSchemaMigrationTests` 3 个用例仍通过。
+- **Python 四条门禁全绿**：`ruff check` **All checks passed** / `ruff format --check` **30 files** / `mypy app` **Success 19 files** / `pytest -q` **195 passed, 13 skipped**。
+- **交付内容**：
+  - `agent-service/app/trace/` 五个模块 —— `checkpoint.py`（记录 + 生命周期集合 + 记录层护栏）、`db.py`（注入式连接工厂 + `dict_row` + 显式事务）、`store.py`（`PostgresRunStore` / `RunStore` 契约）、`retention.py`（`RetentionPolicy` + `sweep_terminal_runs`）、`errors.py`（8 个类型化失败 + `ResumeRefusalReason`）
+  - `agent-service/app/security/secrets.py` —— **唯一**的持久化边界敏感信息规则
+  - `V002__agent_run_checkpoint.sql` —— `version` / `checkpoint_compacted_at` / 终态-完成时间约束 / `status+started_at` 索引 / `agent.agent_checkpoints`
+- **并发 resume 有可执行证明**（不是设计说明）：`test_two_concurrent_resumes_of_one_checkpoint_produce_exactly_one_winner` 用**两个真实线程 + `threading.Barrier`** 对同一旧 checkpoint 同时 resume，断言结果集合恰为 `["refused:ALREADY_CLAIMED", "won"]`、run 只前进一个版本、且只多出一条 checkpoint。**没有用内存假实现**：内存 double 的"锁"是它自己实现的，测它只能证明它和自己一致。
+- **为什么"行锁"和"version"都要**：`SELECT ... FOR UPDATE` 只把并发请求**串行化**；没有 version 比较时，第二个请求阻塞结束醒来后仍会按旧快照继续执行 —— 那正是 T017 禁止的分叉。锁让检查不竞态，version 比较才**发现过期**。第 5 步 `UPDATE ... WHERE run_id=? AND version=?` 是纵深防御。
+- **隔离级别用默认 `READ COMMITTED`（有理由）**：`REPEATABLE READ` 会让第二个事务拿到 serialization failure，调用方就无法区分"基础设施报错"和"别人已抢到这个 resume"，恰好丢掉 T017 要保留的赢家/输家信息。
+- **行与 payload 的漂移在本 store 内不可表达**：行值与其 `state_json` 由**同一个 dict、同一条 UPDATE** 写入；`test_checkpoint_payload_matches_the_row_it_was_written_with` 直接断言 `state.status` 与行一致。
+- **secret-guard 缺口已关闭**（T015 遗留，devlog 2026-09-18 记录未实现）：`tests/unit/test_state_secret_guard.py` **meta-test 遍历 `AgentState.model_fields`** 逐字段注入；**持久化边界层无豁免清单**（全字段必须拒绝），模型构造层单独断言且不冒充覆盖率。原先"逐字段白名单 2/16"的问题根源是**白名单会随字段增长腐烂**，现在新增字段自带用例。
+- **检测规则用结构而非长度**（先收紧再扩覆盖）：旧 `bearer\s+[^\s,;]+` 对普通英文**误报 6/6**；新规则要求 Bearer 后为凭据形状、JWT 前两段必须**解码成 JSON object**。`a1b2c3d4e5f6.a7b8c9d0e1f2.a3b4c5d6e7f8` 这类 trace-id 不再误报，真 JWT 仍命中。**删除了一个凭空猜的 agent-token 正则**（本项目不存在该格式，只会制造误报）。
+- **集成测试抓到 3 个 mock 发现不了的真问题**：① `create_run` 漏写行上的投影列（`resolved_order_id` 实际为 `NULL`）；② Java 测试里 `started_at`（数据库时钟）与 `completed_at`（JVM 时钟）**跨时钟比较**被约束拒绝；③ `localhost` 解析到 IPv6 而容器只绑 `127.0.0.1`，每次连接先等满 5s 超时再回落（实测 **5.03s vs 0.013s**），测试默认 URL 改 `127.0.0.1` 后 21 个集成用例从"分钟级"降到 **1.55s**。
+- **retention 策略**（`retention.py`）：`COMPLETED`/`ESCALATED` 保留 7 天后清 payload 与 trace；`FAILED`/`SAFE_STOP` 保留 90 天且**保留 trace**（`run_id + step_index + trace_id` 是把失败追回 Java 请求的唯一线索）；`RUNNING`/`WAITING_*` **任何年龄都不动**（等待中的 checkpoint 就是产品本身，回收它会把暂停的 run 变成不可恢复）。retention **不是删除**：run 行永久保留，只打 `checkpoint_compacted_at` 标记，且全部操作幂等。
+- **集成测试的连接与清理语义**：无可用数据库时 **skip 而非 fail**；每个用例用随机 `run_id` 并在 teardown 删除（checkpoint/trace 级联），实测跑完后 `agent_checkpoints` 计数回到 **0**，不污染开发库。
+- **环境说明（非代码问题）**：本沙箱下 `uv run` 无法写 `%LOCALAPPDATA%\uv\cache`，四条门禁以等价的 `.venv\Scripts\python.exe -m ...` 形式执行；Java Testcontainers 需要 Docker 命名管道（工作区之外），首次 `verify` 的 44 个错误全部是 `Could not find a valid Docker environment`，提权重跑即通过。
+- **V002 已在开发库实际应用**（实测 `Successfully applied 1 migration to schema "commerce", now at version v002`），因此 Python 集成测试跑在真实迁移后的 schema 上，而非仅靠 Testcontainer。
+
+## 维护规则
 - 每完成一个 Gate 更新本文件；不要每天机械改百分比。
 - 每次开发只关注当前 Phase，不主动扩展下一阶段。
 - `tasks.md` 是详细执行清单，本文件只做导航，不复制全部 Task 内容。
