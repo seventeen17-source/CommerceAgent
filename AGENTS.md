@@ -74,18 +74,50 @@
 4. **能解释输入 → 处理 → 输出**：关键步骤可以被展开或复述，而不是只显示最终成功；
 5. **不提前伪造后续能力**：当前 T 未实现 LangGraph / FastAPI / 写操作时，Visible Output 必须明确使用 mock / simulation，不得让展示看起来像真实链路已经完成；
 6. **不污染下一阶段**：产出应尽量复用现有项目，以最小代码实现；教学 UI 属于 B-class，不应为了“好看”引入重依赖或改变核心架构；
-7. **可以递进升级**：后续 Txxx 可以在前一个 Visible Output 上增加真实能力，例如 mock → real API → Tool → LangGraph → checkpoint / trace，而不是每次重做一个孤立 Demo；
-8. **可用于面试复述**：阶段结束时给出一句“我做出了什么”的可直接表述版本。
+7. **必须优先在同一个 Flow Playground 上递进叠加**：默认不是“每个 T 做一个新的孤立 Demo”，而是持续扩展现有 `web/` 测试站点（本地开发默认入口 `http://localhost:5173/`）。前一个 T 的流转保留，后一个 T 在其基础上继续增加节点、真实调用、状态、Trace 或失败恢复；
+8. **新能力要叠在旧流转上**：页面应逐步从“静态 mock 教学图”成长为“真实 Agent 调试台”。除非技术上明显不适合，新的 Visible Output 应接到已有主链，而不是另起一个互不相干页面；
+9. **可用于面试复述**：阶段结束时给出一句“我做出了什么”的可直接表述版本。
 
-优先形式示例：
+持续叠加路线：
 
 ```text
-T015 → AgentState 小演示：构造状态 → 修改 → 输出状态变化
-T016 → Flow Playground：Auth → CommerceClient → Java mock → typed response
-T017 → checkpoint 演示：保存 → 退出 → 恢复
-T018 → FastAPI 演示：HTTP 请求 → auth → run 创建
-T019+ → 自然语言 → Tool → Java → AgentState 的真实链路
+同一个 http://localhost:5173/
+
+T016
+用户场景
+  → AuthContext
+  → CommerceClient
+  → Java mock
+  → typed response
+  → AgentState
+
+T017 在上面的流转继续叠加
+  → AgentRun
+  → ToolExecution
+  → checkpoint save
+  → process restart / resume
+  → trace persistence
+
+T018 继续叠加
+  → 页面请求真实 FastAPI
+  → JWT / security
+  → 创建或恢复 AgentRun
+  → 后端真实返回流转数据
+
+T019+ 继续叠加
+  → 用户自然语言
+  → LangGraph / Routing
+  → Tool
+  → CommerceClient
+  → Java
+  → PostgreSQL
+  → AgentState / Trace / Audit
+
+最终：
+同一个页面逐步成长为 CommerceAgent Flow Playground / Debug Console
 ```
+
+原则：**能在原有流转上增加，就不要另做一个割裂的新 Demo。** 只有当某个能力无法合理放入该页面时，才使用 CLI / SQL / 独立测试等辅助产出，并尽量把结果或链接回挂到 Flow Playground。
 
 如果某个 Txxx 确实不适合做 UI，也必须至少留下一个**可执行/可观察的等价产出**（例如测试、Trace、SQL 验证、CLI demo），并解释为什么它已经足够代表本阶段能力。
 
