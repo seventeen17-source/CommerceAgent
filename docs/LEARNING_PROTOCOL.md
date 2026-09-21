@@ -271,26 +271,79 @@ commerce.*
 - **不越级**：未实现的后续能力必须清楚标为 mock / simulation；
 - **一段面试表达**：用户能说“这个阶段我实际做出了什么”，而不只是“我学了某个概念”。
 
-推荐的递进方式：
+### 8.2 Flow Playground 是持续生长的单一教学主界面
+
+Visible Output 的默认承载方式不是每个 Task 新建一个 Demo，而是**持续扩展同一个 `web/` Flow Playground**。本地开发时，默认通过 Vite 的 `http://localhost:5173/` 打开。
+
+每完成一个适合可视化的 Txxx，都先问：
+
+> 这个新能力如何叠加到当前已经存在的流转里？
+
+而不是先问：
+
+> 我要不要再做一个新的页面？
+
+推荐的连续演进：
 
 ```text
-T015  Visible Output V0
-      手动构造 AgentState，观察状态与安全约束
+同一个 http://localhost:5173/
 
-T016  Flow Playground V1
-      mock 展示 AuthContext → CommerceClient → typed response → AgentState
+T016 · Flow Playground V1
+用户输入
+  ↓
+AuthContext
+  ↓
+CommerceClient
+  ↓
+Java mock
+  ↓
+typed response
+  ↓
+AgentState
 
-T017  Flow Playground V2
-      增加 AgentRun / ToolExecution / checkpoint 保存与恢复
+T017 · 在 V1 上继续增加
+  ↓
+AgentRun / ToolExecution
+  ↓
+checkpoint save
+  ↓
+退出 / 恢复
+  ↓
+trace persistence
 
-T018  Flow Playground V3
-      接真实 FastAPI，请求真正进入 Python Agent 服务
+T018 · 在原链路继续替换 mock
+  ↓
+真实 FastAPI
+  ↓
+真实 JWT / security
+  ↓
+真实 run create / resume
 
-T019+ Live Flow
-      自然语言 → Tool → Java → PostgreSQL → AgentState / Trace
+T019+ · 继续向主链补全
+  ↓
+自然语言
+  ↓
+LangGraph routing
+  ↓
+Tool calling
+  ↓
+CommerceClient
+  ↓
+Java / PostgreSQL
+  ↓
+AgentState / Trace / Audit
 ```
 
-这里的 UI 本身通常属于 B-class：可以由 AI 快速完成。**教学重点不是让用户花时间写 CSS，而是让用户通过页面看见 A-class 机制。**
+要求：
+
+- **旧步骤保留**：新 Txxx 不应把前一阶段的流转删掉；页面要能看出系统是怎样一步步长出来的；
+- **mock 逐步替换为 real**：当真实 FastAPI / Tool / Java 调用完成后，应把对应 mock 节点升级为真实执行，同时保留“这是从哪一阶段演进来的”说明；
+- **主链优先**：新增状态、checkpoint、retry、HITL、Trace 等能力，优先挂在已有请求流转上；
+- **失败模式也累积**：页面不仅展示 happy path，还应随阶段加入 timeout、unknown write、SAFE_STOP、approval waiting、resume 等真实失败/恢复路径；
+- **避免 UI 反客为主**：页面只是教学与调试外壳，核心实现仍必须落在正式后端 / Agent 模块中；不要为了展示而复制业务逻辑到 React；
+- **必要时才旁路**：某些 SQL、并发或基础设施验证不适合网页直接演示时，可以保留 CLI / test / SQL 作为辅助证据，但尽量在 Flow Playground 中提供入口、结果摘要或说明。
+
+这里的 UI 本身通常属于 B-class：可以由 AI 快速完成。**教学重点不是让用户花时间写 CSS，而是让用户通过这个长期生长的页面看见 A-class 机制如何逐层接起来。**
 
 如果 UI 会明显扩大范围，则改用更轻量的可见产出，例如：
 
