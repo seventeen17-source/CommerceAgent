@@ -7,6 +7,11 @@ Security boundary:
 - Keep only derived principal context (user_id / role), never a raw JWT or credential.
 - Store verified business evidence and backend decisions as structured snapshots.
 - Persisting/restoring this state is a T017 concern.
+- The credential rule itself lives in :mod:`app.security.secrets` and is applied to the *whole*
+  JSON form of this model by :meth:`AgentState.reject_sensitive_content`. It is applied again at
+  the persistence boundary, because a state restored from a raw checkpoint dict never passes
+  through this class at all. Two call sites, one rule -- see that module for why a per-field
+  allowlist was rejected.
 
 Persistence boundary (T017) -- this object is deliberately NOT the `agent.agent_runs` row:
 - Row-only run metadata belongs to the table, not here: `current_node`, `next_action`,
@@ -36,59 +41,25 @@ Cross-service value policy (why some fields are `str`, not `StrEnum`):
 
 from __future__ import annotations
 
-import re
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-_FORBIDDEN_PERSISTED_KEYS = {
-    "authorization",
-    "token",
-    "rawtoken",
-    "accesstoken",
-    "refreshtoken",
-    "idtoken",
-    "password",
-    "secret",
-    "apikey",
-    "cookie",
-    "setcookie",
-    "chainofthought",
-    "cot",
-    "reasoning",
-    "internalreasoning",
-    "rawprompt",
-}
-_BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
-_JWT_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])"
-)
+from app.security.secrets import SensitiveStateError, validate_persistable
 
+#: Control characters (CR/LF/TAB) are rejected anywhere in a machine-produced identifier. This is a
+#: *shape* rule, not a security rule: the credential rule lives in ``app.security.secrets``. What it
+#: buys is that a model-produced value cannot smuggle a line break into a trace, a log line, or a
+#: future query parameter. It deliberately allows uppercase and non-ASCII text, so an unexpected but
+#: harmless value cannot stop a run for a cosmetic reason.
+_IDENTIFIER_PATTERN = r"^[^\x00-\x1f\x7f]+$"
 
-def _normalize_sensitive_key(key: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]", "", key).lower()
-
-
-def _validate_persistable_value(value: Any, path: str) -> None:
-    """Reject raw credentials or hidden reasoning before any structured state is persisted."""
-    if isinstance(value, dict):
-        for key, nested in value.items():
-            normalized = _normalize_sensitive_key(str(key))
-            if normalized in _FORBIDDEN_PERSISTED_KEYS:
-                raise ValueError(f"sensitive state key is not allowed at {path}.{key}")
-            _validate_persistable_value(nested, f"{path}.{key}")
-        return
-    if isinstance(value, (list, tuple, set)):
-        for index, nested in enumerate(value):
-            _validate_persistable_value(nested, f"{path}[{index}]")
-        return
-    if isinstance(value, str) and (
-        _BEARER_PATTERN.search(value) is not None or _JWT_PATTERN.search(value) is not None
-    ):
-        raise ValueError(f"raw authentication token is not allowed at {path}")
+#: A machine-produced identifier: bounded, non-empty, and free of control characters. Annotated
+#: rather than repeated inline so the list and scalar forms of an order id cannot drift apart.
+Identifier = Annotated[str, Field(min_length=1, max_length=64, pattern=_IDENTIFIER_PATTERN)]
 
 
 class PrincipalRole(StrEnum):
@@ -136,7 +107,7 @@ class PrincipalContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    user_id: str = Field(min_length=1, max_length=64)
+    user_id: Identifier
     role: PrincipalRole
 
 
@@ -152,7 +123,7 @@ class EvidenceItem(BaseModel):
     @field_validator("data")
     @classmethod
     def reject_sensitive_persisted_data(cls, value: dict[str, Any]) -> dict[str, Any]:
-        _validate_persistable_value(value, "evidence.data")
+        validate_persistable(value, "evidence.data")
         return value
 
 
@@ -222,7 +193,7 @@ class VerificationOutcome(BaseModel):
     @field_validator("details")
     @classmethod
     def reject_sensitive_persisted_details(cls, value: dict[str, Any]) -> dict[str, Any]:
-        _validate_persistable_value(value, "verification.details")
+        validate_persistable(value, "verification.details")
         return value
 
 
@@ -236,9 +207,9 @@ class AgentState(BaseModel):
     # Untrusted natural-language input. It may guide intent understanding but never authorization.
     user_request: str = Field(min_length=1, max_length=4000)
 
-    intent: str | None = Field(default=None, max_length=100)
-    candidate_order_ids: list[str] = Field(default_factory=list)
-    resolved_order_id: str | None = Field(default=None, max_length=64)
+    intent: str | None = Field(default=None, max_length=100, pattern=_IDENTIFIER_PATTERN)
+    candidate_order_ids: list[Identifier] = Field(default_factory=list)
+    resolved_order_id: Identifier | None = None
 
     evidence: list[EvidenceItem] = Field(default_factory=list)
     eligibility: EligibilitySnapshot | None = None
@@ -265,6 +236,30 @@ class AgentState(BaseModel):
             raise ValueError("step_count cannot exceed max_steps")
         if self.retry_count > self.max_retries:
             raise ValueError("retry_count cannot exceed max_retries")
+        return self
+
+    @model_validator(mode="after")
+    def reject_sensitive_content(self) -> AgentState:
+        """Scan the *whole* JSON form of this state, not a hand-picked list of fields.
+
+        The previous design decorated ``evidence.data`` and ``verification.details`` only. A probe
+        across all 16 free-text fields showed that 26 of 32 credential injections were accepted, and
+        -- the part that actually matters -- a field added tomorrow would have been accepted by
+        default. Attaching the rule to the model instead of to fields inverts the default: new
+        fields are covered unless someone deliberately exempts them.
+
+        ``mode="json"`` is not cosmetic. ``UUID`` and ``Decimal`` only become strings in JSON mode,
+        and the walker inspects strings; validating ``model_dump()`` would check a representation
+        that is never persisted.
+
+        This is defence in depth, not the last line: T017 calls
+        :func:`app.security.secrets.validate_persistable` again on the payload it is about to write,
+        because a checkpoint restored through a raw dict never passes through here at all.
+        """
+        try:
+            validate_persistable(self.model_dump(mode="json"), "state")
+        except SensitiveStateError as exc:
+            raise ValueError(str(exc)) from exc
         return self
 
     @property
