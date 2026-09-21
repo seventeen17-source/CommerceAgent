@@ -26,7 +26,9 @@ class CoreSchemaMigrationTests {
             "commerce.after_sales_rules",
             "commerce.audit_logs",
             "agent.agent_runs",
-            "agent.tool_executions");
+            "agent.tool_executions",
+            // T017: checkpoint history, written in the same transaction as the run row it describes.
+            "agent.agent_checkpoints");
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
