@@ -253,6 +253,56 @@ commerce.*
 
 不得只以“测试绿了 / commit 已 push”作为学习结束。
 
+### 8.1 每个 Txxx 尽量留下 Visible Output（可见产出）
+
+如果用户能解释流程，但仍然觉得“学着很空”，说明这一阶段缺少**可触摸的完成感**。因此从本规则生效后，每个 Txxx 收尾时，Agent 都要主动判断：
+
+> 这一阶段能不能留下一个小而真实的产出，让用户亲手运行、点击、观察或验证？
+
+默认答案应尽量是“能”。Visible Output 不追求复杂，而追求把抽象架构变成用户可以亲眼看到的流转。
+
+最小合格标准：
+
+- **一个明确场景**：例如“物流停滞，是否具备退款资格”；
+- **一个可执行入口**：例如一条命令、一个测试 URL、一个 CLI 脚本或一个测试用例；
+- **一条可见数据流**：让用户看到输入 → 关键模块 → 输出；
+- **模块对应关系**：能指出本 T 的哪些 `.py` / `.java` / API / 表真正参与；
+- **至少一个失败模式**：如果本 T 的价值主要在安全/恢复，应允许观察失败时怎样降级；
+- **不越级**：未实现的后续能力必须清楚标为 mock / simulation；
+- **一段面试表达**：用户能说“这个阶段我实际做出了什么”，而不只是“我学了某个概念”。
+
+推荐的递进方式：
+
+```text
+T015  Visible Output V0
+      手动构造 AgentState，观察状态与安全约束
+
+T016  Flow Playground V1
+      mock 展示 AuthContext → CommerceClient → typed response → AgentState
+
+T017  Flow Playground V2
+      增加 AgentRun / ToolExecution / checkpoint 保存与恢复
+
+T018  Flow Playground V3
+      接真实 FastAPI，请求真正进入 Python Agent 服务
+
+T019+ Live Flow
+      自然语言 → Tool → Java → PostgreSQL → AgentState / Trace
+```
+
+这里的 UI 本身通常属于 B-class：可以由 AI 快速完成。**教学重点不是让用户花时间写 CSS，而是让用户通过页面看见 A-class 机制。**
+
+如果 UI 会明显扩大范围，则改用更轻量的可见产出，例如：
+
+- CLI demo；
+- 单个 integration test；
+- Trace / log viewer；
+- SQL 验证结果；
+- API request/response 演示；
+- checkpoint 保存/恢复脚本。
+
+Visible Output 是“学习闭环证据”，不是新的产品需求。不得为了演示页提前引入后续架构、额外服务或重型依赖。
+
 ## 9. 不把用户训练成复制命令的人
 
 以下情况不能直接替用户全部做完然后宣布掌握：
