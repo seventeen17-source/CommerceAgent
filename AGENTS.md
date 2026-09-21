@@ -62,6 +62,33 @@
 
 对 B-class 样板工作可以加速，但仍必须说明“它在总图哪一层、连接谁、为什么存在”。
 
+### Visible Output（可见产出）规则
+
+用户容易在连续的 Foundation / Runtime 工作中出现“理解了流程，但学完仍然很空”的感觉。因此，**每个 Txxx 收尾时都应尽量留下一个可运行、可观察、可讲解的小产出**，不能只留下“代码已提交 / 测试已通过”。
+
+默认要求：
+
+1. **能跑**：至少有一条明确命令可以启动、执行或验证；
+2. **能看到结果**：优先使用小 Demo、Playground、测试页、CLI 输出、Trace、数据库状态或 API 响应；
+3. **能对应本 T 的代码**：必须让用户看得出“哪几个文件/模块参与了这次流转”；
+4. **能解释输入 → 处理 → 输出**：关键步骤可以被展开或复述，而不是只显示最终成功；
+5. **不提前伪造后续能力**：当前 T 未实现 LangGraph / FastAPI / 写操作时，Visible Output 必须明确使用 mock / simulation，不得让展示看起来像真实链路已经完成；
+6. **不污染下一阶段**：产出应尽量复用现有项目，以最小代码实现；教学 UI 属于 B-class，不应为了“好看”引入重依赖或改变核心架构；
+7. **可以递进升级**：后续 Txxx 可以在前一个 Visible Output 上增加真实能力，例如 mock → real API → Tool → LangGraph → checkpoint / trace，而不是每次重做一个孤立 Demo；
+8. **可用于面试复述**：阶段结束时给出一句“我做出了什么”的可直接表述版本。
+
+优先形式示例：
+
+```text
+T015 → AgentState 小演示：构造状态 → 修改 → 输出状态变化
+T016 → Flow Playground：Auth → CommerceClient → Java mock → typed response
+T017 → checkpoint 演示：保存 → 退出 → 恢复
+T018 → FastAPI 演示：HTTP 请求 → auth → run 创建
+T019+ → 自然语言 → Tool → Java → AgentState 的真实链路
+```
+
+如果某个 Txxx 确实不适合做 UI，也必须至少留下一个**可执行/可观察的等价产出**（例如测试、Trace、SQL 验证、CLI demo），并解释为什么它已经足够代表本阶段能力。
+
 ### Skill 分支规则
 
 - `main` / 功能分支允许保留 **Spec Kit 初始化自动生成的 `.agents/skills/speckit-*` 项目工具**；它们属于当前仓库的 Spec Kit 工作流资产。
