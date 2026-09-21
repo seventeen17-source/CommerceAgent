@@ -66,6 +66,11 @@ known-first-party = ["app"]
 # settings.py 中的口令仅是本地开发占位默认值，真实环境应由环境变量覆盖；
 # 仅在这个配置文件放行，避免整个项目失去硬编码 secret 检测。
 "app/config/settings.py" = ["S105", "S106"]
+# S608（可能的 SQL 注入）在 store.py 是**可证明的误报**：所有语句都是静态 SQL 文本，
+# 唯一被拼接的是 `_RUN_COLUMNS` 这个固定列名清单，而所有**取值**都走 psycopg 参数绑定
+# （`%s` + 元组/字典）。ruff 只做字符串拼接的启发式判断，看不到这个区别。
+# 只放行这一个文件，其余代码继续受该规则检查；不要因为这里放行就把 S608 从 select 里删掉。
+"app/trace/store.py" = ["S608"]
 
 [tool.mypy]
 python_version = "3.13"
