@@ -55,7 +55,7 @@
 
 - [X] T019 [P] [US1] 编写 ownership-scoped order/logistics read 与 stall calculation Java Test：`OrderLogisticsIntegrationTest.java`。
 - [X] T020 [P] [US1] 编写 deterministic eligibility 与拒绝模型覆盖 amount/eligibility 的 Java Test：`EligibilityServiceTest.java`。
-- [ ] T021 [P] [US1] 编写 refund authorization、amount bound、非法状态、idempotency reuse/conflict、timeout recovery Integration Test：`RefundIntegrationTest.java`。
+- [X] T021 [P] [US1] 编写 refund authorization、amount bound、非法状态、idempotency reuse/conflict、timeout recovery Integration Test：`RefundIntegrationTest.java`。
 - [ ] T022 [P] [US1] 编写 Python stalled-logistics happy path 与 unknown-write recovery test：`agent-service/tests/integration/test_us1_logistics_refund.py`。
 
 ### 实现
@@ -63,8 +63,8 @@
 - [ ] T023 [P] [US1] 实现 customer-scoped order list/detail API：`OrderController.java`、`OrderService.java`。
 - [ ] T024 [P] [US1] 实现物流 API 与权威 stall calculation：`LogisticsController.java`、`LogisticsService.java`。
 - [ ] T025 [US1] 实现 deterministic `EligibilityDecision`：`EligibilityService.java`，返回 `eligible`、`allowed_action`、`max_refund_amount`、`approval_required`、rule code/version、reason codes。
-- [ ] T026 [US1] 新建 `commerce.refund_requests` migration 与 Entity/Repository：`V002__refund_schema.sql`、`refund/`；同步扩展 T014 `FixtureLoader.clearFixtureState()`，清理 refund 与本阶段引入的 idempotency state，保证 Eval reset 不残留写入结果。
-- [ ] T027 [US1] 实现 Transactional Refund Create/Status：`RefundService.java`；每次敏感写入前重新校验 ownership、current state、eligibility、amount 和权威 `approvalRequestId`。
+- [X] T026 [US1] 新建 `commerce.refund_requests` migration 与 Entity/Repository：**`V003__refund_schema.sql`**（原计划写 V002，但 `V002` 已被 T017 的 `V002__agent_run_checkpoint.sql` 占用；编号冲突在 T021 报出并修正）、`refund/`；同步扩展 T014 `FixtureLoader.clearFixtureState()`，清理 refund 与本阶段引入的 idempotency state，保证 Eval reset 不残留写入结果。→ **已随 T021 一并交付**：schema（含两个唯一约束）、`RefundRequest`/`RefundRequestRepository`、fixture reset 清理退款行（否则外键会让 reset 直接失败）。
+- [ ] T027 [US1] 实现 Transactional Refund Create/Status：`RefundService.java`；每次敏感写入前重新校验 ownership、current state、eligibility、amount 和权威 `approvalRequestId`。→ **部分已随 T021 交付**：`createRefund` 已实现 ownership / current state / eligibility / amount 的写前重校验、幂等重放与冲突、订单行锁、退款行 + 订单投影 + 审计的同事务写入，以及 `listRefunds` 状态读面。**仍未完成**：权威 `approvalRequestId` 绑定校验（V1 没有审批记录表，任何审批引用一律 fail closed 为 `INVALID_PARAMETER`，US4/T049 实现真正的绑定）。
 - [ ] T028 [US1] 暴露 Refund 与 After-sales Status API，遵循 `Idempotency-Key`：`RefundController.java`。
 - [ ] T029 [P] [US1] 实现 typed tools：`list_user_orders`、`get_order`、`get_logistics`、`check_after_sales_eligibility`、`create_refund_request`、`get_after_sales_status`；统一使用 `success/data/errorCode/retryable/latencyMs/traceId`。
 - [ ] T030 [US1] 实现 `understand_request`、单候选 order resolution、`decide_next_evidence`、read-tool execution、evidence validation、`check_eligibility`；`decide_next_evidence` 遵循 `research.md` 的“模型选择受限 capability + 确定性约束”设计。

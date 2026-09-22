@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational ✅ 收口
-- **当前 Tasks**：T021（Phase 3 — US1 MVP）
+- **当前 Tasks**：T022（Phase 3 — US1 MVP）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -23,7 +23,9 @@
   - T018 — FastAPI 认证 / Principal / Run Ownership / Run 骨架接口：`app/security/credentials.py`（只证明"合法"不证明"是谁"）、`app/security/dependencies.py`、`app/api/runs.py`（6 个端点，认证声明在 router 级）、`app/main.py`（`create_app` 工厂 + lifespan 单例）、`app/trace/store.py` 增补 `get_run_for_owner`（owner 进 SQL 谓词）、`web/vite.config.ts`（dev proxy + rewrite）、Flow Playground 步骤 08–10（Run 创建、查询与 events 真实控件）、`scripts/mint_dev_token.py`、`scripts/run_chain_check.py`；Python四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **39 files**、`mypy app` **Success 24 files**、`pytest -q` **234 passed, 13 skipped**）；Web `npm.cmd run build` 成功、`npm.cmd run lint` 0 warnings/0 errors。**5173 真实端到端流转测试通过**（见「T018 验收证据」）
   - T019 — ownership-scoped order/logistics read 与权威 stall calculation：`order/OrderService.java`（ownership 唯一判定入口 + 订单列表/详情读模型 + cross-owner 内部安全审计）、`logistics/LogisticsService.java`、`logistics/LogisticsStallCalculator.java`、`common/time/ClockConfig.java`；新测试 `OrderLogisticsIntegrationTest.java` **14 个用例**；**契约按 404 concealment 口径统一**（`commerce-api.openapi.yaml` 给 logistics 补 `404`、两个 read 端点的 `403` 明确只表示角色/能力不足，`error-contracts.md` 删除 `ORDER_FORBIDDEN`）。Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: **75**, Failures: 0, Errors: 0；Spotless 73 files clean / 0 needs changes；SpotBugs BugInstance **0**（新增 1 条最窄 exclude，见证据）；JaCoCo 50 classes）。验收证据见「T019 验收证据」
   - T020 — deterministic eligibility 与拒绝模型：`eligibility/EligibilityService.java`（I/O 外壳 `evaluate` + 纯函数 `selectRule`/`decide`）、`EligibilityDecision.java`（构造器把契约字段关系变成不可违反的不变量）、`EligibilityReasonCode.java`（13 个机器可读原因码）、`RuleSelection.java`、`AfterSalesRuleRepository.findByActiveTrue()`；新测试 `EligibilityServiceTest.java` **26 个用例**（纯函数、不连库、0.2 秒跑完）与 `EligibilityServiceIntegrationTest.java` **7 个用例**（Testcontainers：规则来自权威表、新入口继承 404 concealment、依赖故障不被吞成拒绝）。Java `mvnw.cmd verify` → **BUILD SUCCESS**（`EXIT=0`；Tests run: **109**, Failures: 0, Errors: 0；Spotless **79 files clean / 0 needs changes**；SpotBugs BugInstance **0**；JaCoCo 55 classes）。Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **39 files**、`mypy app` **Success 24 files**、`pytest -q` **236 passed, 13 skipped**）。验收证据见「T020 验收证据」
-- **当前优先任务**：T021 — refund authorization / amount bound / 非法状态 / idempotency reuse-conflict / timeout recovery 的 Java Integration Test（`RefundIntegrationTest.java`）
+  - T021 — 受保护退款写入与"恰好一个逻辑退款"：`V003__refund_schema.sql`（`commerce.refund_requests` + `UNIQUE(user_id, idempotency_key)` + 活动态 `UNIQUE(order_id)` 部分索引）、`refund/`（`RefundRequest` / `RefundRequestRepository` / `RefundStatus` / `RefundCommand` / `RefundResult` / `RefundService`）、`OrderRepository.findByIdAndOwnerIdForUpdate`（owner 谓词写在锁查询里）、`OrderService.requireOwnedOrderForUpdate`（`MANDATORY`，锁必须在写事务里才成立）、`FixtureLoader.clearFixtureState()` 增补退款行清理（否则外键会让 fixture reset 直接失败）。新测试 `RefundIntegrationTest.java` **24 个用例**覆盖 authorization / amount bound / illegal state / idempotency reuse-conflict / timeout recovery，含**两个真实线程 + CyclicBarrier 的并发用例**。Java `mvnw.cmd verify` → **BUILD SUCCESS**（`EXIT=0`；Tests run: **133**, Failures: 0, Errors: 0；Spotless **86 files clean / 0 needs changes**；SpotBugs BugInstance **0**（新增 1 条最窄 exclude，理由见证据）；JaCoCo 60 classes）。契约升 **0.2.4**（`POST /refunds` 补 `400/404/503` 与幂等语义、`GET /orders/{orderId}/after-sales` 补 `404`、`RefundResult`/`CreateRefundRequest` 字段语义）。验收证据见「T021 验收证据」
+- **当前优先任务**：T022 — Python stalled-logistics happy path 与 unknown-write recovery test（`agent-service/tests/integration/test_us1_logistics_refund.py`）
+- **任务勾选口径说明**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理四项都在，见 tasks.md 的 V003 编号修正）；T027 **部分交付**（ownership / state / eligibility / amount 的写前重校验、幂等、行锁、审计、状态读面已完成），**仍未完成的是权威 `approvalRequestId` 绑定**（US4/T049）。
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
 - **环境事实（重要）**：
@@ -106,7 +108,7 @@
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
 10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
 11. ✅ T018：FastAPI 认证 / principal / run ownership / run 骨架接口（Python 四条门禁全绿 → 234 passed；Web build + lint 通过；**5173 端到端流转实测通过**）—— Phase 2 收口
-12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径已钉死；T020 ✅ 资格决策与拒绝模型已钉死；当前 T021）
+12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径已钉死；T020 ✅ 资格决策与拒绝模型已钉死；T021 ✅ 退款写入与幂等/并发已钉死；当前 T022）
 
 ### T008 验收证据
 
@@ -254,6 +256,28 @@
 - **未做（不夸大范围）**：T025 仍未完成 —— `POST /after-sales/eligibility` 的 **Controller / HTTP assembly / 端点角色校验 / reasonCode schema 校验**还没有实现，后续必须复用本 T 的 service。`RETURN` / `RETURN_REFUND` 规则目前 fail closed 为 `MANUAL_REVIEW` + `RULE_ACTION_NOT_SUPPORTED`（退货窗口判定属 T039），测试里对该分支有显式断言，不允许"因为规则行写着 RETURN 就自动放行"。本 T 没有任何写操作、没有 `Idempotency-Key`、没有退款（T026/T027/T028）。
 - **已知 tradeoff（写明白而不是藏起来）**：规则冲突检测是保守的 —— 库中任意两条不同 `ruleCode` 同时匹配同一订单都会转人工。这在生产里是想要的（政策冲突必须由人裁决），但在**测试环境**意味着别的测试类留下的规则行会干扰本测试；因此 `EligibilityServiceIntegrationTest` 使用 T020 专属 `productCategory`（`AfterSalesRulePersistenceTest` 用 ELECTRONICS 且不清理自己的行，Spring 上下文缓存又可能让两个测试类共用一个容器）。
 - **环境说明（非代码问题）**：受限沙箱下 `mvnw verify` 的失败集合是**既有测试类一起**报 `Could not find a valid Docker environment`，判据与 T019 一致（既有测试同时挂 → 环境；只有新测试挂 → 代码）；提权重跑同一条命令即 BUILD SUCCESS。第一次提权运行时我用 `Select-Object -First` 截断输出，把 PowerShell 关闭上游管道造成的 `exit 1` 混进了证据，因此重跑了一次并把完整输出落盘、显式打印 `EXIT=0`——**退出码必须来自构建本身，不能来自读取输出的方式**。
+
+### T021 验收证据
+
+- **Java `mvnw.cmd verify` → BUILD SUCCESS**（本机实测 2026-09-22 21:0x，完整输出落盘 `commerce-backend/target/verify-t021.log`：`EXIT=0`；Tests run: **133**, Failures: 0, Errors: 0, Skipped: 0；Spotless **86 files clean / 0 needs changes**；SpotBugs **BugInstance size 0**；JaCoCo **60 classes**；Total time 约 61 s）。新增 **`RefundIntegrationTest` 24 个用例**（T020 基线 109 + 24 = 133）。
+- **交付内容（6 个生产文件 + 1 个迁移 + 3 个既有文件的小改 + 1 个测试文件）**：`db/migration/V003__refund_schema.sql`；`refund/RefundService.java`、`RefundRequest.java`、`RefundRequestRepository.java`、`RefundStatus.java`、`RefundCommand.java`、`RefundResult.java`；`order/OrderRepository.java`（`findByIdAndOwnerIdForUpdate`）、`order/OrderService.java`（`requireOwnedOrderForUpdate`）、`fixture/FixtureLoader.java`（清退款行）。
+- **"恰好一个逻辑退款"由三层防线共同保证，且每一层都有可执行证据**：
+  1. **订单行锁**（`SELECT ... FOR UPDATE`，ownership 写在锁查询自己的 WHERE 里）：`concurrentRefundsWithDifferentKeysProduceExactlyOneRefund` 用**两个真实线程 + `CyclicBarrier`** 证明"恰好一行 + 恰好一个成功 + 另一个拿到确定的 `DUPLICATE_AFTER_SALES`"；调用方不是"有时成功有时 500"。
+  2. **锁后二次检查幂等键**：`concurrentRefundsWithTheSameKeyProduceExactlyOneRefund` 证明两个线程拿到**同一个** `refundRequestId`。这一步是必需的——只加锁不复查，排在后面的请求会拿着"进方法时读到的不存在"这个**过期结论**继续往下写。
+  3. **两个唯一约束兜底**：`UNIQUE(user_id, idempotency_key)` 与活动态 `UNIQUE(order_id)` 部分索引；两者在 PostgreSQL 里都报 `23505`，因此服务按**约束名**把它们翻译成 `IDEMPOTENCY_CONFLICT` 与 `DUPLICATE_AFTER_SALES`，未知约束名则原样上抛（那说明有人绕过了本模型写这张表，属于真实缺陷，必须响）。设计上刻意选了"锁 + 约束"而不是"只靠约束后读回赢家"：后者需要 `REQUIRES_NEW` 才能跳出被 abort 的事务，且失败原因只能从异常反推。
+- **幂等语义四条边界各有用例**：同 key 同请求 → **同一笔**（`replayingTheSameKeyReturnsTheSameRefundWithoutASecondRow`，且用**不同的 runId** 重试仍算同一笔——这就是 runId 不参与指纹的原因）；同 key 不同金额 → `IDEMPOTENCY_CONFLICT`；同 key 不同订单 → `IDEMPOTENCY_CONFLICT`；**换一个全新 key 重试同一订单 → `DUPLICATE_AFTER_SALES`**（`aBlindRetryWithANewKeyCannotBuyASecondRefund`）。最后一条是 T031 的地基：不重复付款**不能**寄托在"Agent 记得复用 key"上。
+- **幂等键命名空间属于用户**（用户拍板）：`theSameKeyFromAnotherUserIsNotAConflict` 证明两个用户可以用同一个 key 各自成功，且彼此看不到对方的退款。若用全局唯一键，一个用了朴素 key 的客户端会因为**别人**先用了这个字符串而失败——而失败本身还泄露了"这个 key 被用过"。
+- **金额只能是更少的钱，且绝不静默改数**（用户拍板 V1 只做整单退款）：省略金额 = 授权全额；显式金额**必须正好等于**授权全额。超限 → `422 AMOUNT_EXCEEDS_ALLOWED`；少于全额 → `400 INVALID_PARAMETER`（本版本没有部分退款的表达）；非正数 → `400`。可退金额只来自 T020 的决策（订单总额），请求对象里没有任何字段能抬高它。刻意**没有**实现 `min(requested, authorized)` 这种静默取小——金额被服务端悄悄改掉，比明确报错危险得多。
+- **非法状态映射沿用 T020 立下的"结论 vs 错误"分界**：`DENY` → `ELIGIBILITY_DENIED`、`MANUAL_REVIEW` → `MANUAL_REVIEW_REQUIRED`、`approvalRequired` → `APPROVAL_REQUIRED`、已有售后 → `DUPLICATE_AFTER_SALES`、物流依赖不可用 → **`503 LOGISTICS_UNAVAILABLE`**（可重试，不降级成拒绝）。四个用例分别断言，且每个都断言**退款行数为 0**（"审批前资金写入必须为 0"）。
+- **V1 没有审批子系统，因此任何审批引用一律 fail closed**：`anApprovalReferenceCannotBeAcceptedInThisVersion` 证明带 `approvalRequestId` 的请求得到 `400` 而不是被原样存进退款行。把无法验证的审批引用存进表里，会留下"看起来已获批准"的证据；US4/T049 会实现真正的绑定。
+- **`runId` 是溯源而不是身份**：`aRunIdIsProvenanceAndCannotChangeOwnership` 传一个**没人拥有**的 runId，退款行仍记录调用者 principal 为 owner，同时把该 runId 写进退款行与审计的 `run_id`。理由写在代码里：`agent.agent_runs` 属于另一个 schema 与另一个数据库角色，Java 无从验证，因此**不能**也不该用它授权。命令对象里根本没有 `userId` 字段（与 T018 的 Run 创建同一条规则：身份只能来自服务端 principal）。
+- **写后可见的事实**：订单投影 `after_sales_status = REFUND_REQUESTED`、退款行、审计（`REFUND_CREATED` + `actorId` + `run_id` + `orderId/amount/ruleCode` metadata）在同一事务里提交；审计用 `writeBusinessEvent`（`REQUIRED`）而不是 `writeSecurityEvent`（`REQUIRES_NEW`），因此不会出现"审计说成功、业务回滚了"的假 SUCCESS（T013 的设计在这里第一次被真正使用）。
+- **越权写继承 T019 的 404 concealment**：`anotherUsersOrderIsIndistinguishableFromAMissingOrder` 断言两种情况的错误码与**消息逐字相同**，且越权尝试**不留任何写入痕迹**。角色/能力不足走 `403 ACCESS_DENIED`，且能力检查排在 ownership 之前——审批者拿别人的 orderId 探测也只会得到同一个 403，不会变成存在性预言机。
+- **本 T 报出的文档/现实冲突已闭环**：`tasks.md` 的 T026 原本写 `V002__refund_schema.sql`，但 `V002` 已被 T017 的 `V002__agent_run_checkpoint.sql` 占用。退款 schema 落在 **`V003`**，tasks.md 同步修正并把冲突原因写在条目里（与 T019/T020 的教训同源：契约/文档自相矛盾要报出来，不要静默挑一个）。
+- **`FixtureLoader` 的改动不是顺手为之，而是被外键逼出来的**：`refund_requests.order_id` 有外键指向 `orders`，若 `clearFixtureState()` 只删订单，fixture reset 会直接以 **FK 违约**失败。Eval reset 的语义是"业务状态回到基线"，退款这类写入结果必须一起清掉，否则"重置后重跑同一个用例"会因上一轮的退款行得到不同结论（T026 原本就要求这一点）。
+- **SpotBugs 新增 1 条最窄豁免，并说明它为什么是可证明误报**：`RefundService` 注入具体类 `AuditWriter` 触发 `EI_EXPOSE_REP2`，与 T019 的 `OrderService.auditWriter` 完全同类（private final、只用于调用 `writeBusinessEvent`、不经公开 API 暴露）。豁免按**类 + 字段**限定，未扩大到包，也未关闭整个 pattern。注意这次的顺序：先让 `verify` 报出真实告警（**1 条**），再判断它是设计问题还是误报——不是先加豁免再跑。
+- **未做（不夸大范围）**：T028 的 `RefundController` 与 HTTP 组装（`Idempotency-Key` 头 → 命令对象、状态码映射）还没有实现；权威 `approvalRequestId` 绑定属 US4/T049；退货（`returns`）属 US2/T038+。退款行的 `status` 在 V1 恒为 `CREATED`（没有结算与状态迁移），因此 `refund_requests` 刻意**没有** `version` 列（data-model 也未定义），但 `updated_at` 因此恒等于 `created_at`——将来允许状态迁移时，必须同时补上更新路径，否则这一列会静默停止说真话（已写在 migration 注释里）。
+- **已知 tradeoff（写明白而不是藏起来）**：`RefundService` 直接注入 `OrderRepository` 来更新订单投影，因此退款模块持有了订单表的写入口。V1 接受，因为写入字段只有一个（`after_sales_status`）且必须在同一事务里；一旦出现第二个写点，应当把订单状态的合法迁移收敛回 `order` 模块，而不是让每个业务模块各自 UPDATE 订单。
 
 ## 维护规则
 - 每完成一个 Gate 更新本文件；不要每天机械改百分比。
