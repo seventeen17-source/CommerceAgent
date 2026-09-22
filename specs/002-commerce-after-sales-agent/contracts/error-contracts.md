@@ -37,6 +37,29 @@ id 存不存在"。本项目订单 id 形如 `order-001`，是可枚举的；把
   两种失败的信号。请求本来就要被拒绝，此时丢掉的只是可观测性，不是业务动作，因此应记录 ERROR 日志后仍抛出
   统一的 `ORDER_NOT_FOUND`。
 
+## 评估结论 vs 错误（T020）
+
+"资格不符合"不是错误，"评估无法完成"才是错误。这两件事必须由不同的通道表达，否则 Agent 会把一次依赖故障或一次
+越权探测当成业务结论：
+
+| 情形 | 通道 | 形态 |
+|---|---|---|
+| 评估完成，结论是**批准**某动作 | 成功 | `200` + `EligibilityDecision`（`eligible=true`、引用规则行、给出金额上界） |
+| 评估完成，结论是**拒绝** | 成功 | `200` + `eligible=false`、`allowedAction=DENY`、`reasonCodes` 说明原因 |
+| 评估完成，结论是**无法自动决定** | 成功 | `200` + `eligible=false`、`allowedAction=MANUAL_REVIEW`、`reasonCodes` 说明缺什么 |
+| 越权 / 订单不存在 | 错误 | `404 ORDER_NOT_FOUND`（两者不可区分，见上） |
+| 订单状态与规则前提冲突 | 错误 | `409 INVALID_ORDER_STATE` |
+| 权威依赖不可用（如规则要求物流证据但没有运单） | 错误 | `503 LOGISTICS_UNAVAILABLE`（有限重试） |
+
+因此：
+
+- `ELIGIBILITY_DENIED`、`MANUAL_REVIEW_REQUIRED`、`APPROVAL_REQUIRED`、`AMOUNT_EXCEEDS_ALLOWED` 是**写路径**
+  错误：它们在提交前重校验一个 proposed action 时拒绝该 action，而不是在评估阶段表达"不符合资格"。
+- 任何"把 `503`/`404` 降级成一个 `eligible=false` 决策"的实现都是错的：那会把"不知道/看不到"永久固化成
+  "业务上不允许"。
+- 反过来，把 `eligible=false` 当成请求失败（例如抛出 `500`）同样是错的：它是一次成功且权威的回答，Agent 应当
+  据此解释拒绝或转人工，而不是重试。
+
 ## Error Taxonomy
 
 | Code | 含义 | 可重试 | Agent 处理 |

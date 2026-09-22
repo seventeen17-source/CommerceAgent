@@ -33,7 +33,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "CurrentPrincipal",
@@ -133,6 +133,13 @@ class EligibilityDecision(BaseModel):
     """``POST /after-sales/eligibility`` -- deterministic eligibility decision.
 
     ``allowed_action`` is Java-owned and deliberately an open string; see the module docstring.
+
+    ``rule_code`` / ``rule_version`` are ``None`` together when Java could not determine an
+    applicable rule (T020: for example ``MANUAL_REVIEW`` because no rule matches, or because two
+    different rule codes match the same order). Java enforces "cited together or not at all", and a
+    decision that grants an action always cites its rule -- so a caller must never infer "there is
+    no rule, therefore someone approved this". Both fields stay optional here because making them
+    required would turn a legitimate, non-eligible decision into a parse failure.
     """
 
     model_config = _RESPONSE
@@ -141,9 +148,21 @@ class EligibilityDecision(BaseModel):
     allowed_action: str = Field(alias="allowedAction", min_length=1, max_length=32)
     max_refund_amount: Decimal | None = Field(default=None, alias="maxRefundAmount")
     approval_required: bool = Field(alias="approvalRequired")
-    rule_code: str = Field(alias="ruleCode", min_length=1, max_length=100)
-    rule_version: int = Field(alias="ruleVersion", ge=1)
+    rule_code: str | None = Field(default=None, alias="ruleCode", min_length=1, max_length=100)
+    rule_version: int | None = Field(default=None, alias="ruleVersion", ge=1)
     reason_codes: list[str] = Field(default_factory=list, alias="reasonCodes")
+
+    @model_validator(mode="after")
+    def _rule_citation_is_all_or_nothing(self) -> EligibilityDecision:
+        """Mirror the producer's invariant instead of trusting it silently.
+
+        The Java producer already refuses to construct a half-cited decision. Keeping the same rule
+        on the consumer side means a malformed or mis-proxied payload stops here rather than
+        reaching the graph as a decision that looks like it came from a rule but names none.
+        """
+        if (self.rule_code is None) != (self.rule_version is None):
+            raise ValueError("ruleCode and ruleVersion are cited together or not at all")
+        return self
 
 
 class ErrorEnvelope(BaseModel):

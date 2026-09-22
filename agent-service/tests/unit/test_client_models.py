@@ -150,7 +150,45 @@ def test_missing_required_field_is_rejected() -> None:
         EligibilityDecision.model_validate(
             {
                 "eligible": True,
-                "allowedAction": "REFUND_ONLY",
+                "approvalRequired": False,
+                "ruleCode": "LOGISTICS_STALLED_REFUND",
+                "ruleVersion": 1,
+            }
+        )
+
+
+def test_decision_without_an_applicable_rule_is_parseable() -> None:
+    """T020: a MANUAL_REVIEW decision may legitimately cite no rule at all.
+
+    Making ruleCode/ruleVersion required would turn that decision into a parse failure, which is
+    exactly the class of "additive/legitimate backend state breaks the consumer" bug the T016
+    hardening removed for `allowedAction`.
+    """
+    decision = EligibilityDecision.model_validate(
+        {
+            "eligible": False,
+            "allowedAction": "MANUAL_REVIEW",
+            "approvalRequired": False,
+            "reasonCodes": ["NO_APPLICABLE_RULE"],
+        }
+    )
+
+    assert decision.rule_code is None
+    assert decision.rule_version is None
+    assert decision.max_refund_amount is None
+
+
+def test_a_half_cited_rule_is_rejected() -> None:
+    """The producer refuses to build this; the consumer must not accept it either.
+
+    A decision that looks like it came from a rule but names no version cannot be audited back to a
+    rule row, so it must fail here rather than reach the graph.
+    """
+    with pytest.raises(ValidationError):
+        EligibilityDecision.model_validate(
+            {
+                "eligible": False,
+                "allowedAction": "MANUAL_REVIEW",
                 "approvalRequired": False,
                 "ruleCode": "LOGISTICS_STALLED_REFUND",
             }

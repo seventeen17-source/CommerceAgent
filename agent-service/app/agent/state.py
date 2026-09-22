@@ -138,9 +138,20 @@ class EligibilitySnapshot(BaseModel):
     allowed_action: str = Field(min_length=1, max_length=32)
     max_refund_amount: Decimal | None = None
     approval_required: bool
-    rule_code: str = Field(min_length=1, max_length=100)
-    rule_version: int = Field(ge=1)
+    # None together with rule_version when Java could not determine an applicable rule (T020): a
+    # MANUAL_REVIEW decision may legitimately cite no rule. The pairing is validated below, and the
+    # absent value must never be read as "a rule approved this" -- approval is only ever the
+    # explicit `eligible`/`allowed_action` pair plus, for money, an explicit `max_refund_amount`.
+    rule_code: str | None = Field(default=None, max_length=100)
+    rule_version: int | None = Field(default=None, ge=1)
     reason_codes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_rule_citation(self) -> EligibilitySnapshot:
+        """Keep the producer's "all or nothing" rule: a half-cited rule is a corrupt snapshot."""
+        if (self.rule_code is None) != (self.rule_version is None):
+            raise ValueError("rule_code and rule_version are cited together or not at all")
+        return self
 
 
 class ApprovalSnapshot(BaseModel):

@@ -1,8 +1,24 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.2
+  version: 0.2.3
   description: |
+    ## Evaluation outcome vs. error (T020)
+
+    Eligibility evaluation distinguishes two things that are easy to conflate:
+
+    * A **completed evaluation** always returns `200` with an `EligibilityDecision`, *including*
+      when the conclusion is "not eligible". `eligible=false` plus `allowedAction`
+      (`DENY` / `MANUAL_REVIEW`) and `reasonCodes` is a successful, authoritative answer.
+    * An **evaluation that could not complete** is an error: ownership concealment (`404`),
+      an order state that contradicts the rule's premise (`409`), or an unavailable
+      authoritative dependency (`503`). Returning "denied" for these would turn a transient
+      outage or a cross-owner probe into a business conclusion.
+
+    `ELIGIBILITY_DENIED`, `MANUAL_REVIEW_REQUIRED`, `APPROVAL_REQUIRED` and
+    `AMOUNT_EXCEEDS_ALLOWED` are therefore **write-path** errors: they reject a proposed
+    action during pre-commit revalidation, not an evaluation.
+
     ## Ownership concealment rule (T019)
 
     Order-scoped resources never reveal whether an order exists to a principal that is not
@@ -118,6 +134,11 @@ paths:
   /after-sales/eligibility:
     post:
       summary: Deterministically evaluate refund/return eligibility
+      description: |
+        POST is used because the request carries a body, not because this is a write: the endpoint
+        is a deterministic, side-effect free evaluation over authoritative state. The caller's
+        reasonCode is descriptive context only -- it must not be able to select a rule, widen an
+        amount, or unlock an action (spec FR-009/FR-010).
       requestBody:
         required: true
         content:
@@ -125,12 +146,33 @@ paths:
             schema: { $ref: '#/components/schemas/EligibilityRequest' }
       responses:
         '200':
-          description: Eligibility decision
+          description: |
+            Eligibility decision. Also returned when the decision is "not eligible": see the
+            evaluation-outcome-vs-error rule in the API description.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EligibilityDecision' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+        '404':
+          $ref: '#/components/responses/Error'
+          description: |
+            ORDER_NOT_FOUND, identical for "order does not exist" and "order belongs to another
+            user". Added in T020: this endpoint previously declared no 404, which would have forced
+            the new read entry point to invent its own ownership semantics.
+        '409':
+          $ref: '#/components/responses/Error'
+          description: |
+            INVALID_ORDER_STATE: the order state contradicts the premise of the applicable rule
+            (for example, a rule requires shipment evidence but the order has not entered the
+            shipment lifecycle). Consumers must not read this as "the refund was denied".
+        '503':
+          $ref: '#/components/responses/Error'
+          description: |
+            LOGISTICS_UNAVAILABLE: the applicable rule requires logistics evidence and no
+            authoritative shipment record is available. Retryable within a bounded budget; the
+            caller must never convert this into a decision, because "unknown" is not "not
+            eligible".
   /refunds:
     post:
       summary: Create idempotent refund request
@@ -343,18 +385,40 @@ components:
         reasonCode: { type: string }
     EligibilityDecision:
       type: object
-      required: [eligible, allowedAction, approvalRequired, ruleCode, ruleVersion]
+      description: |
+        A deterministic decision about one order at one moment. Redundant-looking fields are
+        deliberately kept mutually consistent by the producer (T020): `eligible` is true exactly
+        when `allowedAction` grants an action; a decision that grants nothing carries no
+        `maxRefundAmount` and no `approvalRequired`; a decision that grants an action always cites
+        the rule it applied. Consumers should treat `eligible=false` as terminal for the proposed
+        action and must never read an amount out of a non-eligible decision.
+      required: [eligible, allowedAction, approvalRequired]
       properties:
         eligible: { type: boolean }
         allowedAction:
           type: string
           description: Java-owned forward-compatible action value. Known V1 values are REFUND_ONLY, RETURN, RETURN_REFUND, MANUAL_REVIEW, DENY. Consumers must fail closed / SAFE_STOP on an unknown value instead of treating an additive backend value as a transport parse failure.
-        maxRefundAmount: { type: [number, 'null'] }
-        approvalRequired: { type: boolean }
-        ruleCode: { type: string, minLength: 1 }
-        ruleVersion: { type: integer, minimum: 1 }
+        maxRefundAmount:
+          type: [number, 'null']
+          description: The amount this decision authorises, never more than the order total and never more than the rule's limit. Present exactly when a money-moving action is granted (REFUND_ONLY / RETURN_REFUND); null for a pure RETURN and for every non-eligible decision.
+        approvalRequired:
+          type: boolean
+          description: True only when eligible is true and the authoritative amount reached the rule's approval threshold ("reached" includes equality). It means "eligible, but an authoritative approval is required before the write", not "not eligible".
+        ruleCode:
+          type: [string, 'null']
+          minLength: 1
+          description: |
+            The rule that produced this decision. Null together with ruleVersion when no rule could
+            be determined (for example MANUAL_REVIEW because no rule applies, or because two
+            different rule codes match the same order). A decision that grants an action always
+            cites a rule.
+        ruleVersion:
+          type: [integer, 'null']
+          minimum: 1
+          description: Business rule version (not an optimistic-lock version). Null exactly when ruleCode is null.
         reasonCodes:
           type: array
+          description: Machine-readable explanation, owned by Java. Every non-eligible decision carries at least one; a granting decision may carry none when the rule declared no conditions. Consumers must treat unknown values as additive, not as a parse failure.
           items: { type: string }
     CreateRefundRequest:
       type: object
