@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational ✅ 收口
-- **当前 Tasks**：T020（Phase 3 — US1 MVP）
+- **当前 Tasks**：T021（Phase 3 — US1 MVP）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -22,7 +22,8 @@
   - T017 — Run/Checkpoint/Structured Tool Trace 持久化：`agent-service/app/trace/`（`checkpoint.py` / `db.py` / `store.py` / `retention.py` / `errors.py`）+ `app/security/secrets.py`（持久化边界护栏）+ `V002__agent_run_checkpoint.sql`；Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 61, Failures: 0, Errors: 0；Spotless 65 files clean / 0 needs changes；SpotBugs BugInstance size 0；JaCoCo 42 classes）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **30 files**、`mypy app` **Success 19 files**、`pytest -q` **195 passed, 13 skipped**，其中 **21 个真实 PostgreSQL 集成用例**证明并发 resume 只产生一个赢家。验收证据见「T017 验收证据」
   - T018 — FastAPI 认证 / Principal / Run Ownership / Run 骨架接口：`app/security/credentials.py`（只证明"合法"不证明"是谁"）、`app/security/dependencies.py`、`app/api/runs.py`（6 个端点，认证声明在 router 级）、`app/main.py`（`create_app` 工厂 + lifespan 单例）、`app/trace/store.py` 增补 `get_run_for_owner`（owner 进 SQL 谓词）、`web/vite.config.ts`（dev proxy + rewrite）、Flow Playground 步骤 08–10（Run 创建、查询与 events 真实控件）、`scripts/mint_dev_token.py`、`scripts/run_chain_check.py`；Python四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **39 files**、`mypy app` **Success 24 files**、`pytest -q` **234 passed, 13 skipped**）；Web `npm.cmd run build` 成功、`npm.cmd run lint` 0 warnings/0 errors。**5173 真实端到端流转测试通过**（见「T018 验收证据」）
   - T019 — ownership-scoped order/logistics read 与权威 stall calculation：`order/OrderService.java`（ownership 唯一判定入口 + 订单列表/详情读模型 + cross-owner 内部安全审计）、`logistics/LogisticsService.java`、`logistics/LogisticsStallCalculator.java`、`common/time/ClockConfig.java`；新测试 `OrderLogisticsIntegrationTest.java` **14 个用例**；**契约按 404 concealment 口径统一**（`commerce-api.openapi.yaml` 给 logistics 补 `404`、两个 read 端点的 `403` 明确只表示角色/能力不足，`error-contracts.md` 删除 `ORDER_FORBIDDEN`）。Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: **75**, Failures: 0, Errors: 0；Spotless 73 files clean / 0 needs changes；SpotBugs BugInstance **0**（新增 1 条最窄 exclude，见证据）；JaCoCo 50 classes）。验收证据见「T019 验收证据」
-- **当前优先任务**：T020 — deterministic eligibility 与拒绝模型覆盖 amount/eligibility 的 Java Test（`EligibilityServiceTest.java`）
+  - T020 — deterministic eligibility 与拒绝模型：`eligibility/EligibilityService.java`（I/O 外壳 `evaluate` + 纯函数 `selectRule`/`decide`）、`EligibilityDecision.java`（构造器把契约字段关系变成不可违反的不变量）、`EligibilityReasonCode.java`（13 个机器可读原因码）、`RuleSelection.java`、`AfterSalesRuleRepository.findByActiveTrue()`；新测试 `EligibilityServiceTest.java` **26 个用例**（纯函数、不连库、0.2 秒跑完）与 `EligibilityServiceIntegrationTest.java` **7 个用例**（Testcontainers：规则来自权威表、新入口继承 404 concealment、依赖故障不被吞成拒绝）。Java `mvnw.cmd verify` → **BUILD SUCCESS**（`EXIT=0`；Tests run: **109**, Failures: 0, Errors: 0；Spotless **79 files clean / 0 needs changes**；SpotBugs BugInstance **0**；JaCoCo 55 classes）。Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **39 files**、`mypy app` **Success 24 files**、`pytest -q` **236 passed, 13 skipped**）。验收证据见「T020 验收证据」
+- **当前优先任务**：T021 — refund authorization / amount bound / 非法状态 / idempotency reuse-conflict / timeout recovery 的 Java Integration Test（`RefundIntegrationTest.java`）
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
 - **环境事实（重要）**：
@@ -105,7 +106,7 @@
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
 10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
 11. ✅ T018：FastAPI 认证 / principal / run ownership / run 骨架接口（Python 四条门禁全绿 → 234 passed；Web build + lint 通过；**5173 端到端流转实测通过**）—— Phase 2 收口
-12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径已钉死；当前 T020）
+12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径已钉死；T020 ✅ 资格决策与拒绝模型已钉死；当前 T021）
 
 ### T008 验收证据
 
@@ -229,6 +230,30 @@
 - **本 T 的层位置与未覆盖项（不夸大范围）**：T019 为了让集成测试真正 red→green，已经提前落地了 T023/T024 的 **service read-side**（`OrderService`、`LogisticsService` 与 stall calculator）；T023/T024 仍未完成，因为 **Controller / HTTP assembly / endpoint role enforcement** 还没有实现。T023/T024 后续必须复用这些 service，而不是重写一套。T019 没有 `Idempotency-Key`、没有任何写操作、没有退款；eligibility 属 T025，退款属 T026/T027。
 - **已知 tradeoff（写明白而不是藏起来）**：`OrderService.requireOwnedOrder` 返回 `Order` 实体，因此 `Order` 跨包对 `logistics` 可见。V1 接受，因为调用方只读；一旦有调用方基于这个返回值写订单，写路径必须自己重新校验"当下仍然合法"，不能复用"读的时候合法"这个结论。
 - **环境说明（非代码问题）**：Testcontainers 需要工作区之外的 Docker 命名管道，受限沙箱下**首次** `mvnw verify` 以 `Previous attempts to find a Docker environment failed` 失败（56 errors，**包含 T013/T014/T016–T018 的既有测试**，因此可判定为环境而非代码）；提权重跑同一条命令即 BUILD SUCCESS。
+
+### T020 验收证据
+
+- **Java `mvnw.cmd verify` → BUILD SUCCESS**（本机实测 2026-09-22 20:19，完整输出落盘 `commerce-backend/target/verify-t020.log`：`EXIT=0`；Tests run: **109**, Failures: 0, Errors: 0, Skipped: 0；Spotless **79 files clean / 0 needs changes**；SpotBugs **BugInstance size 0** / Error size 0；JaCoCo **Analyzed bundle 'commerce-backend' with 55 classes**；Total time 46.008 s）。本次**没有新增任何 SpotBugs 豁免**，`config/spotbugs-exclude.xml` 未改动。新增 **`EligibilityServiceTest` 26 例**（0.027 s，不连库）与 **`EligibilityServiceIntegrationTest` 7 例**（Testcontainers）。
+- **Python 四条门禁全绿**：`ruff check` **All checks passed** / `ruff format --check` **39 files** / `mypy app` **Success 24 files** / `pytest -q` **236 passed, 13 skipped**（比 T019 的 234 多 2 例：新增"无规则决策可解析"与"半引用规则被拒"）。
+- **交付内容（4 个生产文件 + 1 个仓库方法 + 2 个测试文件）**：`eligibility/EligibilityService.java`（`evaluate` I/O 外壳 + 包内纯函数 `selectRule`/`decide`/`needsLogisticsFacts`）、`eligibility/EligibilityDecision.java`、`eligibility/EligibilityReasonCode.java`（13 个原因码）、`eligibility/RuleSelection.java`、`AfterSalesRuleRepository.findByActiveTrue()`。
+- **"确定性"不是形容词，而是结构**：决策逻辑是不读时钟、不查库、不调其它服务的纯函数，时间由 `Clock` 注入后**作为参数**传入。因此规则生效窗口、停滞阈值边界、审批阈值边界都能被**精确**断言（26 例 0.027 秒跑完），而不是写成"应该大于 48 吧"这种会随时间腐烂的断言。`repeatingTheSameEvaluationYieldsTheSameDecision` 直接断言两次调用得到的 record 完全相等。
+- **用户的 `reasonCode` 不参与决策（FR-009/FR-010 的结构性保证）**：`evaluate(principal, orderId)` **根本没有** reasonCode 参数，契约里的 `reasonCode` 只由 T025 做 schema 校验。因此"换个说法就能绕过规则/抬金额"在本版本里不是"我们记得不要写"，而是**写不出来**。
+- **规则选择确定性（4 类边界各有用例）**：类目 `null` = 通配、状态 `null` = 通配；生效窗口取**半开区间** `[effectiveFrom, effectiveTo)`（正好等于 `effectiveTo` 即失效，不需要写 `-1 秒` 补丁）；同一 `ruleCode` 多版本取**最高版本**（版本号受 `uq_after_sales_rules_code_version` 约束，不存在并列）；**两个不同 `ruleCode` 同时匹配同一订单 → `MANUAL_REVIEW` + `CONFLICTING_RULES`，且不引用任何规则**。最后一条的理由很直接：任选一条等于让 seed 数据的插入顺序决定用户能退多少钱。
+- **拒绝模型三段分明**（`DENY` = 证据证明不符合；`MANUAL_REVIEW` = 证据不足以证明符合或规则无法确定；两者都 `eligible=false`、都不动钱）：
+  1. 停滞未达阈值 → `DENY` + `STALL_THRESHOLD_NOT_MET`（47h vs 48h 有专门用例；48h 整算达到，取等号）；
+  2. 停滞时长未知（运单存在但无事件，`stalledHours == null`）→ `MANUAL_REVIEW` + `LOGISTICS_EVIDENCE_UNAVAILABLE`，**仍然引用规则行**（结论是"这条规则下的证据不足"）；
+  3. 订单说 `SHIPPED`、运单已签收 → `MANUAL_REVIEW` + `LOGISTICS_CONFLICTS_WITH_ORDER`：两个权威来源冲突时不猜，因为选错方向就是"给已签收订单退款"；
+  4. 订单已有售后动作 → `DENY` + `ORDER_ALREADY_HAS_AFTER_SALES`，且**排在读物流之前**（否则一次物流依赖故障会把这个本来就该拒绝的请求变成可重试的 503）。
+- **金额模型（"只能是更少的钱"）**：可退金额**只取权威订单金额**（eligibility 请求里根本没有金额字段，把金额说大说小在类型上写不出来）；规则上限是**硬边界**，超过即 `DENY` + `AMOUNT_EXCEEDS_RULE_LIMIT`（V1 只做整单退款，没有部分退款兜底）；`approval_threshold` 取**等号**（300.00 要审批，299.99 不要）且 `approvalRequired` 与 `eligible` **同时为真**——它是"资格允许但要先审批"，不是"没有资格"；规则没有声明上限的语义是"这条规则不再进一步收窄"，**不是**"可以退任意金额"（仍有订单总额这一上界）。
+- **`EligibilityDecision` 把自己不可能表达的状态变成非法**：`eligible` 与 `allowedAction` 必须一致（正向列举批准动作，将来 Java 新增取值时默认是"没批准"）；不批准的决策**不得**携带 `maxRefundAmount` 或 `approvalRequired`；需要资金的动作必须有金额、纯退货动作必须没有金额；批准动作必须引用规则行，`ruleCode`/`ruleVersion` 要么都给要么都不给；**不批准必须有原因码**（批准允许为空——规则没有声明条件时，解释已经在 ruleCode 与金额上，硬塞一个"条件已满足"的填充码只会变成 Trace/Eval 噪声）。9 条错误组合各有断言。
+- **只收集规则要求的证据**：规则未声明停滞阈值时**不读物流**（`needsLogisticsFacts`）。集成用例 `aRuleWithoutAStallRequirementDecidesWithoutAShipment` 证明：订单没有任何运单记录仍能得出可退结论。若无条件读物流，一条不需要物流的规则会被一次物流依赖故障拖成 503。
+- **依赖故障不被吞成业务结论**（集成用例）：`SHIPPED` + 无运单仍是 **`LOGISTICS_UNAVAILABLE`（retryable 503）**，而不是 `DENY`。把 503 降级成拒绝，会让 Agent 把一次暂时故障当成终局结论，永久不退款。
+- **新的读入口继承 T019 的 concealment 口径**：`evaluate` 复用 `OrderService.getOrder`，cross-owner 与"不存在"在 eligibility 上同样是 `404 ORDER_NOT_FOUND` 且消息逐字相同（集成用例）。如果新入口自己写一遍归属判断，它就会成为绕过该口径的第二条路径。
+- **本 T 发现的契约不一致已闭环**：`POST /after-sales/eligibility` 此前只声明 `200/401/403`，而实现现在有了真实的权威失败模式（ownership `404`、规则前提冲突 `409`、依赖不可用 `503`），且"评估完成的拒绝"需要一个明确的 200 语义。openapi 升 **0.2.3**：端点补 `404/409/503`，`info.description` 新增 **Evaluation outcome vs. error** 规则，`EligibilityDecision` 说明字段关系并放开 `ruleCode`/`ruleVersion` 为可空；`error-contracts.md` 新增同规则专章，明确 `ELIGIBILITY_DENIED`/`MANUAL_REVIEW_REQUIRED`/`APPROVAL_REQUIRED`/`AMOUNT_EXCEEDS_ALLOWED` 是**写路径**错误（提交前重校验拒绝一个 proposed action），不是评估阶段的"不符合资格"。
+- **契约放开一个字段 → 消费端必须同步**：`ruleCode`/`ruleVersion` 变可空后，`app/clients/models.py` 与 `app/agent/state.py` 的 `EligibilitySnapshot` 同步为可选，并在**两侧**都加上"要么都给要么都不给"的校验（Java 构造器 + Pydantic `model_validator`）。原先 `test_missing_required_field_is_rejected` 正好是靠"缺 ruleVersion 必须报错"来证明必需字段被拒——放开后它换成了缺 `allowedAction`，并新增"无规则决策可解析"与"半引用规则被拒"两例。这类"放开一个字段会静默削弱一条既有断言"的情况，是契约变更真正容易被漏掉的地方。
+- **未做（不夸大范围）**：T025 仍未完成 —— `POST /after-sales/eligibility` 的 **Controller / HTTP assembly / 端点角色校验 / reasonCode schema 校验**还没有实现，后续必须复用本 T 的 service。`RETURN` / `RETURN_REFUND` 规则目前 fail closed 为 `MANUAL_REVIEW` + `RULE_ACTION_NOT_SUPPORTED`（退货窗口判定属 T039），测试里对该分支有显式断言，不允许"因为规则行写着 RETURN 就自动放行"。本 T 没有任何写操作、没有 `Idempotency-Key`、没有退款（T026/T027/T028）。
+- **已知 tradeoff（写明白而不是藏起来）**：规则冲突检测是保守的 —— 库中任意两条不同 `ruleCode` 同时匹配同一订单都会转人工。这在生产里是想要的（政策冲突必须由人裁决），但在**测试环境**意味着别的测试类留下的规则行会干扰本测试；因此 `EligibilityServiceIntegrationTest` 使用 T020 专属 `productCategory`（`AfterSalesRulePersistenceTest` 用 ELECTRONICS 且不清理自己的行，Spring 上下文缓存又可能让两个测试类共用一个容器）。
+- **环境说明（非代码问题）**：受限沙箱下 `mvnw verify` 的失败集合是**既有测试类一起**报 `Could not find a valid Docker environment`，判据与 T019 一致（既有测试同时挂 → 环境；只有新测试挂 → 代码）；提权重跑同一条命令即 BUILD SUCCESS。第一次提权运行时我用 `Select-Object -First` 截断输出，把 PowerShell 关闭上游管道造成的 `exit 1` 混进了证据，因此重跑了一次并把完整输出落盘、显式打印 `EXIT=0`——**退出码必须来自构建本身，不能来自读取输出的方式**。
 
 ## 维护规则
 - 每完成一个 Gate 更新本文件；不要每天机械改百分比。
