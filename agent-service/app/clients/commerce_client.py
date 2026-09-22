@@ -362,21 +362,30 @@ class CommerceClient:
         )
 
     async def get_after_sales_status(
-        self, auth: AuthContext, order_id: str
+        self,
+        auth: AuthContext,
+        order_id: str,
+        *,
+        idempotency_key: str | None = None,
     ) -> CommerceCall[AfterSalesStatus]:
-        """``GET /orders/{orderId}/after-sales`` -- did the write actually commit?
+        """``GET /orders/{orderId}/after-sales`` -- did this logical write actually commit?
 
-        This is the read half of unknown-outcome recovery, which is why it exists in the same change
-        as the write. An **empty** ``refunds`` list is a positive statement ("no refund exists"),
-        and that is the only thing that makes a same-key retry of a timed-out write safe.
+        During unknown-write recovery the durable idempotency key is sent as an optional query
+        filter. That distinction matters: "some refund exists for this order" is not proof that the
+        timed-out logical request is the one that committed. An explicit empty ``refunds`` list
+        for the filtered key is the positive statement that permits a same-key retry.
         """
         segment = _safe_path_segment(order_id, field="order_id")
+        params: dict[str, str] | None = None
+        if idempotency_key is not None:
+            params = {"idempotencyKey": _safe_idempotency_key(idempotency_key)}
         return await self._request(
             "GET",
             f"/orders/{segment}/after-sales",
             auth,
             response_model=AfterSalesStatus,
             request_is_safe=True,
+            params=params,
         )
 
     # ---- transport -------------------------------------------------------------------------
