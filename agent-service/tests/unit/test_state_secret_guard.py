@@ -132,6 +132,7 @@ def build_populated_state() -> AgentState:
             action="CREATE_REFUND_REQUEST",
             target_id="order-001",
             idempotency_key="0123456789abcdef0123456789abcdef",
+            request_fingerprint="0" * 64,
         ),
         verification=VerificationOutcome(
             status=VerificationStatus.VERIFIED_SUCCESS,
