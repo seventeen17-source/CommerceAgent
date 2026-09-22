@@ -52,9 +52,7 @@ public class LogisticsService {
     public LogisticsSnapshot getLogistics(CommercePrincipal principal, String orderId) {
         Order order = orderService.requireOwnedOrder(principal, orderId);
 
-        Shipment shipment = shipmentRepository
-                .findByOrderId(orderId)
-                .orElseThrow(() -> missingShipment(order));
+        Shipment shipment = shipmentRepository.findByOrderId(orderId).orElseThrow(() -> missingShipment(order));
 
         // 方法名里的 `Shipment_Id` 让 Spring Data 直接走 shipment_id 外键列，
         // 不会为了取一个时间戳而把 Shipment 实体再加载一次（LogisticsEvent.shipment 是 LAZY）。
