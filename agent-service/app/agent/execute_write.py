@@ -38,6 +38,8 @@ failure claim would tell the user "you were not refunded" about a refund that ma
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -55,6 +57,7 @@ __all__ = [
     "DEFAULT_MAX_ATTEMPTS",
     "INTENT_NOT_DURABLE_ERROR_CODE",
     "UNKNOWN_OUTCOME_ERROR_CODE",
+    "WriteIntentConflictError",
     "RefundWriteIntent",
     "RefundWriteOutcome",
     "create_refund",
@@ -85,6 +88,41 @@ UNKNOWN_OUTCOME_ERROR_CODE = "WRITE_TIMEOUT_UNKNOWN"
 INTENT_NOT_DURABLE_ERROR_CODE = "INTERNAL_ERROR"
 
 
+class WriteIntentConflictError(ValueError):
+    """A resumed write no longer matches the durable logical request.
+
+    Reusing the old key with a changed payload would become IDEMPOTENCY_CONFLICT at Java, while
+    minting a new key would create a different logical write. Neither is valid recovery, so stop
+    locally before any network call.
+    """
+
+
+def _canonical_amount(value: Decimal | None) -> str | None:
+    """Stable decimal spelling for a fingerprint; never use binary float text for money."""
+    if value is None:
+        return None
+    return format(value.normalize(), "f")
+
+
+def _refund_request_fingerprint(
+    *,
+    order_id: str,
+    reason_code: str,
+    requested_amount: Decimal | None,
+) -> str:
+    """SHA-256 of the V1 logical refund payload, excluding run id and idempotency key."""
+    payload = {
+        "action": CREATE_REFUND_ACTION,
+        "orderId": order_id,
+        "reasonCode": reason_code,
+        "requestedAmount": _canonical_amount(requested_amount),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 @dataclass(frozen=True)
 class RefundWriteIntent:
     """One logical refund, identified by a key that survives retries and process restarts."""
@@ -101,6 +139,11 @@ class RefundWriteIntent:
             action=CREATE_REFUND_ACTION,
             target_id=self.order_id,
             idempotency_key=self.idempotency_key,
+            request_fingerprint=_refund_request_fingerprint(
+                order_id=self.order_id,
+                reason_code=self.reason_code,
+                requested_amount=self.requested_amount,
+            ),
         )
 
 
@@ -150,11 +193,20 @@ def refund_write_intent(
     turn every resume into a second refund.
     """
     persisted = state.write_intent
+    proposed_fingerprint = _refund_request_fingerprint(
+        order_id=order_id,
+        reason_code=reason_code,
+        requested_amount=requested_amount,
+    )
     if (
         persisted is not None
         and persisted.action == CREATE_REFUND_ACTION
         and persisted.target_id == order_id
     ):
+        if persisted.request_fingerprint != proposed_fingerprint:
+            raise WriteIntentConflictError(
+                "the resumed refund payload does not match the durable write intent"
+            )
         return RefundWriteIntent(
             run_id=str(state.run_id),
             order_id=order_id,
@@ -190,21 +242,23 @@ async def create_refund(
     client: CommerceClient,
     auth: AuthContext,
     intent: RefundWriteIntent,
-    persist_intent: Callable[[WriteIntent], Awaitable[None]],
+    persist_intent: Callable[[WriteIntent, WriteOutcome], Awaitable[None]],
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     may_already_have_committed: bool = False,
 ) -> RefundWriteOutcome:
     """Create exactly one refund, or report that the outcome could not be established.
 
-    ``persist_intent`` is required, and it is called *before* the first request: a write whose
-    idempotency key is not durable yet is a write whose retry cannot be recognised. If persisting
-    fails, nothing is sent.
+    ``persist_intent`` is required, and it is called *before* the first request with both the
+    durable intent and a ``PENDING`` outcome. The callback must persist those two values atomically:
+    a checkpoint that contains the key but still says ``NOT_ATTEMPTED`` is ambiguous on resume.
+    If that persistence fails, nothing is sent.
     """
     if not 1 <= max_attempts <= MAX_ATTEMPTS_LIMIT:
         raise ValueError(f"max_attempts must be between 1 and {MAX_ATTEMPTS_LIMIT}")
 
+    pending = WriteOutcome(status=WriteStatus.PENDING, action=CREATE_REFUND_ACTION)
     try:
-        await persist_intent(intent.to_state_intent())
+        await persist_intent(intent.to_state_intent(), pending)
     except Exception as exc:
         logger.error(
             "refusing to send a refund whose idempotency intent could not be persisted: %s",
@@ -222,7 +276,9 @@ async def create_refund(
     if may_already_have_committed:
         # Resuming: read before writing. If a previous attempt did commit, this is where we find out
         # -- without sending anything.
-        confirmed = await _confirmed_refunds(client, auth, intent.order_id)
+        confirmed = await _confirmed_refunds(
+            client, auth, intent.order_id, intent.idempotency_key
+        )
         if confirmed is None:
             return _unknown(attempts=0, intent=intent, trace_ids=trace_ids)
         if confirmed:
@@ -250,7 +306,9 @@ async def create_refund(
             )
         except CommerceTransportError as exc:
             logger.warning("refund write outcome unknown for order: %s", exc.reason)
-            confirmed = await _confirmed_refunds(client, auth, intent.order_id)
+            confirmed = await _confirmed_refunds(
+                client, auth, intent.order_id, intent.idempotency_key
+            )
             if confirmed is None:
                 # We cannot even read the state we would need to decide. Retrying would be a guess.
                 return _unknown(attempts=attempts, intent=intent, trace_ids=trace_ids)
@@ -298,7 +356,10 @@ def _request_body(intent: RefundWriteIntent) -> CreateRefundRequest:
 
 
 async def _confirmed_refunds(
-    client: CommerceClient, auth: AuthContext, order_id: str
+    client: CommerceClient,
+    auth: AuthContext,
+    order_id: str,
+    idempotency_key: str,
 ) -> list[RefundResult] | None:
     """The authoritative refund list for an order, or ``None`` when it could not be established.
 
@@ -306,14 +367,14 @@ async def _confirmed_refunds(
     answered, and no refund exists", which is what makes a same-key retry safe. ``None`` means
     "we do not know", which makes any retry a guess.
 
-    Any live refund on the order counts, not only one carrying our key -- the contract's
-    ``RefundResult`` does not expose the key, and Java guarantees at most one live refund per order.
-    So "the order already has a refund" is the fact this layer can actually establish, and reporting
-    it as our outcome is the truthful reading of it (the alternative would be to claim the user was
-    not refunded when the order says otherwise).
+    Recovery is bound to the durable idempotency key. A different refund on the same order is an
+    important business fact, but it is not proof that *this* logical write committed. Without the
+    key filter we could incorrectly report another concurrent refund as our own success.
     """
     try:
-        call = await client.get_after_sales_status(auth, order_id)
+        call = await client.get_after_sales_status(
+            auth, order_id, idempotency_key=idempotency_key
+        )
     except CommerceError as exc:
         logger.warning("could not confirm refund state for the order: %s", type(exc).__name__)
         return None
