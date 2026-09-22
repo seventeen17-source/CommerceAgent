@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational ✅ 收口
-- **当前 Tasks**：T022（Phase 3 — US1 MVP）
+- **当前 Tasks**：T023（Phase 3 — US1 MVP，实现段起点）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -24,8 +24,9 @@
   - T019 — ownership-scoped order/logistics read 与权威 stall calculation：`order/OrderService.java`（ownership 唯一判定入口 + 订单列表/详情读模型 + cross-owner 内部安全审计）、`logistics/LogisticsService.java`、`logistics/LogisticsStallCalculator.java`、`common/time/ClockConfig.java`；新测试 `OrderLogisticsIntegrationTest.java` **14 个用例**；**契约按 404 concealment 口径统一**（`commerce-api.openapi.yaml` 给 logistics 补 `404`、两个 read 端点的 `403` 明确只表示角色/能力不足，`error-contracts.md` 删除 `ORDER_FORBIDDEN`）。Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: **75**, Failures: 0, Errors: 0；Spotless 73 files clean / 0 needs changes；SpotBugs BugInstance **0**（新增 1 条最窄 exclude，见证据）；JaCoCo 50 classes）。验收证据见「T019 验收证据」
   - T020 — deterministic eligibility 与拒绝模型：`eligibility/EligibilityService.java`（I/O 外壳 `evaluate` + 纯函数 `selectRule`/`decide`）、`EligibilityDecision.java`（构造器把契约字段关系变成不可违反的不变量）、`EligibilityReasonCode.java`（13 个机器可读原因码）、`RuleSelection.java`、`AfterSalesRuleRepository.findByActiveTrue()`；新测试 `EligibilityServiceTest.java` **26 个用例**（纯函数、不连库、0.2 秒跑完）与 `EligibilityServiceIntegrationTest.java` **7 个用例**（Testcontainers：规则来自权威表、新入口继承 404 concealment、依赖故障不被吞成拒绝）。Java `mvnw.cmd verify` → **BUILD SUCCESS**（`EXIT=0`；Tests run: **109**, Failures: 0, Errors: 0；Spotless **79 files clean / 0 needs changes**；SpotBugs BugInstance **0**；JaCoCo 55 classes）。Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **39 files**、`mypy app` **Success 24 files**、`pytest -q` **236 passed, 13 skipped**）。验收证据见「T020 验收证据」
   - T021 — 受保护退款写入与"恰好一个逻辑退款"：`V003__refund_schema.sql`（`commerce.refund_requests` + `UNIQUE(user_id, idempotency_key)` + 活动态 `UNIQUE(order_id)` 部分索引）、`refund/`（`RefundRequest` / `RefundRequestRepository` / `RefundStatus` / `RefundCommand` / `RefundResult` / `RefundService`）、`OrderRepository.findByIdAndOwnerIdForUpdate`（owner 谓词写在锁查询里）、`OrderService.requireOwnedOrderForUpdate`（`MANDATORY`，锁必须在写事务里才成立）、`FixtureLoader.clearFixtureState()` 增补退款行清理（否则外键会让 fixture reset 直接失败）。新测试 `RefundIntegrationTest.java` **24 个用例**覆盖 authorization / amount bound / illegal state / idempotency reuse-conflict / timeout recovery，含**两个真实线程 + CyclicBarrier 的并发用例**。Java `mvnw.cmd verify` → **BUILD SUCCESS**（`EXIT=0`；Tests run: **133**, Failures: 0, Errors: 0；Spotless **86 files clean / 0 needs changes**；SpotBugs BugInstance **0**（新增 1 条最窄 exclude，理由见证据）；JaCoCo 60 classes）。契约升 **0.2.4**（`POST /refunds` 补 `400/404/503` 与幂等语义、`GET /orders/{orderId}/after-sales` 补 `404`、`RefundResult`/`CreateRefundRequest` 字段语义）。验收证据见「T021 验收证据」
-- **当前优先任务**：T022 — Python stalled-logistics happy path 与 unknown-write recovery test（`agent-service/tests/integration/test_us1_logistics_refund.py`）
-- **任务勾选口径说明**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理四项都在，见 tasks.md 的 V003 编号修正）；T027 **部分交付**（ownership / state / eligibility / amount 的写前重校验、幂等、行锁、审计、状态读面已完成），**仍未完成的是权威 `approvalRequestId` 绑定**（US4/T049）。
+  - T022 — Agent 侧写路径与未知结果恢复：`app/agent/execute_write.py`（**write-ahead intent**：key 先落盘再发请求；单次尝试 → 未知结果先读权威状态 → 同 key 有限预算重试 → 预算耗尽 `UNKNOWN` 升级；intent 落盘失败则一字节都不发）、`app/agent/state.py`（新增 `WriteIntent` + `AgentState.write_intent`，让"从未发出"与"发了但结果未知"可区分）、`app/clients/commerce_client.py`（写面 `create_refund`（`request_is_safe=False`）/ `get_after_sales_status` + `Idempotency-Key` 形状校验 + 禁止 `extra_headers` 覆盖 `Authorization`）、`app/clients/models.py`（`CreateRefundRequest`/`RefundResult`/`AfterSalesStatus`）。新测试 `tests/integration/test_us1_logistics_refund.py` **13 个用例**（有状态假 Java：能"已提交但响应丢失"、能拒绝换 key 的第二笔）。**顺带修掉一个 T017 遗留的护栏漏洞**：`test_state_secret_guard.py` 的 `_carries_text` 不递归进嵌套模型，导致 `SomeModel | None` 类型的字段（`principal`、`write`、`verification`、`eligibility`、`approval`，以及本次新增的 `write_intent`）**一个探针都没有**却仍被判为"已覆盖"；改为递归后这些字段全部进入凭据探针矩阵。Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **41 files**、`mypy app` **Success 25 files**、`pytest -q` **258 passed, 6 skipped**）。验收证据见「T022 验收证据」
+- **当前优先任务**：T023 — customer-scoped order list/detail API（`OrderController` / `OrderService` 的 HTTP 装配），随后 T024 物流 API；两者必须复用 T019 已落地的 service 读面并把 T019 的 404 concealment 写进端点声明
+- **任务勾选口径说明（T021/T022）**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理，编号修正为 `V003`）；T027 **部分交付**（ownership / state / eligibility / amount 写前重校验、幂等、行锁、审计、状态读面已完成），**仍缺**权威 `approvalRequestId` 绑定（US4/T049）；T029 **客户端写面已交付**，**仍缺** Tool Envelope / allowlist；T031 **恢复核心已交付**，**仍缺** `verify_business_state.py` 与 graph 接线（T032）。
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
 - **环境事实（重要）**：
@@ -126,7 +127,7 @@ main (af50a7b)
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
 10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
 11. ✅ T018：FastAPI 认证 / principal / run ownership / run 骨架接口（Python 四条门禁全绿 → 234 passed；Web build + lint 通过；**5173 端到端流转实测通过**）—— Phase 2 收口
-12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径已钉死；T020 ✅ 资格决策与拒绝模型已钉死；T021 ✅ 退款写入与幂等/并发已钉死；当前 T022）
+12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径已钉死；T020 ✅ 资格决策与拒绝模型已钉死；T021 ✅ 退款写入与幂等/并发已钉死；T022 ✅ Agent 侧写路径与未知结果恢复已钉死 —— 「先写测试」四步全部完成，当前 T023）
 
 ### T008 验收证据
 
@@ -296,6 +297,22 @@ main (af50a7b)
 - **SpotBugs 新增 1 条最窄豁免，并说明它为什么是可证明误报**：`RefundService` 注入具体类 `AuditWriter` 触发 `EI_EXPOSE_REP2`，与 T019 的 `OrderService.auditWriter` 完全同类（private final、只用于调用 `writeBusinessEvent`、不经公开 API 暴露）。豁免按**类 + 字段**限定，未扩大到包，也未关闭整个 pattern。注意这次的顺序：先让 `verify` 报出真实告警（**1 条**），再判断它是设计问题还是误报——不是先加豁免再跑。
 - **未做（不夸大范围）**：T028 的 `RefundController` 与 HTTP 组装（`Idempotency-Key` 头 → 命令对象、状态码映射）还没有实现；权威 `approvalRequestId` 绑定属 US4/T049；退货（`returns`）属 US2/T038+。退款行的 `status` 在 V1 恒为 `CREATED`（没有结算与状态迁移），因此 `refund_requests` 刻意**没有** `version` 列（data-model 也未定义），但 `updated_at` 因此恒等于 `created_at`——将来允许状态迁移时，必须同时补上更新路径，否则这一列会静默停止说真话（已写在 migration 注释里）。
 - **已知 tradeoff（写明白而不是藏起来）**：`RefundService` 直接注入 `OrderRepository` 来更新订单投影，因此退款模块持有了订单表的写入口。V1 接受，因为写入字段只有一个（`after_sales_status`）且必须在同一事务里；一旦出现第二个写点，应当把订单状态的合法迁移收敛回 `order` 模块，而不是让每个业务模块各自 UPDATE 订单。
+
+### T022 验收证据
+
+- **Python 四条门禁全绿**：`ruff check` **All checks passed** / `ruff format --check` **41 files** / `mypy app` **Success 25 source files** / `pytest -q` **258 passed, 6 skipped**（T021 基线为 236 passed / 13 skipped；增量 = T022 新增 13 例 + 护栏修复解除的 7 个跳过 + `write_intent` 新增两个参数化用例）。本 T **未改任何 Java 文件**，因此没有重跑 `mvnw verify`（Java 侧最近一次绿是 T021 的 133 tests）。
+- **交付内容**：`app/agent/execute_write.py`、`app/agent/state.py`（`WriteIntent` / `AgentState.write_intent`）、`app/clients/commerce_client.py`（写面 + `Idempotency-Key`）、`app/clients/models.py`（三个契约模型）、`tests/integration/test_us1_logistics_refund.py`（13 例）、`tests/unit/test_state_secret_guard.py`（护栏修复）。
+- **write-ahead intent：key 先落盘，再发请求**（用户拍板）：`create_refund` 把 `persist_intent` 作为**必填**参数，并在第一次请求之前调用它；落盘失败则直接返回 `FAILED` / `INTERNAL_ERROR` 且**一字节都不发**（`test_a_write_without_a_durable_intent_is_never_sent` 断言 `write_attempts() == 0`）。`test_the_idempotency_key_is_durable_before_the_request_is_sent` 用共享事件日志断言顺序恰为 `persist:<key>` → `write:<key>`，且两次的 key 相同——**顺序本身就是安全属性**：只在请求发出后才记住 key，等于没有 key。
+- **"从未发出"与"发了但结果未知"是两种状态**：`AgentState.write_intent` 独立于 `WriteOutcome`。没有 intent = 什么也没发；intent 存在 + `write.status ∈ {PENDING, UNKNOWN}` = 可能已经提交。`write_may_already_have_committed()` 是这一判断的唯一入口，恢复路径据此**先读权威状态再决定是否写**（`test_a_resumed_run_reuses_the_persisted_key_and_checks_state_first` 断言恢复时写次数为 0）。
+- **未知结果的恢复顺序（用户拍板）**：超时/无响应 → 先 `GET /orders/{id}/after-sales`：有退款 → 以权威事实收尾（`recovered=True`，**不重发**）；没有 → 同 key 重试；读状态本身失败 → `UNKNOWN` + 不重试。三条各有断言（`..._without_rewriting` / `..._retries_with_the_same_key` / `..._stops_instead_of_guessing`）。
+- **"还没提交"不等于"永远不会提交"**：客户端超时并不代表服务端停止工作，超时请求仍可能在之后提交。因此预算耗尽时的结论必须是 `WriteStatus.UNKNOWN`（升级），**绝不能是 FAILED**——把未知说成失败，等于对一笔可能已经发生的退款告诉用户"没退"。`test_the_retry_budget_is_finite_and_never_switches_keys` 同时钉住"预算有限"与"耗尽时也不换 key"。
+- **换 key 盲重试在假 Java 上会立刻暴露**：假 Java 与真 Java 一样，对已有活动退款的订单用**新 key** 会回 `409 DUPLICATE_AFTER_SALES`（`test_a_duplicate_answer_is_terminal_and_never_retried` 断言 1 次尝试、终局失败、不重试）；而重试会成功的唯一形态就是**同一个 key**（多处以 `len(set(java.write_keys)) == 1` 断言）。
+- **`request_is_safe=False` 是这套逻辑的地基**：T016 定的"client 从不重试"在这里第一次真正被使用——`create_refund` 明确声明自己是有副作用的操作，所以它的超时是"未知结果"而不是"可以免费重来"。这也说明为什么不能用 `method == "POST"` 推导安全性：同一个 POST 的 eligibility 是无副作用的。
+- **幂等键的字符集在客户端先验一遍**：`_safe_idempotency_key` 在发请求前按 Java 的 `[A-Za-z0-9_-]{8,128}` 校验（点号被 Java 有意排除，所以 JWT 形状的字符串不可能被当成 key 落库）；另外 `extra_headers` 禁止覆盖 `Authorization` 与 `X-Trace-Id`——凭据只能来自已认证上下文，correlation id 不能由调用方决定。
+- **顺带修掉一个 T017 遗留的护栏漏洞（本 T 最有价值的发现）**：`test_state_secret_guard.py` 的 `_carries_text(annotation)` 只检查注解自身与一层 `get_args`，因此 `SomeModel | None` 这类字段被判定为"无法承载文本"——它拿不到任何凭据探针，而收集守卫（"新增文本字段必须自带探针"）也因此**看不见这个洞**。受影响的不止本次新增的 `write_intent`，还包括 T015 就存在的 `principal`、`write`、`verification`、`eligibility`、`approval`。修复方式是对 `BaseModel` 字段递归（`_carries_text` 进入 `model_fields`），修复后这些字段全部进入凭据探针矩阵、6 个原本跳过的用例开始真正执行。**规则本身一直在工作**（`validate_persistable` 是递归的），坏掉的是"我们以为它被覆盖了"这件事——这正是元测试存在的原因。
+- **一处刻意的分层**：恢复策略放在 `app/agent/execute_write.py`，不放在 `CommerceClient` 里，也不放在 Java 里。client 看不到"这是第几次尝试"，Java 看不到 Agent 的意图与预算；只有这一层同时握着**幂等键**与**重试预算**这两个事实。Java 侧仍然独立保证"每个订单最多一笔活动退款"（T021 的部分唯一索引），因此即使 Agent 这边的恢复策略写错了，钱也不会变成两笔——两层是纵深防御，不是互相替代。
+- **未做（不夸大范围）**：T029 的 Tool Envelope + allowlist 注册未做（客户端写面已就绪）；T031 的 `verify_business_state.py` 独立节点与 T032 的 LangGraph 接线未做——本测试里的 `_us1_refund_flow` 是**测试夹具**，明确标注为 T030/T032 的替身，不是图；退货（US2）、审批（US4）、真实 LLM 决策（T030）都未涉及。
+- **依赖注入的取舍**：测试里的假 Java 用 `httpx.MockTransport` 脚本化，因为它必须能"提交后把响应丢掉"——真实服务无法按需做到这一点。这与 T018/T016 的既有口径一致：被测的是**我们如何使用已发布的契约**，而 Java 契约本身由 Java 侧的 `mvnw verify`（T021 的 133 tests）负责。
 
 ## 维护规则
 - 每完成一个 Gate 更新本文件；不要每天机械改百分比。

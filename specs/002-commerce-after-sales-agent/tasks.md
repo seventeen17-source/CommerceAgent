@@ -56,7 +56,7 @@
 - [X] T019 [P] [US1] 编写 ownership-scoped order/logistics read 与 stall calculation Java Test：`OrderLogisticsIntegrationTest.java`。
 - [X] T020 [P] [US1] 编写 deterministic eligibility 与拒绝模型覆盖 amount/eligibility 的 Java Test：`EligibilityServiceTest.java`。
 - [X] T021 [P] [US1] 编写 refund authorization、amount bound、非法状态、idempotency reuse/conflict、timeout recovery Integration Test：`RefundIntegrationTest.java`。
-- [ ] T022 [P] [US1] 编写 Python stalled-logistics happy path 与 unknown-write recovery test：`agent-service/tests/integration/test_us1_logistics_refund.py`。
+- [X] T022 [P] [US1] 编写 Python stalled-logistics happy path 与 unknown-write recovery test：`agent-service/tests/integration/test_us1_logistics_refund.py`。
 
 ### 实现
 
@@ -66,9 +66,9 @@
 - [X] T026 [US1] 新建 `commerce.refund_requests` migration 与 Entity/Repository：**`V003__refund_schema.sql`**（原计划写 V002，但 `V002` 已被 T017 的 `V002__agent_run_checkpoint.sql` 占用；编号冲突在 T021 报出并修正）、`refund/`；同步扩展 T014 `FixtureLoader.clearFixtureState()`，清理 refund 与本阶段引入的 idempotency state，保证 Eval reset 不残留写入结果。→ **已随 T021 一并交付**：schema（含两个唯一约束）、`RefundRequest`/`RefundRequestRepository`、fixture reset 清理退款行（否则外键会让 reset 直接失败）。
 - [ ] T027 [US1] 实现 Transactional Refund Create/Status：`RefundService.java`；每次敏感写入前重新校验 ownership、current state、eligibility、amount 和权威 `approvalRequestId`。→ **部分已随 T021 交付**：`createRefund` 已实现 ownership / current state / eligibility / amount 的写前重校验、幂等重放与冲突、订单行锁、退款行 + 订单投影 + 审计的同事务写入，以及 `listRefunds` 状态读面。**仍未完成**：权威 `approvalRequestId` 绑定校验（V1 没有审批记录表，任何审批引用一律 fail closed 为 `INVALID_PARAMETER`，US4/T049 实现真正的绑定）。
 - [ ] T028 [US1] 暴露 Refund 与 After-sales Status API，遵循 `Idempotency-Key`：`RefundController.java`。
-- [ ] T029 [P] [US1] 实现 typed tools：`list_user_orders`、`get_order`、`get_logistics`、`check_after_sales_eligibility`、`create_refund_request`、`get_after_sales_status`；统一使用 `success/data/errorCode/retryable/latencyMs/traceId`。
+- [ ] T029 [P] [US1] 实现 typed tools：`list_user_orders`、`get_order`、`get_logistics`、`check_after_sales_eligibility`、`create_refund_request`、`get_after_sales_status`；统一使用 `success/data/errorCode/retryable/latencyMs/traceId`。→ **客户端写面已随 T022 交付**（`CommerceClient.create_refund` / `get_after_sales_status` + `Idempotency-Key` 形状校验 + 契约模型 `CreateRefundRequest`/`RefundResult`/`AfterSalesStatus`）；**仍未完成**：Tool Envelope 包装、allowlist 注册与 risk level 标注。
 - [ ] T030 [US1] 实现 `understand_request`、单候选 order resolution、`decide_next_evidence`、read-tool execution、evidence validation、`check_eligibility`；`decide_next_evidence` 遵循 `research.md` 的“模型选择受限 capability + 确定性约束”设计。
-- [ ] T031 [US1] 实现 Write Execution + Verify-after-write Recovery：`execute_write.py`、`verify_business_state.py`；unknown timeout 必须先 `get_after_sales_status`，必要时同 key 重试。
+- [ ] T031 [US1] 实现 Write Execution + Verify-after-write Recovery：`execute_write.py`、`verify_business_state.py`；unknown timeout 必须先 `get_after_sales_status`，必要时同 key 重试。→ **恢复核心已随 T022 交付**（`app/agent/execute_write.py`：写前落盘 write-ahead intent、单次尝试、未知结果先读权威状态、同 key 有限预算重试、预算耗尽 → `UNKNOWN` 升级、intent 落盘失败则不发请求）；**仍未完成**：`verify_business_state.py` 的独立节点与 graph 接线（T032）。
 - [ ] T032 [US1] 在 `graph.py` / `routing.py` 连接显式 LangGraph：START → understand → resolve → evidence loop → eligibility → refund write → verify → finalize；包含最大 step/retry budget。
 - [ ] T033 [US1] 实现 Agent Run Create/Execute/Response Serialization：`api/runs.py`；只返回已验证业务 ID/事实，不接受模型自称成功。
 - [ ] T034 [US1] 实现最小 Customer Console：`web/src/features/chat/`，展示输入、run status、resolved order、final result 和可折叠 tool timeline。
