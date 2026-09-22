@@ -12,6 +12,7 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -74,6 +75,33 @@ public class OrderService {
      */
     public Order requireOwnedOrder(CommercePrincipal principal, String orderId) {
         Optional<Order> ownedOrder = orderRepository.findByIdAndOwnerId(orderId, principal.userId());
+        if (ownedOrder.isPresent()) {
+            return ownedOrder.get();
+        }
+        auditConcealedCrossOwnerRead(principal, orderId);
+        throw notAccessible();
+    }
+
+    /**
+     * T021：写路径专用的 ownership 判定 —— 与 {@link #requireOwnedOrder} 完全相同的对外语义，但会锁住订单行。
+     *
+     * <p>三件事值得写清楚：
+     *
+     * <ul>
+     *   <li><b>为什么写路径要锁订单行</b>：退款是"读状态 → 判断 → 写"的组合。没有锁时两个并发请求会同时读到
+     *       {@code after_sales_status = null}，各自认为自己是第一笔。锁把这一段串行化，于是后到者看到的是**别人已经
+     *       提交后的**状态。数据库唯一约束是第二道防线（见 V003），不是替代品：约束能拒绝第二个写入，但锁才能让
+     *       第二个人得到"已经有人退过款"这个可解释的结论。
+     *   <li><b>为什么用 {@code MANDATORY} 传播</b>：{@code SELECT ... FOR UPDATE} 的锁只在事务期间有效。若调用方没有
+     *       事务，这条语句会在自身结束时释放锁，看上去成功、实际什么也没保护 —— 那是最危险的一种"静默失效"。
+     *       {@code MANDATORY} 把"忘了开事务"从静默降级变成立即失败。
+     *   <li><b>对外仍然不可区分</b>：锁查询返回空（不存在或属于别人）时，走的是与读路径同一个审计与同一条消息，
+     *       所以 T019 的 concealment 口径不会被写路径重新引入的存在性泄露破坏。
+     * </ul>
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Order requireOwnedOrderForUpdate(CommercePrincipal principal, String orderId) {
+        Optional<Order> ownedOrder = orderRepository.findByIdAndOwnerIdForUpdate(orderId, principal.userId());
         if (ownedOrder.isPresent()) {
             return ownedOrder.get();
         }

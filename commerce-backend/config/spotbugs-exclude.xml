@@ -38,6 +38,17 @@
 		<Field name="auditWriter"/>
 		<Bug pattern="EI_EXPOSE_REP2"/>
 	</Match>
+	<!--
+		T021: RefundService injects the concrete AuditWriter for the same reason OrderService does, and
+		hits the same provable false positive: the reference lives in a private final field, is only
+		used to call writeBusinessEvent, and is never returned or exposed. Keep this exemption narrowed
+		to class plus field; do not widen it to the package, and do not disable the pattern.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.refund.RefundService"/>
+		<Field name="auditWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
 	<Match>
 		<Class name="com.seventeen17.commerceagent.fixture.FixtureLoader"/>
 		<Field name="jdbcTemplate"/>

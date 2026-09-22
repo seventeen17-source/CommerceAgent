@@ -1,8 +1,24 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.3
+  version: 0.2.4
   description: |
+    ## Write-path idempotency (T021)
+
+    `POST /refunds` (and, later, `POST /returns`) is the only place in this API where a retry can cost
+    money, so its semantics are stated once here:
+
+    * A request is identified by the `Idempotency-Key` header **within the authenticated user's
+      namespace**. Replaying a key with the same logical request returns the already-committed
+      object; replaying it with a different one is `409 IDEMPOTENCY_CONFLICT`.
+    * "Same logical request" is (orderId, amount, reasonCode). `runId` is provenance, not identity: a
+      resumed Agent run may retry with a different run id and must still reach the same refund.
+    * A *different* key for an already-refunded order is `409 DUPLICATE_AFTER_SALES`, never a second
+      refund. "At most one live refund per order" is enforced by the database (a partial unique
+      index), not only by service code.
+    * A timeout means the outcome is **unknown**: query `GET /orders/{orderId}/after-sales` before
+      retrying. A write that could not be confirmed must never be reported to a user as success.
+
     ## Evaluation outcome vs. error (T020)
 
     Eligibility evaluation distinguishes two things that are easy to conflate:
@@ -176,7 +192,20 @@ paths:
   /refunds:
     post:
       summary: Create idempotent refund request
-      description: The backend revalidates authenticated ownership, current state, eligibility, amount, approval record, and idempotency immediately before commit.
+      description: |
+        The backend revalidates authenticated ownership, current state, eligibility, amount, approval
+        record, and idempotency immediately before commit. Two guarantees that a caller must be able
+        to rely on (T021):
+
+        * **A retry never becomes a second payment.** Replaying the same `Idempotency-Key` with the
+          same logical request returns the same `refundRequestId`. The key's namespace belongs to the
+          authenticated user, so one user reusing a key cannot observe or block another user's key.
+          The idempotency fingerprint is (orderId, requested amount, reasonCode) — `runId` is
+          provenance and deliberately does not participate, because a resumed run may retry with a
+          different run id and that retry must still resolve to the same refund.
+        * **At most one live refund per order.** A different key for an already-refunded order is a
+          duplicate, not a new refund. Callers must not treat "I lost the response" as "nothing
+          happened": read `GET /orders/{orderId}/after-sales` first.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -190,10 +219,35 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RefundResult' }
+        '400':
+          $ref: '#/components/responses/Error'
+          description: |
+            INVALID_PARAMETER: malformed Idempotency-Key, non-UUID runId, non-positive amount, or a
+            partial amount (this version refunds the whole order only and never silently changes the
+            amount), or an approval reference that this version cannot validate.
         '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
-        '422': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: ACCESS_DENIED. The endpoint is customer-scoped; an authenticated principal without the customer capability is refused regardless of order ownership.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: ORDER_NOT_FOUND, identical for "order does not exist" and "order belongs to another user".
+        '409':
+          $ref: '#/components/responses/Error'
+          description: |
+            DUPLICATE_AFTER_SALES: a live refund already exists for this order.
+            IDEMPOTENCY_CONFLICT: this key was already used for a different logical request.
+        '422':
+          $ref: '#/components/responses/Error'
+          description: |
+            ELIGIBILITY_DENIED (deterministic rules deny this refund), MANUAL_REVIEW_REQUIRED (the
+            case cannot be decided automatically), APPROVAL_REQUIRED (eligible but an authoritative
+            approval must be obtained first), or AMOUNT_EXCEEDS_ALLOWED.
+        '503':
+          $ref: '#/components/responses/Error'
+          description: |
+            LOGISTICS_UNAVAILABLE: revalidating eligibility needs authoritative logistics evidence
+            and it is unavailable. Retryable within a budget; never read as "refused".
   /returns:
     post:
       summary: Create idempotent return request
@@ -298,6 +352,11 @@ paths:
   /orders/{orderId}/after-sales:
     get:
       summary: Query current after-sales objects/status for verification and timeout recovery
+      description: |
+        The authoritative read used for two things: post-write verification (did the write actually
+        commit?) and unknown-outcome recovery (a write request timed out, so query before retrying).
+        An empty list is a positive statement -- "no refund exists" -- which is what makes a same-key
+        retry safe.
       parameters:
         - $ref: '#/components/parameters/OrderId'
         - in: query
@@ -311,6 +370,12 @@ paths:
               schema: { $ref: '#/components/schemas/AfterSalesStatus' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+        '404':
+          $ref: '#/components/responses/Error'
+          description: |
+            ORDER_NOT_FOUND, identical for "order does not exist" and "order belongs to another
+            user". Added in T021 for the same reason T019 added it elsewhere: an endpoint that reads
+            order-scoped state must not be the one place that leaks existence.
 components:
   securitySchemes:
     bearerAuth:
@@ -426,15 +491,36 @@ components:
       properties:
         orderId: { type: string }
         reasonCode: { type: string }
-        requestedAmount: { type: [number, 'null'] }
-        approvalRequestId: { type: [string, 'null'] }
-        runId: { type: string }
+        requestedAmount:
+          type: [number, 'null']
+          description: |
+            Optional. Omitted means "refund the whole authorised amount". This version refunds the
+            whole order only: an explicit value must be positive and exactly equal to the authorised
+            amount. The backend never silently substitutes a different amount — ask for something
+            else and you get 400/422, not a smaller refund.
+        approvalRequestId:
+          type: [string, 'null']
+          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
+        runId:
+          type: string
+          format: uuid
+          description: Agent run UUID. Recorded on the refund and in the audit log for cross-service traceability; it is never identity or authorization, because agent.agent_runs belongs to another schema and DB role.
     RefundResult:
       type: object
+      description: |
+        Authoritative facts about the refund row that exists right now. A caller must never treat "I
+        requested X" as "the system accepted X": read the value back (or re-read
+        `GET /orders/{orderId}/after-sales`) before reporting success to a user.
       properties:
-        refundRequestId: { type: string }
-        status: { type: string }
-        acceptedAmount: { type: number }
+        refundRequestId:
+          type: string
+          description: Random UUIDv4. Not enumerable, so unlike order ids it needs no concealment.
+        status:
+          type: string
+          description: Java-owned forward-compatible status. Known V1 values are CREATED, PROCESSING, COMPLETED, REJECTED, CANCELLED. REJECTED and CANCELLED are terminal and do not occupy the order's single live-refund slot.
+        acceptedAmount:
+          type: number
+          description: The amount the backend actually accepted. In V1 this always equals the authorised whole-order amount; it is never a silently reduced version of a requested amount.
     CreateReturnRequest:
       type: object
       required: [orderId, reasonCode, runId]

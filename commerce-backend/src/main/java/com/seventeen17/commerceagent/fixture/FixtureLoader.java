@@ -82,6 +82,10 @@ public class FixtureLoader {
 
     private void clearFixtureState() {
         jdbcTemplate.update("DELETE FROM commerce.audit_logs");
+        // T021/T026：refund_requests 对 orders 有外键，因此必须在下游对象之后再删 orders，否则 fixture reset 会以
+        // FK 违约失败。Eval reset 的语义是"业务状态回到基线"，退款这类写入结果必须一起清掉，否则"重置后重跑同一个
+        // 用例"会因为上一轮的退款行而得到不同结论。
+        jdbcTemplate.update("DELETE FROM commerce.refund_requests WHERE order_id IN ('order-001', 'order-002')");
         jdbcTemplate.update(
                 "DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002')");
         jdbcTemplate.update("DELETE FROM commerce.shipments WHERE order_id IN ('order-001', 'order-002')");
