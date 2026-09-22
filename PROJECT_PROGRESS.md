@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 2 — Foundational ✅ 收口
-- **当前 Tasks**：T019（Phase 3 — US1 MVP）
+- **当前 Tasks**：T020（Phase 3 — US1 MVP）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -21,7 +21,8 @@
   - T016 — 类型化 Java API Client（`agent-service/app/clients/`：`auth.py` / `models.py` / `errors.py` / `identity.py` / `commerce_client.py`）+ Java `TraceIdFilter` 收紧 + `FixtureLoader` advisory lock 修复；Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 52, Failures: 0, Errors: 0；Spotless 64 files clean / 0 needs changes；SpotBugs BugInstance 0）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **17 files**、`mypy app` **Success 11 files**、`pytest -q` **86 passed**）。验收证据见「T016 验收证据」
   - T017 — Run/Checkpoint/Structured Tool Trace 持久化：`agent-service/app/trace/`（`checkpoint.py` / `db.py` / `store.py` / `retention.py` / `errors.py`）+ `app/security/secrets.py`（持久化边界护栏）+ `V002__agent_run_checkpoint.sql`；Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: 61, Failures: 0, Errors: 0；Spotless 65 files clean / 0 needs changes；SpotBugs BugInstance size 0；JaCoCo 42 classes）；Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **30 files**、`mypy app` **Success 19 files**、`pytest -q` **195 passed, 13 skipped**，其中 **21 个真实 PostgreSQL 集成用例**证明并发 resume 只产生一个赢家。验收证据见「T017 验收证据」
   - T018 — FastAPI 认证 / Principal / Run Ownership / Run 骨架接口：`app/security/credentials.py`（只证明"合法"不证明"是谁"）、`app/security/dependencies.py`、`app/api/runs.py`（6 个端点，认证声明在 router 级）、`app/main.py`（`create_app` 工厂 + lifespan 单例）、`app/trace/store.py` 增补 `get_run_for_owner`（owner 进 SQL 谓词）、`web/vite.config.ts`（dev proxy + rewrite）、Flow Playground 步骤 08–10（Run 创建、查询与 events 真实控件）、`scripts/mint_dev_token.py`、`scripts/run_chain_check.py`；Python四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **39 files**、`mypy app` **Success 24 files**、`pytest -q` **234 passed, 13 skipped**）；Web `npm.cmd run build` 成功、`npm.cmd run lint` 0 warnings/0 errors。**5173 真实端到端流转测试通过**（见「T018 验收证据」）
-- **当前优先任务**：T019 — ownership-scoped order/logistics read 与 stall calculation Java Test（US1 MVP，先写测试）
+  - T019 — ownership-scoped order/logistics read 与权威 stall calculation：`order/OrderService.java`（ownership 唯一判定入口 + 订单列表/详情读模型 + cross-owner 内部安全审计）、`logistics/LogisticsService.java`、`logistics/LogisticsStallCalculator.java`、`common/time/ClockConfig.java`；新测试 `OrderLogisticsIntegrationTest.java` **14 个用例**；**契约按 404 concealment 口径统一**（`commerce-api.openapi.yaml` 给 logistics 补 `404`、两个 read 端点的 `403` 明确只表示角色/能力不足，`error-contracts.md` 删除 `ORDER_FORBIDDEN`）。Java `mvnw.cmd verify` → **BUILD SUCCESS**（Tests run: **75**, Failures: 0, Errors: 0；Spotless 73 files clean / 0 needs changes；SpotBugs BugInstance **0**（新增 1 条最窄 exclude，见证据）；JaCoCo 50 classes）。验收证据见「T019 验收证据」
+- **当前优先任务**：T020 — deterministic eligibility 与拒绝模型覆盖 amount/eligibility 的 Java Test（`EligibilityServiceTest.java`）
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
 - **环境事实（重要）**：
@@ -52,7 +53,7 @@
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
 | 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ✅ Complete（T008–T018 ✅） |
-| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（当前 T019） |
+| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019 ✅，当前 T020） |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
 | 6 | 安全降级 | T057–T063 | 依赖失败 / 规则冲突时 Safe Stop 或转人工 | ⬜ |
@@ -104,7 +105,7 @@
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
 10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
 11. ✅ T018：FastAPI 认证 / principal / run ownership / run 骨架接口（Python 四条门禁全绿 → 234 passed；Web build + lint 通过；**5173 端到端流转实测通过**）—— Phase 2 收口
-12. ⬜ T019–T035：US1 物流异常退款 MVP（当前 T019）
+12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径已钉死；当前 T020）
 
 ### T008 验收证据
 
@@ -167,6 +168,8 @@
 
 - **验证页结构纠偏（2026-09-22）**：T018 首版把 `App.tsx` 整体替换成单任务 chain check，覆盖了 `demo/t016-flow-playground` 中已经由用户实际操作过的 T016 流程与故障注入按钮。现已恢复 T016 Playground，并把 T018 控件嵌回同一个调试器；后续任务在这条既有 Flow 上增加按钮或查看能力，不再另开独立任务页面。
 
+- **契约复验（2026-09-22，直连 8000 + 真实 PostgreSQL）**：纠偏后重新按契约复验 16 项（创建/读取/事件、403 与 409 分离、四类 401、claims 无授权效力、404 与 422、先鉴权再判状态），全部符合契约；并确认 `agent_app` 对 `commerce.*` 无权限（`permission denied for schema commerce`），Python 无法绕过 Java 直接读权威用户表。复验中发现并修掉一个**运行环境缺陷**：8000 上 15:21 启动的历史进程因缺少 `trust_env=False` 而读取系统代理，导致带合法 token 的请求全部 502；当前代码已含该修复，杀进程重启后复验通过。明细见 `docs/devlog/2026-09-22.md`。**唯一未覆盖项**：Vite `/agent` → `/api/v1/agent` rewrite（页面冒烟：步骤 08 应返回 201）。
+
 - **Python 四条门禁全绿**：`ruff check` **All checks passed** / `ruff format --check` **39 files** / `mypy app` **Success 24 files** / `pytest -q` **234 passed, 13 skipped**（其中 T018 集成 18 个、凭据单测 21 个）。
 - **Web**：`npm.cmd run build` 成功（`dist/` 产出）；`npm.cmd run lint`（oxlint）**0 warnings / 0 errors**。
 - **5173 真实端到端流转测试（实测通过）** —— 这是本节的核心验收，链路为 `浏览器 → localhost:5173 (Vite dev proxy) → FastAPI:8000 → stub Java /me → PostgreSQL(agent.*)`：
@@ -193,6 +196,37 @@
   4. 测试 fixture 第一版 teardown 会删 `user_id LIKE 'customer-%'` 的所有行 —— 对共享开发库具破坏性，已改为只删自己登记的 id。
 - **环境陷阱（记录以免下次误判）**：本机 Vite dev server 只监听 **IPv6 `::1`**，所以 `http://127.0.0.1:5173/` 连不上，必须用 `http://localhost:5173/`；这与 T017 的 PostgreSQL（只绑 IPv4，`localhost` 先试 `::1` 白等 5 秒）**方向恰好相反**。结论：不要记"用 127.0.0.1"或"用 localhost"的口诀，按目标服务实际监听地址决定。
 - **明确未做（不夸大本节范围）**：`/events` 目前返回 JSON 数组而非 `text/event-stream` 流（契约声明 SSE，内容正确、传输留 UI 阶段）；`/input`/`/resume` 只做门禁与 resume，**不解释文本**（理解属 T030）；没有真正调用 LLM、没有查订单、没有退款（T029/T030/T026）。
+
+### T019 验收证据
+
+- **Java `mvnw.cmd verify` → BUILD SUCCESS**（本机实测 2026-09-22 17:53：Tests run: **75**, Failures: 0, Errors: 0, Skipped: 0；Spotless **73 files clean / 0 needs changes**；SpotBugs **BugInstance size 0** / Error size 0；JaCoCo 分析 **50 classes**）。新增 `OrderLogisticsIntegrationTest` **14 个用例全过**，每类逐个复核：AfterSalesRule 2 / AgentRunCheckpointSchema 9 / AuditWriter 7 / ApplicationTests 1 / TraceIdFilter 15 / CoreSchemaMigration 3 / DatabaseGeneratedValues 1 / ErrorEnvelope 6 / FixtureProfileDeclaration 2 / FixtureLoader 5 / JwtSecurity 7 / OrderConcurrencyGuarantees 3 / **OrderLogistics 14** = 75。
+- **交付内容（7 个生产文件 + 1 个测试文件）**：
+  - `order/OrderService.java` —— ownership 的**唯一**判定入口 `requireOwnedOrder`，加上 `getOrder` / `listOwnOrders` 两个客户维度读方法；
+  - `order/OrderSnapshot.java` / `order/OrderSummary.java` —— 契约对齐的 detached 读模型；
+  - `logistics/LogisticsService.java` —— 物流读（先过 ownership 再读运单）；
+  - `logistics/LogisticsStallCalculator.java` —— 物流派生事实的唯一计算处（签收判定 + 停滞时长）；
+  - `logistics/LogisticsSnapshot.java` —— 物流读模型 + `stalledAtLeast` 阈值比较；
+  - `common/time/ClockConfig.java` —— `Clock` 时间 seam。
+- **越权读的 404 concealment 口径已从"实现选择"升级为"契约规则"**（2026-09-22，用户确认）：`commerce-api.openapi.yaml` 升到 `0.2.1`，在 `info.description` 写入全局 **Ownership concealment rule**；`GET /orders/{orderId}/logistics` 补上 `404`（它此前只声明 `403`/`503`，与 concealment 自相矛盾）；两个 read 端点的 `403` 明确为"已认证主体缺少角色/能力权限"→ `ACCESS_DENIED`，**绝不用于 ownership 失败**。`error-contracts.md` 新增同样规则的专章并把 taxonomy 里的 `ORDER_FORBIDDEN` **整条删除**——它描述的正是"订单属于别人"，按 concealment 必须与"不存在"不可区分，因此**没有合法的生产方**；留着一个没有合法出口的错误码，只会诱导后续实现者重新引入存在性泄露。`tool-contracts.md` 的 `get_order` / `get_logistics` 错误码同步（去掉 `ORDER_FORBIDDEN`，补 `ACCESS_DENIED` 与 `LOGISTICS_UNAVAILABLE`）。Java `ErrorCode.ORDER_FORBIDDEN` 随之删除。
+- **"对外抹平"不等于"内部失明"（可执行证据）**：`OrderService` 在判定失败后额外用 `existsById` 区分两种情况，只对 **cross-owner** 写结构化安全审计（`commerce.audit_logs`，`action=ORDER_ACCESS_DENIED`，`metadata.reason=CROSS_OWNER`、`concealedAs=ORDER_NOT_FOUND`），普通 404 **不写**（否则一次 id 扫描就能刷爆审计表，把真正的越权信号淹掉）。两条失败路径的查询次数与形状相同（`existsById` 两种情况下都执行），因此响应时间也不构成新的区分信号。
+- **审计失败不得改变对外结果**：只有 cross-owner 路径会写审计，若审计异常向上传播，"审计挂了 → 500"就重新变成可探测信号，把刚抹平的区别又泄露出去。请求本来就要被拒绝，丢掉的只是可观测性而非业务动作，因此捕获后记 ERROR 日志，仍抛出统一的 `ORDER_NOT_FOUND`。
+- **SpotBugs 新增 1 条最窄豁免，并且抓到自己的一个静默失效**：`OrderService` 现在注入**具体类** `AuditWriter`（此前注入的都是仓储接口），触发 `EI_EXPOSE_REP2`；该字段是 private final、仅用于调用 `writeSecurityEvent`、不经公开 API 暴露，属于 exclude 文件开头那段注释描述的可证明误报，因此按类+字段做最窄豁免。**首次加豁免后 SpotBugs 反而报了 4 条**——包括 3 条早就存在的旧豁免。原因是我在 XML 注释里写了 `--`（`do not -- that is`），而 XML 规范禁止注释内出现 `--`，导致整个 filter 文件**非良构**并被 SpotBugs **静默忽略**（不报解析错误）。修正后回到 `BugInstance size 0`。已在 exclude 文件里写下这条"改这个文件时要注意"的警告。
+- **越权读刻意"对外不可区分"（服务层实现）**：不存在 vs 属于别人，统一 `ErrorCode.ORDER_NOT_FOUND`，且两条失败路径的 `getMessage()` **逐字相同**（测试直接断言消息相等）。理由：fixture 的订单 id 形如 `order-001`，可枚举；若对别人的订单回 403，攻击者就能用状态码差异枚举出哪些 orderId 真实存在（存在性预言机）。角色/能力不足走 `ACCESS_DENIED`。
+- **停滞计算的四个口径各有独立用例**（都指向 fail-closed，即"少退款"方向）：
+  1. **基准取更近的一方**：`max(shipments.last_event_at, MAX(logistics_events.occurred_at))`。投影列与事件表之间**没有任何数据库约束防漂移**，取较大值 = 低估停滞时长。测试构造了两个相反方向的漂移（100h/30h 与 30h/100h），结论都必须是 30h。
+  2. **没有物流事实就不编造**：两个来源都空 → `lastMeaningfulEventAt`/`stalledHours` 都是 `null`，**不回落**到 `orders.shipped_at`。`null` 表示"不知道"，与"停滞 0 小时"是两件事；`stalledAtLeast(48)` 在 `null` 上返回 `false`。
+  3. **向下取整**：47h59m → 47h，不达 48h 阈值；整 48h 才算达到（`>=` 取等号）。
+  4. **已签收 ⇒ 不存在停滞**：`signed` 由 `signed_at != null || status = DELIVERED` 派生（两来源任一成立即算已签收，冲突时偏向"已签收"），已签收时 `stalledHours = null`——否则 US2 的退货路径会被 US1 的退款路径抢走。
+- **时间戳落在未来时夹到 0，但原始事实照实暴露**：`lastMeaningfulEventAt` 仍然返回那个未来时间戳，异常看得见；只是不把它算成停滞。既不谎报，也不销毁信息。
+- **"确定性计算"由类型保证，不靠约定**：`LogisticsStallCalculator` 从注入的 `Clock` 取"现在"，生产是 `Clock.systemUTC()`，测试用 `@TestConfiguration` + `@Primary` 覆盖成 `Clock.fixed`。因此测试能对停滞时长做**精确**断言（120h / 30h / 47h / 48h），而不是"应该大于 48 吧"这种随时间腐烂的模糊断言。
+- **订单列表的 ownership 是集合性质**：测试断言 `listOwnOrders(OWNER)` 的 id 列表**恰好等于** `["t019-order-mine"]`，而不是"不含某人"这种否定式写法。
+- **读模型而不是实体**：`open-in-view: false` + `Order.items` 是 LAZY ⇒ 一旦把实体交给 controller，`getItems()` 就会 `LazyInitializationException`。这是 Service 必须返回 detached snapshot 的真实原因。
+- **订单存在但没有运单时抛 503 `LOGISTICS_UNAVAILABLE`（retryable）**，不返回字段全空的快照：V1 的"查不到运单"与"这个订单还没发货"在数据上无法区分，让 Agent 拿到空快照自己猜会违反 US5（证据不足必须转人工，不得凭推理继续退款）。
+- **本 T 发现的契约不一致已闭环**（原状态：`GET /orders/{orderId}` 同时声明 `403`+`404`，而 `GET /orders/{orderId}/logistics` 只声明 `403`/`503`、没有 `404`）。用户 2026-09-22 拍板采用 **404 concealment 口径统一契约**，处置见上面两条。教训：契约在实现前写成，出现自相矛盾时实现者应当**把它作为发现报出来**，而不是静默挑一个继续往下写。
+- **刻意保留的一处不等价（有理由，不是遗漏）**：Agent 侧 `POST/GET /runs/*` 对 cross-owner run 仍返回 **403 `RUN_FORBIDDEN`**（T018 已验收的口径），与订单侧 404 concealment **故意不同**。判据是**标识符的可猜性**而不是端点形状：`run_id` 是随机 UUIDv4，确认"这个 id 存在"给不了攻击者可枚举的东西；`orderId` 形如 `order-001`，短且可猜。concealment 是有成本的取舍（可诊断性换抗枚举），不是教条。`runs.py` 的过时注释（引用已删除的 `ORDER_FORBIDDEN`）已改写为这条理由；Python 四条门禁复跑全绿（`ruff check` All checks passed / `ruff format --check` **39 files** / `mypy app` **Success 24 files** / `pytest -q` **234 passed, 13 skipped**）。
+- **本 T 的层位置与未覆盖项（不夸大范围）**：T019 只做 Java **service 层读面**，没有 HTTP controller、没有 `Idempotency-Key`、没有任何写操作、没有退款。HTTP 状态码装配与角色约束属 T023/T024；eligibility 属 T025；退款属 T026/T027。
+- **已知 tradeoff（写明白而不是藏起来）**：`OrderService.requireOwnedOrder` 返回 `Order` 实体，因此 `Order` 跨包对 `logistics` 可见。V1 接受，因为调用方只读；一旦有调用方基于这个返回值写订单，写路径必须自己重新校验"当下仍然合法"，不能复用"读的时候合法"这个结论。
+- **环境说明（非代码问题）**：Testcontainers 需要工作区之外的 Docker 命名管道，受限沙箱下**首次** `mvnw verify` 以 `Previous attempts to find a Docker environment failed` 失败（56 errors，**包含 T013/T014/T016–T018 的既有测试**，因此可判定为环境而非代码）；提权重跑同一条命令即 BUILD SUCCESS。
 
 ## 维护规则
 - 每完成一个 Gate 更新本文件；不要每天机械改百分比。
