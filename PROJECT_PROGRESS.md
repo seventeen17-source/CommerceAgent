@@ -199,6 +199,8 @@
 
 ### T019 验收证据
 
+> **Post-review hardening（当前提交）**：在最初 75-test 通过后，又补了 `PAID + no shipment` 的 non-retryable 回归用例并收紧相关契约。下面的 **75 / OrderLogistics 14** 是该补丁之前的真实本机基线；新提交尚未重新本地执行 `mvnw.cmd verify`，因此这里不把总数擅自改成 76，也不把新增用例写成“已通过”。
+
 - **Java `mvnw.cmd verify` → BUILD SUCCESS**（本机实测 2026-09-22 17:53：Tests run: **75**, Failures: 0, Errors: 0, Skipped: 0；Spotless **73 files clean / 0 needs changes**；SpotBugs **BugInstance size 0** / Error size 0；JaCoCo 分析 **50 classes**）。新增 `OrderLogisticsIntegrationTest` **14 个用例全过**，每类逐个复核：AfterSalesRule 2 / AgentRunCheckpointSchema 9 / AuditWriter 7 / ApplicationTests 1 / TraceIdFilter 15 / CoreSchemaMigration 3 / DatabaseGeneratedValues 1 / ErrorEnvelope 6 / FixtureProfileDeclaration 2 / FixtureLoader 5 / JwtSecurity 7 / OrderConcurrencyGuarantees 3 / **OrderLogistics 14** = 75。
 - **交付内容（7 个生产文件 + 1 个测试文件）**：
   - `order/OrderService.java` —— ownership 的**唯一**判定入口 `requireOwnedOrder`，加上 `getOrder` / `listOwnOrders` 两个客户维度读方法；
@@ -208,7 +210,7 @@
   - `logistics/LogisticsSnapshot.java` —— 物流读模型 + `stalledAtLeast` 阈值比较；
   - `common/time/ClockConfig.java` —— `Clock` 时间 seam。
 - **越权读的 404 concealment 口径已从"实现选择"升级为"契约规则"**（2026-09-22，用户确认）：`commerce-api.openapi.yaml` 升到 `0.2.1`，在 `info.description` 写入全局 **Ownership concealment rule**；`GET /orders/{orderId}/logistics` 补上 `404`（它此前只声明 `403`/`503`，与 concealment 自相矛盾）；两个 read 端点的 `403` 明确为"已认证主体缺少角色/能力权限"→ `ACCESS_DENIED`，**绝不用于 ownership 失败**。`error-contracts.md` 新增同样规则的专章并把 taxonomy 里的 `ORDER_FORBIDDEN` **整条删除**——它描述的正是"订单属于别人"，按 concealment 必须与"不存在"不可区分，因此**没有合法的生产方**；留着一个没有合法出口的错误码，只会诱导后续实现者重新引入存在性泄露。`tool-contracts.md` 的 `get_order` / `get_logistics` 错误码同步（去掉 `ORDER_FORBIDDEN`，补 `ACCESS_DENIED` 与 `LOGISTICS_UNAVAILABLE`）。Java `ErrorCode.ORDER_FORBIDDEN` 随之删除。
-- **"对外抹平"不等于"内部失明"（可执行证据）**：`OrderService` 在判定失败后额外用 `existsById` 区分两种情况，只对 **cross-owner** 写结构化安全审计（`commerce.audit_logs`，`action=ORDER_ACCESS_DENIED`，`metadata.reason=CROSS_OWNER`、`concealedAs=ORDER_NOT_FOUND`），普通 404 **不写**（否则一次 id 扫描就能刷爆审计表，把真正的越权信号淹掉）。两条失败路径的查询次数与形状相同（`existsById` 两种情况下都执行），因此响应时间也不构成新的区分信号。
+- **"对外抹平"不等于"内部失明"（可执行证据）**：`OrderService` 在判定失败后额外用 `existsById` 区分两种情况，只对 **cross-owner** 写结构化安全审计（`commerce.audit_logs`，`action=ORDER_ACCESS_DENIED`，`metadata.reason=CROSS_OWNER`、`concealedAs=ORDER_NOT_FOUND`），普通 404 **不写**（否则一次 id 扫描就能刷爆审计表，把真正的越权信号淹掉）。两条失败路径都会执行 `existsById`，避免最粗粒度的查询数量差异；但 cross-owner 还会额外写一条 `REQUIRES_NEW` 安全审计，因此这里只承诺 **status / errorCode / message concealment**，**不宣称 constant-time**，也不把“无时序侧信道”写成已证明结论。
 - **审计失败不得改变对外结果**：只有 cross-owner 路径会写审计，若审计异常向上传播，"审计挂了 → 500"就重新变成可探测信号，把刚抹平的区别又泄露出去。请求本来就要被拒绝，丢掉的只是可观测性而非业务动作，因此捕获后记 ERROR 日志，仍抛出统一的 `ORDER_NOT_FOUND`。
 - **SpotBugs 新增 1 条最窄豁免，并且抓到自己的一个静默失效**：`OrderService` 现在注入**具体类** `AuditWriter`（此前注入的都是仓储接口），触发 `EI_EXPOSE_REP2`；该字段是 private final、仅用于调用 `writeSecurityEvent`、不经公开 API 暴露，属于 exclude 文件开头那段注释描述的可证明误报，因此按类+字段做最窄豁免。**首次加豁免后 SpotBugs 反而报了 4 条**——包括 3 条早就存在的旧豁免。原因是我在 XML 注释里写了 `--`（`do not -- that is`），而 XML 规范禁止注释内出现 `--`，导致整个 filter 文件**非良构**并被 SpotBugs **静默忽略**（不报解析错误）。修正后回到 `BugInstance size 0`。已在 exclude 文件里写下这条"改这个文件时要注意"的警告。
 - **越权读刻意"对外不可区分"（服务层实现）**：不存在 vs 属于别人，统一 `ErrorCode.ORDER_NOT_FOUND`，且两条失败路径的 `getMessage()` **逐字相同**（测试直接断言消息相等）。理由：fixture 的订单 id 形如 `order-001`，可枚举；若对别人的订单回 403，攻击者就能用状态码差异枚举出哪些 orderId 真实存在（存在性预言机）。角色/能力不足走 `ACCESS_DENIED`。
@@ -221,10 +223,10 @@
 - **"确定性计算"由类型保证，不靠约定**：`LogisticsStallCalculator` 从注入的 `Clock` 取"现在"，生产是 `Clock.systemUTC()`，测试用 `@TestConfiguration` + `@Primary` 覆盖成 `Clock.fixed`。因此测试能对停滞时长做**精确**断言（120h / 30h / 47h / 48h），而不是"应该大于 48 吧"这种随时间腐烂的模糊断言。
 - **订单列表的 ownership 是集合性质**：测试断言 `listOwnOrders(OWNER)` 的 id 列表**恰好等于** `["t019-order-mine"]`，而不是"不含某人"这种否定式写法。
 - **读模型而不是实体**：`open-in-view: false` + `Order.items` 是 LAZY ⇒ 一旦把实体交给 controller，`getItems()` 就会 `LazyInitializationException`。这是 Service 必须返回 detached snapshot 的真实原因。
-- **订单存在但没有运单时抛 503 `LOGISTICS_UNAVAILABLE`（retryable）**，不返回字段全空的快照：V1 的"查不到运单"与"这个订单还没发货"在数据上无法区分，让 Agent 拿到空快照自己猜会违反 US5（证据不足必须转人工，不得凭推理继续退款）。
+- **no-shipment 按订单状态区分，不再一律报 retryable 503**：`PAID + no shipment` 表示尚未进入物流生命周期，返回 non-retryable `INVALID_ORDER_STATE`；`SHIPPED + no shipment` 才表示按当前业务状态本应存在权威物流记录却缺失，返回 retryable `LOGISTICS_UNAVAILABLE`。两种情况都不返回空快照让 Agent 猜。
 - **本 T 发现的契约不一致已闭环**（原状态：`GET /orders/{orderId}` 同时声明 `403`+`404`，而 `GET /orders/{orderId}/logistics` 只声明 `403`/`503`、没有 `404`）。用户 2026-09-22 拍板采用 **404 concealment 口径统一契约**，处置见上面两条。教训：契约在实现前写成，出现自相矛盾时实现者应当**把它作为发现报出来**，而不是静默挑一个继续往下写。
 - **刻意保留的一处不等价（有理由，不是遗漏）**：Agent 侧 `POST/GET /runs/*` 对 cross-owner run 仍返回 **403 `RUN_FORBIDDEN`**（T018 已验收的口径），与订单侧 404 concealment **故意不同**。判据是**标识符的可猜性**而不是端点形状：`run_id` 是随机 UUIDv4，确认"这个 id 存在"给不了攻击者可枚举的东西；`orderId` 形如 `order-001`，短且可猜。concealment 是有成本的取舍（可诊断性换抗枚举），不是教条。`runs.py` 的过时注释（引用已删除的 `ORDER_FORBIDDEN`）已改写为这条理由；Python 四条门禁复跑全绿（`ruff check` All checks passed / `ruff format --check` **39 files** / `mypy app` **Success 24 files** / `pytest -q` **234 passed, 13 skipped**）。
-- **本 T 的层位置与未覆盖项（不夸大范围）**：T019 只做 Java **service 层读面**，没有 HTTP controller、没有 `Idempotency-Key`、没有任何写操作、没有退款。HTTP 状态码装配与角色约束属 T023/T024；eligibility 属 T025；退款属 T026/T027。
+- **本 T 的层位置与未覆盖项（不夸大范围）**：T019 为了让集成测试真正 red→green，已经提前落地了 T023/T024 的 **service read-side**（`OrderService`、`LogisticsService` 与 stall calculator）；T023/T024 仍未完成，因为 **Controller / HTTP assembly / endpoint role enforcement** 还没有实现。T023/T024 后续必须复用这些 service，而不是重写一套。T019 没有 `Idempotency-Key`、没有任何写操作、没有退款；eligibility 属 T025，退款属 T026/T027。
 - **已知 tradeoff（写明白而不是藏起来）**：`OrderService.requireOwnedOrder` 返回 `Order` 实体，因此 `Order` 跨包对 `logistics` 可见。V1 接受，因为调用方只读；一旦有调用方基于这个返回值写订单，写路径必须自己重新校验"当下仍然合法"，不能复用"读的时候合法"这个结论。
 - **环境说明（非代码问题）**：Testcontainers 需要工作区之外的 Docker 命名管道，受限沙箱下**首次** `mvnw verify` 以 `Previous attempts to find a Docker environment failed` 失败（56 errors，**包含 T013/T014/T016–T018 的既有测试**，因此可判定为环境而非代码）；提权重跑同一条命令即 BUILD SUCCESS。
 

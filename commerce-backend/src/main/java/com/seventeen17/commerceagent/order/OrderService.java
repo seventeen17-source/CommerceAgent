@@ -102,9 +102,10 @@ public class OrderService {
      * 把"查不到"进一步区分为"订单不存在"与"订单属于别人"，并把后者写成安全审计事件。
      *
      * <p><b>为什么用 {@code existsById} 而不是"按 id 查出订单再比 owner"：</b>前者只做一次存在性索引查询，不会把
-     * 订单实体带进内存；更重要的是 {@code existsById} 在本方法的**两种失败情况下都会执行**（不存在返回 false、
-     * cross-owner 返回 true），因此两条失败路径的查询次数与查询形状相同，攻击者无法靠响应时间差异把"不存在"与
-     * "不是你的"重新区分开。
+     * 订单实体带进内存；{@code existsById} 也会在本方法的**两种失败情况下都执行**（不存在返回 false、
+     * cross-owner 返回 true），避免最粗粒度的"一条路径少一次查询"差异。这里的安全承诺只到
+     * status/errorCode/message concealment 为止，<b>不宣称 constant-time</b>：cross-owner 分支随后还会额外写一条
+     * {@code REQUIRES_NEW} 安全审计，因此完整请求仍可能存在时序差异。
      *
      * <p><b>为什么只给 cross-owner 写审计：</b>普通 404（调用方打错 id、或 Agent 猜了一个不存在的单号）不是安全
      * 事件。为它写审计只会让一次 id 扫描把审计表刷爆，把真正值得追查的信号淹掉。

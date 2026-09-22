@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.1
+  version: 0.2.2
   description: |
     ## Ownership concealment rule (T019)
 
@@ -103,12 +103,18 @@ paths:
             ORDER_NOT_FOUND, returned identically for "order does not exist" and "order
             belongs to another user". Added in T019: this endpoint previously declared no
             404 at all, which contradicted the concealment rule.
+        '409':
+          $ref: '#/components/responses/Error'
+          description: |
+            INVALID_ORDER_STATE: the order exists and is accessible but has not entered the
+            shipment lifecycle yet (for example, PAID with no Shipment). This is a business
+            state, not a transient dependency failure, so consumers must not retry it as 503.
         '503':
           $ref: '#/components/responses/Error'
           description: |
-            LOGISTICS_UNAVAILABLE: the order exists and is accessible, but no authoritative
-            logistics record is available. Consumers must not infer a logistics state from
-            its absence (US5 requires escalating instead of guessing).
+            LOGISTICS_UNAVAILABLE: the order state indicates that authoritative logistics
+            should exist, but no authoritative shipment record is available. Consumers may
+            retry only within their bounded retry budget and must not invent logistics state.
   /after-sales/eligibility:
     post:
       summary: Deterministically evaluate refund/return eligibility

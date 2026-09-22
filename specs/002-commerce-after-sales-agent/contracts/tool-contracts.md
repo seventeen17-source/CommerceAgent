@@ -74,8 +74,9 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 - last meaningful event/time
 - deterministic anomaly projection（如有）
 
-错误：`ORDER_NOT_FOUND`（同上，与 cross-owner 不可区分）、`ACCESS_DENIED`、`LOGISTICS_UNAVAILABLE`（订单存在且
-可访问，但没有权威运单记录——**不得**据此推断物流状态）。
+错误：`ORDER_NOT_FOUND`（同上，与 cross-owner 不可区分）、`ACCESS_DENIED`、`INVALID_ORDER_STATE`
+（例如 `PAID + no shipment`：尚未进入物流生命周期，non-retryable）、`LOGISTICS_UNAVAILABLE`（订单已进入
+应有物流记录的状态，但权威运单缺失；只允许在有限预算内重试，且**不得**据此推断物流状态）。
 
 规则：依赖不可用时不得编造 anomaly state。
 

@@ -70,7 +70,8 @@ import org.springframework.test.context.ActiveProfiles;
  *   <li>{@link #missingLogisticsEvidenceYieldsUnknownInsteadOfZeroHours()}：没有证据时返回 null 而不是 0；
  *   <li>{@link #stallThresholdComparisonTruncatesDownwards()}：47h59m 不算达标，整 48h 才算；
  *   <li>{@link #signedLogisticsHasNoStallEvenWhenTheLastEventIsOld()}：已签收订单不存在"物流停滞"；
- *   <li>{@link #orderWithoutShipmentRecordFailsClosedInsteadOfInventingLogistics()}：无运单时明确 503，不返回空快照。
+ *   <li>{@link #paidOrderWithoutShipmentIsNotReportedAsRetryableLogisticsFailure()}：PAID + 无运单是业务状态，不是基础设施故障；
+ *   <li>{@link #orderWithoutShipmentRecordFailsClosedInsteadOfInventingLogistics()}：SHIPPED + 无运单时明确 503，不返回空快照。
  * </ul>
  *
  * <p>测试**不标注** {@code @Transactional}（与 T009 的并发测试一致）：每个仓储调用都必须跑在自己的事务里，否则
@@ -291,6 +292,20 @@ class OrderLogisticsIntegrationTest {
         LogisticsSnapshot exactly = logisticsService.getLogistics(OWNER, "t019-order-exactly");
         assertEquals(Long.valueOf(48L), exactly.stalledHours());
         assertTrue(exactly.stalledAtLeast(48), "阈值比较取等号：正好 48 小时算达到");
+    }
+
+    @Test
+    void paidOrderWithoutShipmentIsNotReportedAsRetryableLogisticsFailure() {
+        seedUser(OWNER_ID);
+        seedOrder("t019-order-paid-no-shipment", OWNER_ID, OrderStatus.PAID, 1);
+
+        BusinessException failure = assertThrows(
+                BusinessException.class, () -> logisticsService.getLogistics(OWNER, "t019-order-paid-no-shipment"));
+
+        assertEquals(ErrorCode.INVALID_ORDER_STATE, failure.getErrorCode());
+        assertFalse(
+                failure.getErrorCode().retryable(),
+                "PAID + no shipment means 'not shipped yet', not a transient logistics dependency failure");
     }
 
     @Test
