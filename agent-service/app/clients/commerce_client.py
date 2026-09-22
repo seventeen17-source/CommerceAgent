@@ -1,13 +1,12 @@
-"""Typed async client for the Java business API (read / evaluation surface).
+"""Typed async client for the Java business API (read / evaluation / write surface).
 
-T016 scope: ``GET /me``, ``GET /orders``, ``GET /orders/{orderId}``,
-``GET /orders/{orderId}/logistics`` and ``POST /after-sales/eligibility``. The write surface
-(``/refunds``, ``/returns``, ``/approvals``) belongs to T026/T038: a write needs the idempotency-key
-and write-after-read verification machinery, and adding it here early would invite exactly the blind
-retry that ``errors.py`` exists to prevent.
+T016 delivered the read/evaluation surface (``GET /me``, ``GET /orders``,
+``GET /orders/{orderId}``, ``GET /orders/{orderId}/logistics``,
+``POST /after-sales/eligibility``). T022 adds the first two write-surface calls: ``POST /refunds``
+and ``GET /orders/{orderId}/after-sales``.
 
-Five rules this module enforces once, instead of once per tool
----------------------------------------------------------------
+Six rules this module enforces once, instead of once per tool
+--------------------------------------------------------------
 1. **Forward a credential, never assert an identity.** Every call carries the caller's Bearer token
    (:class:`~app.clients.auth.AuthContext`); ``userId``/``role`` come back from Java. There is no
    ``user_id`` parameter here to get wrong.
@@ -21,6 +20,11 @@ Five rules this module enforces once, instead of once per tool
 5. **Ambient configuration cannot reroute the call.** The client is built with ``trust_env=False``,
    so no environment or OS-level proxy can silently put itself between the Agent and the one service
    allowed to state business facts -- and receive the forwarded Bearer token on the way.
+6. **A state-changing call says so in its type.** ``request_is_safe=False`` on
+   :meth:`CommerceClient.create_refund` is what makes a timeout there an *unknown outcome*
+   instead of a free retry. Deriving that from ``method == "POST"`` would be wrong twice over: it
+   would strip the retry budget from ``POST /after-sales/eligibility`` (side-effect free) and it
+   would teach the next reader that an HTTP verb decides authorization.
 
 Java analogy: a singleton ``RestClient`` bean -- one connection pool, lifecycle owned by the
 application (here the FastAPI lifespan, T018), ``Authorization`` set per exchange rather than as a
@@ -49,6 +53,8 @@ from app.clients.errors import (
     UnsafeRequestParameterError,
 )
 from app.clients.models import (
+    AfterSalesStatus,
+    CreateRefundRequest,
     CurrentPrincipal,
     EligibilityDecision,
     EligibilityRequest,
@@ -56,6 +62,7 @@ from app.clients.models import (
     LogisticsSnapshot,
     OrderSnapshot,
     OrderSummary,
+    RefundResult,
 )
 
 if TYPE_CHECKING:
@@ -69,6 +76,9 @@ logger = logging.getLogger(__name__)
 #: to accept an inbound id only after format/length validation, and to generate one otherwise.
 TRACE_ID_HEADER = "X-Trace-Id"
 
+#: Idempotency header, required by the contract on ``POST /refunds`` (and ``POST /returns``).
+IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
+
 #: ``commerce_api_base_url`` is the service root; the contract's server URL adds this prefix.
 _API_PREFIX = "/api/v1"
 
@@ -79,6 +89,27 @@ _TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{8,128}$")
 #: stay inside a charset that cannot express ``/``, ``?``, ``#`` or whitespace. 64 matches
 #: ``commerce.orders.id``; ``order-001`` and ``demo-order-stalled-001`` both fit.
 _PATH_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+#: The idempotency-key charset Java accepts (``Idempotency-Key`` is 8-128 of ``[A-Za-z0-9_-]``).
+#: Mirrored here so a malformed key fails *before* the money endpoint is called. Dots are excluded
+#: on the Java side precisely so that a JWT-shaped string cannot be stored as a key; keeping the
+#: same charset here means that mistake is caught locally instead of becoming a 400 mid-run.
+_IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+
+
+def _safe_idempotency_key(value: str) -> str:
+    """Reject an idempotency key this process must not send.
+
+    The key identifies a money write *and* is persisted
+    (``commerce.refund_requests.idempotency_key``, plus the Agent's own state). A key that Java
+    would reject, or that could not be safely logged, is our bug and must fail before the request
+    leaves the process.
+    """
+    if _IDEMPOTENCY_KEY_PATTERN.fullmatch(value) is None:
+        raise UnsafeRequestParameterError(
+            field="idempotency_key", reason="must be 8-128 characters of [A-Za-z0-9_-]"
+        )
+    return value
 
 
 def _safe_path_segment(value: str, *, field: str) -> str:
@@ -298,6 +329,56 @@ class CommerceClient:
             json_body=request.model_dump(by_alias=True, mode="json"),
         )
 
+    # ---- write surface ---------------------------------------------------------------------
+
+    async def create_refund(
+        self,
+        auth: AuthContext,
+        *,
+        idempotency_key: str,
+        request: CreateRefundRequest,
+    ) -> CommerceCall[RefundResult]:
+        """``POST /refunds`` -- create (or replay) exactly one logical refund.
+
+        ``request_is_safe=False`` is the whole point of this method's type: if no answer arrives,
+        Java may or may not have committed, so **the caller must not simply call this again**. The
+        authority layer for that decision is :mod:`app.agent.execute_write`, which reads
+        ``GET /orders/{orderId}/after-sales`` first.
+
+        The idempotency key travels as a header, not in the body, because it identifies *this
+        logical request* rather than the business payload: two attempts at one refund share the
+        key, and Java's conflict fingerprint deliberately excludes it. The key is shape-checked
+        here so a malformed one never reaches the money endpoint -- nothing is sent at all.
+        """
+        key = _safe_idempotency_key(idempotency_key)
+        return await self._request(
+            "POST",
+            "/refunds",
+            auth,
+            response_model=RefundResult,
+            request_is_safe=False,
+            json_body=request.model_dump(by_alias=True, mode="json"),
+            extra_headers={IDEMPOTENCY_KEY_HEADER: key},
+        )
+
+    async def get_after_sales_status(
+        self, auth: AuthContext, order_id: str
+    ) -> CommerceCall[AfterSalesStatus]:
+        """``GET /orders/{orderId}/after-sales`` -- did the write actually commit?
+
+        This is the read half of unknown-outcome recovery, which is why it exists in the same change
+        as the write. An **empty** ``refunds`` list is a positive statement ("no refund exists"),
+        and that is the only thing that makes a same-key retry of a timed-out write safe.
+        """
+        segment = _safe_path_segment(order_id, field="order_id")
+        return await self._request(
+            "GET",
+            f"/orders/{segment}/after-sales",
+            auth,
+            response_model=AfterSalesStatus,
+            request_is_safe=True,
+        )
+
     # ---- transport -------------------------------------------------------------------------
 
     async def _request[T: BaseModel](
@@ -310,11 +391,16 @@ class CommerceClient:
         request_is_safe: bool,
         json_body: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> CommerceCall[T]:
         """Send one call and validate a single JSON object response against ``response_model``.
 
         ``response_model`` is a *type* parameter used at runtime, which is why it is keyword-only
         rather than inferred: every endpoint names its contract explicitly at the call site.
+
+        ``extra_headers`` exists for contract-mandated headers such as ``Idempotency-Key``. It is a
+        narrow channel: the caller cannot override ``Authorization`` or the correlation id through
+        it (see :meth:`_send`).
         """
         raw = await self._send(
             method,
@@ -323,6 +409,7 @@ class CommerceClient:
             request_is_safe=request_is_safe,
             json_body=json_body,
             params=params,
+            extra_headers=extra_headers,
         )
         return CommerceCall(
             value=_parse(raw.payload, response_model, path=path, request_is_safe=request_is_safe),
@@ -373,6 +460,7 @@ class CommerceClient:
         request_is_safe: bool,
         json_body: dict[str, Any] | None,
         params: dict[str, str] | None,
+        extra_headers: dict[str, str] | None = None,
     ) -> _RawResponse:
         """Perform one HTTP call and normalise every way it can fail.
 
@@ -389,6 +477,18 @@ class CommerceClient:
             "Authorization": f"Bearer {auth.token.get_secret_value()}",
             TRACE_ID_HEADER: sent_trace_id,
         }
+        if extra_headers:
+            # Contract headers only. Authorization and the correlation id are set above and must not
+            # be replaceable by a caller: the credential comes from the authenticated context, and a
+            # trace id accepted from outside would let model output choose the id we persist.
+            forbidden = {"authorization", TRACE_ID_HEADER.lower()} & {
+                name.lower() for name in extra_headers
+            }
+            if forbidden:
+                raise UnsafeRequestParameterError(
+                    field="extra_headers", reason="may not override authenticated headers"
+                )
+            headers.update(extra_headers)
         try:
             response = await self._http.request(
                 method, path, headers=headers, json=json_body, params=params

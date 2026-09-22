@@ -45,6 +45,7 @@ from app.agent.state import (
     ToolHistoryEntry,
     VerificationOutcome,
     VerificationStatus,
+    WriteIntent,
     WriteOutcome,
     WriteStatus,
 )
@@ -124,6 +125,14 @@ def build_populated_state() -> AgentState:
             action="CREATE_REFUND_REQUEST",
             resource_id="refund-001",
         ),
+        # T022: the write-ahead intent is a text-bearing field, so the probe matrix must see it
+        # filled in rather than left at its default -- an empty field gives the mutation nothing
+        # to inject into.
+        write_intent=WriteIntent(
+            action="CREATE_REFUND_REQUEST",
+            target_id="order-001",
+            idempotency_key="0123456789abcdef0123456789abcdef",
+        ),
         verification=VerificationOutcome(
             status=VerificationStatus.VERIFIED_SUCCESS,
             resource_id="refund-001",
@@ -144,9 +153,18 @@ _NON_TEXT_FIELDS = frozenset(
 
 
 def _carries_text(annotation: Any) -> bool:
-    """Whether a credential could be represented anywhere inside this annotation."""
+    """Whether a credential could be represented anywhere inside this annotation.
+
+    The recursion into nested models matters more than it looks. Without it, a field typed
+    ``SomeModel | None`` was classified as "cannot carry text" (its union arguments are a model
+    class and ``NoneType``, neither of which *is* ``str``), so it silently received no probe at
+    all -- the collection guard could not see the hole it was supposed to close. Found in T022 when
+    ``write_intent`` was added and arrived with zero probes.
+    """
     if annotation is str:
         return True
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return any(_carries_text(field.annotation) for field in annotation.model_fields.values())
     return any(_carries_text(arg) for arg in get_args(annotation))
 
 

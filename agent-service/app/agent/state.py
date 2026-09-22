@@ -23,6 +23,9 @@ Persistence boundary (T017) -- this object is deliberately NOT the `agent.agent_
   both places: the row column is the *queryable projection*, this object (serialized into
   `state_json`) is the authoritative copy of the *runtime* state. T017 owns writing both in one
   transaction and must not let the two drift.
+- `write_intent` (T022) is state-only on purpose: it is a durable intent, not a queryable run
+  property. Persisting it is what makes a resumed run reuse the same idempotency key instead of
+  creating a second refund; see `app/agent/execute_write.py`.
 - Being stored here still grants nothing: `AgentRun.status` is not business authorization.
 
 Cross-service value policy (why some fields are `str`, not `StrEnum`):
@@ -192,6 +195,35 @@ class WriteOutcome(BaseModel):
     error_code: str | None = Field(default=None, max_length=100)
 
 
+class WriteIntent(BaseModel):
+    """What we are about to ask the backend to change, recorded **before** the request is sent.
+
+    Why this is separate from :class:`WriteOutcome` (T022)
+    -----------------------------------------------------
+    ``WriteOutcome`` answers "what happened". This answers "what did we ask for, under which
+    idempotency key". A resumed run needs the second question answered, and the reason is money: if
+    the key that identified an in-flight refund is lost, the retry is a *new* logical write and Java
+    will happily create a second refund. Persisting the intent first is what turns "at-least-once"
+    delivery into "at most one" business effect.
+
+    It is also the one place where "we never sent it" (no intent) and "we sent it and do not know
+    the outcome" (intent present, outcome ``PENDING``/``UNKNOWN``) can be told apart. Merging intent
+    into ``WriteOutcome`` would make those two states indistinguishable, and the second one is
+    exactly the one that must not be blind-retried.
+
+    ``idempotency_key`` is not a credential: it is a client-generated opaque string, safe to persist
+    and safe to log. The charset rule that Java enforces lives at the send boundary
+    (``app/clients/commerce_client.py``), which is deliberately the only copy of it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: str = Field(min_length=1, max_length=100)
+    #: The business object the action targets (for a refund: the order id).
+    target_id: Identifier
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=_IDENTIFIER_PATTERN)
+
+
 class VerificationOutcome(BaseModel):
     """Authoritative verification performed after a write attempt."""
 
@@ -237,6 +269,10 @@ class AgentState(BaseModel):
     max_retries: int = Field(default=2, ge=0)
 
     write: WriteOutcome = Field(default_factory=WriteOutcome)
+    # Durable write-ahead intent (T022): persisted before the request is sent, so a resumed run
+    # retries the *same* logical write instead of creating a second one. Optional because a run that
+    # never attempted a write has no intent; `None` here means "nothing was ever sent".
+    write_intent: WriteIntent | None = None
     verification: VerificationOutcome = Field(default_factory=VerificationOutcome)
     status: RunStatus = RunStatus.RUNNING
 

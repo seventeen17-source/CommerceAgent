@@ -36,6 +36,8 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
+    "AfterSalesStatus",
+    "CreateRefundRequest",
     "CurrentPrincipal",
     "EligibilityDecision",
     "EligibilityRequest",
@@ -44,6 +46,7 @@ __all__ = [
     "OrderItem",
     "OrderSnapshot",
     "OrderSummary",
+    "RefundResult",
 ]
 
 # Responses come from Java: tolerate additive fields rather than failing the call.
@@ -163,6 +166,59 @@ class EligibilityDecision(BaseModel):
         if (self.rule_code is None) != (self.rule_version is None):
             raise ValueError("ruleCode and ruleVersion are cited together or not at all")
         return self
+
+
+class CreateRefundRequest(BaseModel):
+    """``POST /refunds`` request body (T022).
+
+    ``extra="forbid"`` for the same reason as ``EligibilityRequest``: this body is built here, so an
+    undeclared field is our bug. Note what is *absent*: there is no ``userId`` (ownership comes from
+    the forwarded credential) and no ``idempotencyKey`` (that travels as the ``Idempotency-Key``
+    header, because it identifies the HTTP request rather than the business payload -- two retries
+    of one logical refund share the header, and Java's fingerprint deliberately excludes it).
+
+    ``requestedAmount`` is optional and, on the Java side, must equal the authorised amount exactly:
+    V1 refunds the whole order and never silently substitutes a different number.
+    """
+
+    model_config = _REQUEST
+
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    reason_code: str = Field(alias="reasonCode", min_length=1, max_length=100)
+    requested_amount: Decimal | None = Field(default=None, alias="requestedAmount")
+    approval_request_id: str | None = Field(default=None, alias="approvalRequestId", max_length=64)
+    run_id: str = Field(alias="runId", min_length=1, max_length=64)
+
+
+class RefundResult(BaseModel):
+    """``RefundResult`` -- the authoritative refund row that exists right now.
+
+    Every field is required by the contract: a response missing ``refundRequestId`` is not a refund
+    we can verify, and the client turns that into a transport error rather than into ``None``.
+    """
+
+    model_config = _RESPONSE
+
+    refund_request_id: str = Field(alias="refundRequestId", min_length=1, max_length=64)
+    # Java-owned forward-compatible status (CREATED / PROCESSING / COMPLETED / REJECTED /
+    # CANCELLED in V1). Open string on purpose: an additive backend value must safe-stop, not fail
+    # to parse (see the module docstring).
+    status: str = Field(min_length=1, max_length=32)
+    accepted_amount: Decimal = Field(alias="acceptedAmount")
+
+
+class AfterSalesStatus(BaseModel):
+    """``GET /orders/{orderId}/after-sales`` -- the authoritative answer to "did it commit?".
+
+    ``returns`` is declared by the contract as an array; V1 has no return path yet, so the field is
+    optional and defaults to empty. Consumers must read an *empty* ``refunds`` list as a positive
+    statement ("no refund exists"), because that is what makes a same-key retry safe.
+    """
+
+    model_config = _RESPONSE
+
+    refunds: list[RefundResult] = Field(default_factory=list)
+    returns: list[dict[str, object]] = Field(default_factory=list)
 
 
 class ErrorEnvelope(BaseModel):
