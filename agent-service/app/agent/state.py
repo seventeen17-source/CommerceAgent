@@ -212,7 +212,9 @@ class WriteIntent(BaseModel):
     exactly the one that must not be blind-retried.
 
     ``idempotency_key`` is not a credential: it is a client-generated opaque string, safe to persist
-    and safe to log. The charset rule that Java enforces lives at the send boundary
+    and safe to log. ``request_fingerprint`` binds that key to the exact logical payload used when
+    the intent was created; a resume with changed inputs fails closed before any request is sent.
+    The key charset rule that Java enforces lives at the send boundary
     (``app/clients/commerce_client.py``), which is deliberately the only copy of it.
     """
 
@@ -222,6 +224,12 @@ class WriteIntent(BaseModel):
     #: The business object the action targets (for a refund: the order id).
     target_id: Identifier
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=_IDENTIFIER_PATTERN)
+    # Stable SHA-256 of the logical request payload. The key alone is not enough: a resumed run
+    # must prove that it is replaying the same business action, not silently attach an old key to
+    # changed reason/amount inputs. Lowercase hex keeps the value portable across checkpoints.
+    request_fingerprint: str = Field(
+        min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
 
 
 class VerificationOutcome(BaseModel):
