@@ -212,8 +212,14 @@ def _http_error_for(exc: Exception, run_id: str) -> HTTPException:
     if isinstance(exc, RunNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RUN_NOT_FOUND")
     if isinstance(exc, RunForbiddenError):
-        # 403 with a code distinct from ORDER_FORBIDDEN (T012): "this run is not yours" and "this
+        # 403 with a code distinct from the order-side failure: "this run is not yours" and "this
         # order is not yours" are different facts, and Eval attributes them to different failures.
+        #
+        # This deliberately diverges from the T019 order concealment rule (cross-owner order reads
+        # collapse into 404 ORDER_NOT_FOUND). The reason is the identifier, not the endpoint shape:
+        # run_id is a random UUIDv4, so confirming "this id exists" gives an attacker nothing they
+        # could enumerate, while order ids are short and guessable (order-001). Concealment is a
+        # cost/benefit call driven by id guessability, not a blanket rule.
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="RUN_FORBIDDEN")
     if isinstance(exc, RunResumeConflictError):
         detail = exc.reason.value if exc.reason.value in _CONFLICT_REASONS else "RESUME_CONFLICT"

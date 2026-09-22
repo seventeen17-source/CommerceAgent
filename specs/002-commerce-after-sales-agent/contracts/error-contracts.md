@@ -6,22 +6,44 @@
 
 ```json
 {
-  "errorCode": "ORDER_FORBIDDEN",
-  "message": "Order is not accessible to the authenticated user",
+  "errorCode": "ORDER_NOT_FOUND",
+  "message": "The order does not exist or is not accessible to the authenticated user",
   "retryable": false,
   "traceId": "...",
   "details": {}
 }
 ```
 
+## Ownership Concealment Rule（T019）
+
+**订单不存在**与**订单属于其他用户**必须产生**完全相同**的响应：相同状态码（`404`）、相同 `errorCode`
+（`ORDER_NOT_FOUND`）、相同 `message`。实现不得为其中一种情况补一句"更友好"或"更精确"的提示。
+
+理由：错误码的字面语义会附带事实。`403` 的字面含义是"资源**存在**，但你无权访问"，因此它顺带回答了"这个
+id 存不存在"。本项目订单 id 形如 `order-001`，是可枚举的；把这两种情况分开，读接口就变成攻击者的**存在性
+预言机**（existence oracle）。
+
+因此：
+
+- `403` 在两个 customer read 端点上**只**表示"已认证主体缺少该端点所需的角色/能力权限"，对应
+  `ACCESS_DENIED`。它**绝不**用于 ownership 失败。
+- `ORDER_FORBIDDEN` **已从本契约删除**：它描述的是"订单属于其他用户"这一场景，而该场景按上述规则必须与
+  "不存在"不可区分，因此它没有合法的生产方。保留一个没有合法出口的错误码，只会诱导后来的实现者重新引入
+  存在性泄露。
+- **对外抹平不等于内部失明**：后端仍必须把**真实原因**写入结构化安全审计
+  （`commerce.audit_logs`，`action = ORDER_ACCESS_DENIED`，`metadata.reason = CROSS_OWNER`）。这不是可选装饰 ——
+  否则"谁在探测别人的订单"将永远无法被回答。
+- 审计写入**失败不得改变对外结果**：若只有 cross-owner 路径会写审计，那么"审计写失败 → 500"会重新变成区分
+  两种失败的信号。请求本来就要被拒绝，此时丢掉的只是可观测性，不是业务动作，因此应记录 ERROR 日志后仍抛出
+  统一的 `ORDER_NOT_FOUND`。
+
 ## Error Taxonomy
 
 | Code | 含义 | 可重试 | Agent 处理 |
 |---|---|---:|---|
 | `AUTH_REQUIRED` | 缺少或无效认证 | 否 | 停止，要求有效 session |
-| `ACCESS_DENIED` | 已认证，但当前角色/权限不允许访问该能力 | 否 | 安全停止，不把角色拒绝误报成订单越权 |
-| `ORDER_NOT_FOUND` | 订单不存在 | 否 | 澄清/重新搜索当前用户订单或停止 |
-| `ORDER_FORBIDDEN` | 订单属于其他用户/拒绝访问 | 否 | 安全停止，不泄露订单细节 |
+| `ACCESS_DENIED` | 已认证，但当前角色/权限不允许访问该能力 | 否 | 安全停止。它**只**表示角色/能力不足，绝不代表资源归属问题 |
+| `ORDER_NOT_FOUND` | 订单不存在**或**不属于当前主体（两者刻意不可区分） | 否 | 澄清/重新搜索当前用户订单或停止；不得据此推断该 id 是否存在 |
 | `AMBIGUOUS_ORDER` | 存在多个合理候选订单 | 否 | 询问澄清，禁止写入 |
 | `INVALID_ORDER_STATE` | 当前订单状态不允许该售后动作 | 否 | 重新评估路径，不强行写入 |
 | `LOGISTICS_UNAVAILABLE` | 物流依赖不可用 | 有限 | 在预算内重试，否则转人工/安全停止 |
@@ -54,3 +76,6 @@
 4. Prompt Text 不能把 forbidden/non-retryable error 变成允许动作。
 5. Error Code 必须进入 `ToolExecution` / `AgentRun` Trace 与 Eval failure taxonomy。
 6. UI 可以本地化 message，但代码分支只依赖稳定 error code / status。
+7. 越权读与"不存在"必须不可区分（见 Ownership Concealment Rule）。Agent 不得把 `ORDER_NOT_FOUND` 解读为
+   "这个 id 有效但不属于我"——它拿不到这个信息，也不应该尝试通过重试或改变措辞来获取它。
+8. 安全拒绝事件必须写结构化审计并保留真实原因；但审计子系统的可用性**不得**影响对外响应的一致性。

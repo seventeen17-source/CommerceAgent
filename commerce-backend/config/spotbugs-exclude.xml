@@ -24,6 +24,20 @@
 		<Field name="repository"/>
 		<Bug pattern="EI_EXPOSE_REP2"/>
 	</Match>
+	<!--
+		T019: OrderService injects the concrete AuditWriter to record concealed cross-owner read
+		denials. Same provable false positive as above: the reference lives in a private final
+		field, is only used to call writeSecurityEvent, and is never returned or exposed.
+
+		Careful when editing this file: a double hyphen inside an XML comment makes the document
+		ill-formed, and SpotBugs then silently ignores the WHOLE filter file instead of failing.
+		That turns every existing suppression back on at once, which looks nothing like the cause.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.order.OrderService"/>
+		<Field name="auditWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
 	<Match>
 		<Class name="com.seventeen17.commerceagent.fixture.FixtureLoader"/>
 		<Field name="jdbcTemplate"/>

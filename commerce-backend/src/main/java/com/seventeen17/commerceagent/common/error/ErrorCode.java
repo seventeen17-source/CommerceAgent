@@ -4,7 +4,6 @@ public enum ErrorCode {
     AUTH_REQUIRED(401, false, "Authentication is required"),
     ACCESS_DENIED(403, false, "Access is denied"),
     ORDER_NOT_FOUND(404, false, "Order was not found"),
-    ORDER_FORBIDDEN(403, false, "Order is not accessible to the authenticated user"),
     AMBIGUOUS_ORDER(409, false, "Multiple orders match the request"),
     INVALID_ORDER_STATE(409, false, "Order state does not allow the requested action"),
     LOGISTICS_UNAVAILABLE(503, true, "Logistics information is temporarily unavailable"),

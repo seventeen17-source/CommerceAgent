@@ -1,7 +1,28 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.0
+  version: 0.2.1
+  description: |
+    ## Ownership concealment rule (T019)
+
+    Order-scoped resources never reveal whether an order exists to a principal that is not
+    allowed to see it.
+
+    * An order that **does not exist** and an order that **belongs to someone else** MUST
+      produce exactly the same response: same status (`404`), same `errorCode`
+      (`ORDER_NOT_FOUND`), same `message`. Implementations must not add a "friendlier" or
+      "more precise" message for one of the two cases.
+    * `403` on these endpoints therefore has exactly one meaning: the authenticated
+      principal lacks the role/capability required by the endpoint (`ACCESS_DENIED`). It is
+      **never** used for ownership failures, because `403` literally asserts that the
+      resource exists — which would turn the endpoint into an existence oracle. This
+      matters concretely here: order ids in this system are enumerable (`order-001`).
+    * `ORDER_FORBIDDEN` was removed from the error taxonomy for the same reason: it
+      described a cross-owner customer read, and a cross-owner read must not be
+      distinguishable from "not found".
+    * Concealing the reason from the caller is **not** the same as losing it. The backend
+      still records the true reason internally as a structured security audit event
+      (`ORDER_ACCESS_DENIED`, `metadata.reason = CROSS_OWNER`).
 servers:
   - url: http://commerce-backend:8080/api/v1
 paths:
@@ -19,7 +40,7 @@ paths:
   /orders:
     get:
       summary: List authenticated user's orders
-      description: Returns only orders owned by the authenticated customer principal.
+      description: Returns only orders owned by the authenticated customer principal. Ownership is a SQL predicate, so another user's order can never appear in the result set.
       parameters:
         - in: query
           name: productQuery
@@ -39,6 +60,7 @@ paths:
   /orders/{orderId}:
     get:
       summary: Get authoritative order snapshot
+      description: Returns the order only when it belongs to the authenticated customer principal. Nonexistent orders and orders owned by another user are deliberately indistinguishable; see the ownership concealment rule in the API description.
       parameters:
         - $ref: '#/components/parameters/OrderId'
       responses:
@@ -48,11 +70,20 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/OrderSnapshot' }
         '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: |
+            ACCESS_DENIED only: the authenticated principal lacks the role/capability this
+            endpoint requires. Never emitted for an ownership failure.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: |
+            ORDER_NOT_FOUND, returned identically for "order does not exist" and "order
+            belongs to another user".
   /orders/{orderId}/logistics:
     get:
       summary: Get authoritative logistics snapshot
+      description: Returns logistics only when the order belongs to the authenticated customer principal. The ownership check runs before any logistics read, because shipment traces are sensitive data in their own right.
       parameters:
         - $ref: '#/components/parameters/OrderId'
       responses:
@@ -62,8 +93,22 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/LogisticsSnapshot' }
         '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '503': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: |
+            ACCESS_DENIED only: role/capability, never ownership.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: |
+            ORDER_NOT_FOUND, returned identically for "order does not exist" and "order
+            belongs to another user". Added in T019: this endpoint previously declared no
+            404 at all, which contradicted the concealment rule.
+        '503':
+          $ref: '#/components/responses/Error'
+          description: |
+            LOGISTICS_UNAVAILABLE: the order exists and is accessible, but no authoritative
+            logistics record is available. Consumers must not infer a logistics state from
+            its absence (US5 requires escalating instead of guessing).
   /after-sales/eligibility:
     post:
       summary: Deterministically evaluate refund/return eligibility

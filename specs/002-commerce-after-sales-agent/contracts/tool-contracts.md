@@ -58,7 +58,9 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 - timestamps
 - current after-sales state
 
-错误：`ORDER_NOT_FOUND`、`ORDER_FORBIDDEN`、`DEPENDENCY_UNAVAILABLE`。
+错误：`ORDER_NOT_FOUND`（订单不存在**或**不属于当前用户，两者刻意不可区分）、`ACCESS_DENIED`（角色/能力不足）、
+`DEPENDENCY_UNAVAILABLE`。注意这里**不使用** `ORDER_FORBIDDEN`：把 cross-owner 读与"不存在"分开会让工具变成
+存在性预言机（见 `error-contracts.md` 的 Ownership Concealment Rule）。
 
 ## T3 `get_logistics`
 
@@ -71,6 +73,9 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 - signed flag
 - last meaningful event/time
 - deterministic anomaly projection（如有）
+
+错误：`ORDER_NOT_FOUND`（同上，与 cross-owner 不可区分）、`ACCESS_DENIED`、`LOGISTICS_UNAVAILABLE`（订单存在且
+可访问，但没有权威运单记录——**不得**据此推断物流状态）。
 
 规则：依赖不可用时不得编造 anomaly state。
 

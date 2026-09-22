@@ -53,7 +53,7 @@
 
 ### 测试
 
-- [ ] T019 [P] [US1] 编写 ownership-scoped order/logistics read 与 stall calculation Java Test：`OrderLogisticsIntegrationTest.java`。
+- [X] T019 [P] [US1] 编写 ownership-scoped order/logistics read 与 stall calculation Java Test：`OrderLogisticsIntegrationTest.java`。
 - [ ] T020 [P] [US1] 编写 deterministic eligibility 与拒绝模型覆盖 amount/eligibility 的 Java Test：`EligibilityServiceTest.java`。
 - [ ] T021 [P] [US1] 编写 refund authorization、amount bound、非法状态、idempotency reuse/conflict、timeout recovery Integration Test：`RefundIntegrationTest.java`。
 - [ ] T022 [P] [US1] 编写 Python stalled-logistics happy path 与 unknown-write recovery test：`agent-service/tests/integration/test_us1_logistics_refund.py`。
