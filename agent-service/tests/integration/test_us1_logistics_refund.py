@@ -41,6 +41,7 @@ from app.agent.execute_write import (
     UNKNOWN_OUTCOME_ERROR_CODE,
     RefundWriteIntent,
     RefundWriteOutcome,
+    WriteIntentConflictError,
     create_refund,
     refund_write_intent,
     write_may_already_have_committed,
@@ -96,6 +97,7 @@ class FakeJava:
         #: "timeout_after_commit", "duplicate", "unavailable".
         self.write_faults: deque[str] = deque()
         self.after_sales_read_fails = False
+        self.after_sales_omit_refunds = False
         #: Every idempotency key the endpoint saw, in order -- proof that a retry reused it.
         self.write_keys: list[str] = []
         self.calls: list[str] = []
@@ -134,7 +136,7 @@ class FakeJava:
             if self.after_sales_read_fails:
                 # A dependency failure on the *read* half: the outcome stays unknown.
                 return self._error(503, "DEPENDENCY_UNAVAILABLE", retryable=True)
-            return httpx.Response(200, json=self._after_sales())
+            return httpx.Response(200, json=self._after_sales(request))
         if request.method == "POST" and path == "/api/v1/refunds":
             return self._write(request)
         return self._error(404, "ORDER_NOT_FOUND")
@@ -223,8 +225,17 @@ class FakeJava:
             "reasonCodes": ["STALL_THRESHOLD_MET"],
         }
 
-    def _after_sales(self) -> dict[str, Any]:
-        return {"refunds": list(self.refunds.values()), "returns": []}
+    def _after_sales(self, request: httpx.Request) -> dict[str, Any]:
+        key = request.url.params.get("idempotencyKey")
+        if key is None:
+            refunds = list(self.refunds.values())
+        else:
+            matched = self.refunds.get(key)
+            refunds = [] if matched is None else [matched]
+        payload: dict[str, Any] = {"refunds": refunds, "returns": []}
+        if self.after_sales_omit_refunds:
+            payload.pop("refunds")
+        return payload
 
     @staticmethod
     def _error(code: int, error_code: str, *, retryable: bool = False) -> httpx.Response:
@@ -263,6 +274,21 @@ def _state(**overrides: Any) -> AgentState:
     return AgentState.model_validate(values)
 
 
+def _persisted_refund_intent(
+    key: str,
+    *,
+    reason_code: str = _REASON_CODE,
+) -> WriteIntent:
+    """Build a durable intent with the same fingerprint logic production uses."""
+    generated = refund_write_intent(
+        _state(),
+        order_id=FakeJava.ORDER_ID,
+        reason_code=reason_code,
+        requested_amount=None,
+    ).to_state_intent()
+    return generated.model_copy(update={"idempotency_key": key})
+
+
 class Persister:
     """The durability seam, as the graph node will supply it.
 
@@ -280,11 +306,12 @@ class Persister:
         self.events = events if events is not None else []
         self.saved: list[WriteIntent] = []
 
-    async def __call__(self, intent: WriteIntent) -> None:
+    async def __call__(self, intent: WriteIntent, pending: WriteOutcome) -> None:
+        assert pending.status is WriteStatus.PENDING
         self.events.append(f"persist:{intent.idempotency_key}")
         self.saved.append(intent)
         self.state = self.state.model_copy(
-            update={"write_intent": intent, "write": WriteOutcome(status=WriteStatus.PENDING)}
+            update={"write_intent": intent, "write": pending}
         )
 
     def record_outcome(self, outcome: RefundWriteOutcome) -> None:
@@ -468,11 +495,7 @@ async def test_a_resumed_run_reuses_the_persisted_key_and_checks_state_first() -
     persister = Persister(
         _state(
             write=WriteOutcome(status=WriteStatus.UNKNOWN, action=CREATE_REFUND_ACTION),
-            write_intent=WriteIntent(
-                action=CREATE_REFUND_ACTION,
-                target_id=FakeJava.ORDER_ID,
-                idempotency_key="key-from-the-previous-process",
-            ),
+            write_intent=_persisted_refund_intent("key-from-the-previous-process"),
         )
     )
     assert write_may_already_have_committed(persister.state) is True
@@ -493,11 +516,7 @@ async def test_a_resumed_run_with_nothing_committed_writes_with_the_persisted_ke
     persister = Persister(
         _state(
             write=WriteOutcome(status=WriteStatus.UNKNOWN, action=CREATE_REFUND_ACTION),
-            write_intent=WriteIntent(
-                action=CREATE_REFUND_ACTION,
-                target_id=FakeJava.ORDER_ID,
-                idempotency_key="key-from-the-previous-process",
-            ),
+            write_intent=_persisted_refund_intent("key-from-the-previous-process"),
         )
     )
 
@@ -552,6 +571,59 @@ async def test_the_retry_budget_is_finite_and_never_switches_keys() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_different_refund_on_the_same_order_is_not_misattributed_to_this_key() -> None:
+    """Another logical refund is not proof that this timed-out key committed."""
+    java = FakeJava()
+    java.commit_out_of_band("some-other-logical-write")
+    persister = Persister(
+        _state(
+            write=WriteOutcome(status=WriteStatus.UNKNOWN, action=CREATE_REFUND_ACTION),
+            write_intent=_persisted_refund_intent("key-from-the-previous-process"),
+        )
+    )
+
+    outcome = await _us1_refund_flow(client=_client(java), java=java, persister=persister)
+
+    assert outcome is not None
+    assert outcome.write_status is WriteStatus.FAILED
+    assert outcome.error_code == "DUPLICATE_AFTER_SALES"
+    assert outcome.recovered is False
+    assert java.write_keys == ["key-from-the-previous-process"]
+
+
+@pytest.mark.asyncio
+async def test_missing_refunds_field_keeps_the_write_unknown_instead_of_licensing_retry() -> None:
+    """Missing evidence is not an authoritative empty list."""
+    java = FakeJava()
+    java.write_faults.append("timeout_before_commit")
+    java.after_sales_omit_refunds = True
+    persister = Persister(_state())
+
+    outcome = await _us1_refund_flow(client=_client(java), java=java, persister=persister)
+
+    assert outcome is not None
+    assert outcome.write_status is WriteStatus.UNKNOWN
+    assert outcome.error_code == UNKNOWN_OUTCOME_ERROR_CODE
+    assert java.write_attempts() == 1
+
+
+def test_a_resumed_key_cannot_be_rebound_to_a_changed_payload() -> None:
+    """The durable key and the durable logical request are one identity."""
+    state = _state(
+        write=WriteOutcome(status=WriteStatus.UNKNOWN, action=CREATE_REFUND_ACTION),
+        write_intent=_persisted_refund_intent("key-from-the-previous-process"),
+    )
+
+    with pytest.raises(WriteIntentConflictError):
+        refund_write_intent(
+            state,
+            order_id=FakeJava.ORDER_ID,
+            reason_code="A_DIFFERENT_REASON",
+            requested_amount=None,
+        )
+
+
+@pytest.mark.asyncio
 async def test_a_duplicate_answer_is_terminal_and_never_retried() -> None:
     java = FakeJava()
     java.write_faults.append("duplicate")
@@ -589,7 +661,7 @@ async def test_a_write_without_a_durable_intent_is_never_sent() -> None:
     java = FakeJava()
     state = _state()
 
-    async def failing_persister(intent: WriteIntent) -> None:
+    async def failing_persister(intent: WriteIntent, pending: WriteOutcome) -> None:
         raise RuntimeError("checkpoint store unavailable")
 
     outcome = await create_refund(
@@ -615,7 +687,7 @@ async def test_the_retry_budget_cannot_be_configured_without_a_bound() -> None:
         idempotency_key="0123456789abcdef0123456789abcdef",
     )
 
-    async def persister(value: WriteIntent) -> None:
+    async def persister(value: WriteIntent, pending: WriteOutcome) -> None:
         return None
 
     with pytest.raises(ValueError, match="max_attempts"):
