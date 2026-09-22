@@ -210,15 +210,16 @@ class RefundResult(BaseModel):
 class AfterSalesStatus(BaseModel):
     """``GET /orders/{orderId}/after-sales`` -- the authoritative answer to "did it commit?".
 
-    ``returns`` is declared by the contract as an array; V1 has no return path yet, so the field is
-    optional and defaults to empty. Consumers must read an *empty* ``refunds`` list as a positive
-    statement ("no refund exists"), because that is what makes a same-key retry safe.
+    Both arrays are required by the contract. That is a safety property, not cosmetic strictness:
+    an explicit empty ``refunds`` list means "the authority checked and found none", while an
+    omitted field means "the response did not state the fact". Collapsing omission into ``[]``
+    would license a money retry from missing evidence.
     """
 
     model_config = _RESPONSE
 
-    refunds: list[RefundResult] = Field(default_factory=list)
-    returns: list[dict[str, object]] = Field(default_factory=list)
+    refunds: list[RefundResult]
+    returns: list[dict[str, object]]
 
 
 class ErrorEnvelope(BaseModel):
