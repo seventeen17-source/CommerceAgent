@@ -49,6 +49,24 @@
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
 
+## 当前 US1 分支堆叠关系（T019 → T021）
+
+当前开发采用**线性堆叠分支**，每个 Task 保留独立 checkpoint，暂不把 T019/T020/T021 分别合并到 `main`：
+
+```text
+main (af50a7b)
+└─ feat/us1-order-logistics-read      (T019 7e98084)
+   └─ feat/us1-eligibility-decision   (T020 c3cf512)
+      └─ feat/us1-refund-write        (T021 f7f95c6)  ← 当前已验收顶端
+```
+
+- T020 直接建立在 T019 之上，因为 `EligibilityService` 依赖 T019 已落地的 `OrderService` / `LogisticsService`。
+- T021 直接建立在 T020 之上，因为 `RefundService` 在写入前必须重新调用 T020 的确定性 eligibility。
+- 这种堆叠方式保留了**每个阶段可单独回退**的 checkpoint，同时又让后续 Task 可以复用前一阶段真实代码，不需要把半成品提前并入 `main`。
+- **当前不要为了“同步 main”把三条功能分支分别 merge。** 等 US1 到达一个真正可发布的 Gate 后，再按项目合并规则统一处理；此时可以用一个 PR 审阅从 T019 到当前顶端的连续故事，而不是制造三次中间态合并。
+- 下一步是 T022；新的工作应从当前最新可用顶端 `feat/us1-refund-write` 继续建立 checkpoint，而不是回到 `main` 或 T019/T020 旧顶端重新开发。
+- 只有远端已经存在、且本地尚未包含的 commit 才需要 `git pull`；“分支是堆叠的”本身不等于每做完一层都要 pull/merge main。
+
 ## 阶段总览
 
 | Phase | 目标 | Tasks | Gate | 状态 |
@@ -56,7 +74,7 @@
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
 | 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ✅ Complete（T008–T018 ✅） |
-| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019 ✅，当前 T020） |
+| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T021 ✅，当前 T022） |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
 | 6 | 安全降级 | T057–T063 | 依赖失败 / 规则冲突时 Safe Stop 或转人工 | ⬜ |
