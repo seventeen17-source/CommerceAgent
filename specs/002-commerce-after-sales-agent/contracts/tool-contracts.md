@@ -35,6 +35,10 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 - 可选 `product_query`
 - 可选 `status_filter`
 
+> 分层说明：这些过滤项属于后续 T029/T030 的 Tool / candidate-resolution 能力，不代表当前 Java
+> `GET /api/v1/orders` 接受同名 query parameter。T023 的 Java HTTP 面只返回 authenticated owner 的
+> customer-scoped 订单列表；候选筛选与自然语言解析留在 Agent Tool 层，避免在 Java 契约里声明尚未实现的过滤语义。
+
 输出：
 - `order_id`
 - 商品摘要

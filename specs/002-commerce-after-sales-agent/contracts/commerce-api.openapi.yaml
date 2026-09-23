@@ -370,7 +370,7 @@ paths:
             type: string
             minLength: 8
             maxLength: 128
-            pattern: '^[A-Za-z0-9_-]+      responses:
+            pattern: '^[A-Za-z0-9_-]+$'\n      responses:
         '200':
           description: Current after-sales status
           content:

@@ -64,6 +64,11 @@ class OrderHttpIntegrationTest {
     }
 
     @Test
+    void unauthenticatedOrderDetailIsRejected() throws Exception {
+        mockMvc.perform(get("/api/v1/orders/{orderId}", OWN_ORDER_ID)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void customerOrderListContainsOnlyOwnedOrders() throws Exception {
         seedCustomerOrders();
         String token = localJwtIssuer.issue(CUSTOMER_ID);
@@ -114,6 +119,17 @@ class OrderHttpIntegrationTest {
         String token = localJwtIssuer.issue(APPROVER_ID);
 
         mockMvc.perform(get("/api/v1/orders").header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void authenticatedNonCustomerCannotUseCustomerOrderDetailApi() throws Exception {
+        seedUser(APPROVER_ID, UserRole.APPROVER);
+        String token = localJwtIssuer.issue(APPROVER_ID);
+
+        mockMvc.perform(get("/api/v1/orders/{orderId}", OWN_ORDER_ID)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("ACCESS_DENIED"));
     }
