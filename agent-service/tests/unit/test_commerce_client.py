@@ -452,8 +452,8 @@ async def test_money_stays_decimal_end_to_end() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_orders_omits_filters_that_were_not_asked_for() -> None:
-    """An empty ``status`` is not the same as no filter, so absent means absent."""
+async def test_list_orders_sends_no_query_filters_in_v1() -> None:
+    """The V1 contract exposes the owner's full order list; T030 owns candidate filtering."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -471,15 +471,11 @@ async def test_list_orders_omits_filters_that_were_not_asked_for() -> None:
 
     async with _client(handler) as client:
         call = await client.list_orders(_AUTH)
-        filtered = await client.list_orders(_AUTH, product_query="耳机", status_filter="DELIVERED")
 
     assert len(call.value) == 1
     assert call.value[0].order_id == "order-001"
     assert call.value[0].created_at.year == 2026
     assert dict(seen[0].url.params) == {}
-    assert dict(seen[1].url.params) == {"productQuery": "耳机", "status": "DELIVERED"}
-    # Two calls must not share a correlation id.
-    assert filtered.trace_id != call.trace_id
 
 
 @pytest.mark.asyncio

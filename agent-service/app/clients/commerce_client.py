@@ -256,30 +256,20 @@ class CommerceClient:
             "GET", "/me", auth, response_model=CurrentPrincipal, request_is_safe=True
         )
 
-    async def list_orders(
-        self,
-        auth: AuthContext,
-        *,
-        product_query: str | None = None,
-        status_filter: str | None = None,
-    ) -> CommerceCall[list[OrderSummary]]:
+    async def list_orders(self, auth: AuthContext) -> CommerceCall[list[OrderSummary]]:
         """``GET /orders`` -- the authenticated customer's orders.
 
-        Ownership is enforced by Java from the token; both filters are optional and omitted rather
-        than sent as empty strings, because an empty ``status`` is not the same as no filter.
+        V1 intentionally exposes no query filters. Candidate-order filtering/scoring belongs to the
+        Agent resolution work in T030; silently accepting undeclared filters here would let a caller
+        believe Java had narrowed the authoritative result when it had not.
         """
-        params: dict[str, str] = {}
-        if product_query is not None:
-            params["productQuery"] = product_query
-        if status_filter is not None:
-            params["status"] = status_filter
         return await self._request_list(
             "GET",
             "/orders",
             auth,
             item_model=OrderSummary,
             request_is_safe=True,
-            params=params or None,
+            params=None,
         )
 
     async def get_order(self, auth: AuthContext, order_id: str) -> CommerceCall[OrderSnapshot]:

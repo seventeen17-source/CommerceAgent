@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.4
+  version: 0.2.5
   description: |
     ## Write-path idempotency (T021)
 
@@ -73,13 +73,6 @@ paths:
     get:
       summary: List authenticated user's orders
       description: Returns only orders owned by the authenticated customer principal. Ownership is a SQL predicate, so another user's order can never appear in the result set.
-      parameters:
-        - in: query
-          name: productQuery
-          schema: { type: string }
-        - in: query
-          name: status
-          schema: { type: string }
       responses:
         '200':
           description: Order summaries
@@ -89,6 +82,12 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/OrderSummary' }
         '401': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: |
+            ACCESS_DENIED only: the authenticated principal is not a CUSTOMER. Ownership is not
+            evaluated on the list endpoint because the SQL query is already scoped to the current
+            customer's user id.
   /orders/{orderId}:
     get:
       summary: Get authoritative order snapshot
