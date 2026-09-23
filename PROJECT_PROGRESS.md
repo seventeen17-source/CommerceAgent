@@ -4,8 +4,8 @@
 
 ## 当前状态
 
-- **当前 Phase**：Phase 2 — Foundational ✅ 收口
-- **当前 Tasks**：T024（Phase 3 — US1 MVP，物流 HTTP API）
+- **当前 Phase**：Phase 3 — US1 MVP
+- **当前 Tasks**：T025（先核对 T020 已实现的 deterministic eligibility 与原 T025 描述是否重复，避免重复实现）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -26,8 +26,9 @@
   - T021 — 受保护退款写入与"恰好一个逻辑退款"：`V003__refund_schema.sql`（`commerce.refund_requests` + `UNIQUE(user_id, idempotency_key)` + 活动态 `UNIQUE(order_id)` 部分索引）、`refund/`（`RefundRequest` / `RefundRequestRepository` / `RefundStatus` / `RefundCommand` / `RefundResult` / `RefundService`）、`OrderRepository.findByIdAndOwnerIdForUpdate`（owner 谓词写在锁查询里）、`OrderService.requireOwnedOrderForUpdate`（`MANDATORY`，锁必须在写事务里才成立）、`FixtureLoader.clearFixtureState()` 增补退款行清理（否则外键会让 fixture reset 直接失败）。新测试 `RefundIntegrationTest.java` **24 个用例**覆盖 authorization / amount bound / illegal state / idempotency reuse-conflict / timeout recovery，含**两个真实线程 + CyclicBarrier 的并发用例**。Java `mvnw.cmd verify` → **BUILD SUCCESS**（`EXIT=0`；Tests run: **133**, Failures: 0, Errors: 0；Spotless **86 files clean / 0 needs changes**；SpotBugs BugInstance **0**（新增 1 条最窄 exclude，理由见证据）；JaCoCo 60 classes）。契约升 **0.2.4**（`POST /refunds` 补 `400/404/503` 与幂等语义、`GET /orders/{orderId}/after-sales` 补 `404`、`RefundResult`/`CreateRefundRequest` 字段语义）。验收证据见「T021 验收证据」
   - T022 — Agent 侧写路径与未知结果恢复：`app/agent/execute_write.py`（**write-ahead intent**：key 先落盘再发请求；单次尝试 → 未知结果先读权威状态 → 同 key 有限预算重试 → 预算耗尽 `UNKNOWN` 升级；intent 落盘失败则一字节都不发）、`app/agent/state.py`（新增 `WriteIntent` + `AgentState.write_intent`，让"从未发出"与"发了但结果未知"可区分）、`app/clients/commerce_client.py`（写面 `create_refund`（`request_is_safe=False`）/ `get_after_sales_status` + `Idempotency-Key` 形状校验 + 禁止 `extra_headers` 覆盖 `Authorization`）、`app/clients/models.py`（`CreateRefundRequest`/`RefundResult`/`AfterSalesStatus`）。新测试 `tests/integration/test_us1_logistics_refund.py` **13 个用例**（有状态假 Java：能"已提交但响应丢失"、能拒绝换 key 的第二笔）。**顺带修掉一个 T017 遗留的护栏漏洞**：`test_state_secret_guard.py` 的 `_carries_text` 不递归进嵌套模型，导致 `SomeModel | None` 类型的字段（`principal`、`write`、`verification`、`eligibility`、`approval`，以及本次新增的 `write_intent`）**一个探针都没有**却仍被判为"已覆盖"；改为递归后这些字段全部进入凭据探针矩阵。Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **41 files**、`mypy app` **Success 25 files**、`pytest -q` **258 passed, 6 skipped**）。验收证据见「T022 验收证据」
   - T023 — customer-scoped order list/detail HTTP API：新增 `OrderController` 暴露 `GET /api/v1/orders` 与 `GET /api/v1/orders/{orderId}`；`SecurityConfig` 将两个读端点限制为 `CUSTOMER`，ownership 继续复用 T019 `OrderService`，cross-owner 与不存在统一为 `404 ORDER_NOT_FOUND`；`OrderHttpIntegrationTest` 现有 **7 个** MockMvc + Testcontainers 用例覆盖 list/detail 的 401/403、owner 200、cross-owner/missing concealment。T023 初次全量 Java `clean verify` → **138 tests / BUILD SUCCESS**；Python 四条门禁全绿，`pytest -q` **261 passed, 6 skipped**，`test_commerce_client.py` **32 passed**；review 后新增的两个 HTTP 权限用例已本地定点复验 **7/7 通过**。
+  - T024 — customer-scoped logistics HTTP API：新增 `GET /api/v1/orders/{orderId}/logistics`，复用 T019 `LogisticsService` / `LogisticsStallCalculator`；`LogisticsHttpIntegrationTest` **8/8** 通过；本地 `mvnw.cmd clean verify` → **148 tests / BUILD SUCCESS**，Spotless 90 files clean、SpotBugs 0；Web `npm.cmd run build` / `npm.cmd run lint` 全绿；5173 实测 `order-001` → 200 + `IN_TRANSIT` + `stalledHours > 48`，cross-owner `order-002` 与不存在订单均 → 404 `ORDER_NOT_FOUND`；同一页面 09/10/11 真实 Agent Run API 也已实测：Create Run → **201**，Read Run → **200**，Read Events → **200**。
 - **T022 review hardening（已本地复验）**：在原 258 passed / 6 skipped 基线上补齐 3 个恢复边界：① `AfterSalesStatus.refunds/returns` 必填；② unknown-write recovery 用 `idempotencyKey` 过滤权威状态；③ `WriteIntent` 增加稳定 request fingerprint，恢复 payload 漂移时 fail closed。2026-09-23 本地复验：`ruff check` **All checks passed**、`ruff format --check` **41 files**、`mypy app` **Success 25 source files**、`pytest -q` **261 passed, 6 skipped**。
-- **当前优先任务**：T024 — 物流 API 与权威 stall calculation（`LogisticsController` / `LogisticsService` 的 HTTP 装配）；继续复用 T019 已落地的 service 读面，并把相同的 404 concealment / 403 capability 边界钉进端点测试与契约
+- **当前优先任务**：T025 — 开始前先核对 T020 已落地的 deterministic eligibility 与 T025 原任务描述，已有能力不重复实现，只补真实缺口。
 - **任务勾选口径说明（T021/T022）**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理，编号修正为 `V003`）；T027 **部分交付**（ownership / state / eligibility / amount 写前重校验、幂等、行锁、审计、状态读面已完成），**仍缺**权威 `approvalRequestId` 绑定（US4/T049）；T029 **客户端写面已交付**，**仍缺** Tool Envelope / allowlist；T031 **恢复核心已交付**，**仍缺** `verify_business_state.py` 与 graph 接线（T032）。
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
@@ -52,7 +53,7 @@
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
 
-## 当前 US1 分支堆叠关系（T019 → T023）
+## 当前 US1 分支堆叠关系（T019 → T024）
 
 当前开发采用**线性堆叠分支**，每个 Task 保留独立 checkpoint，暂不把 T019/T020/T021 分别合并到 `main`：
 
@@ -62,14 +63,15 @@ main (af50a7b)
    └─ feat/us1-eligibility-decision   (T020 c3cf512)
       └─ feat/us1-refund-write        (T021 f7f95c6)
          └─ feat/us1-agent-write-recovery (T022 1c77a0b)
-            └─ feat/us1-order-http-api    (T023 2dcefd1)  ← 当前已验收顶端
+            └─ feat/us1-order-http-api    (T023 2dcefd1)
+               └─ feat/us1-logistics-http-api (T024)  ← 当前已验收顶端
 ```
 
 - T020 直接建立在 T019 之上，因为 `EligibilityService` 依赖 T019 已落地的 `OrderService` / `LogisticsService`。
 - T021 直接建立在 T020 之上，因为 `RefundService` 在写入前必须重新调用 T020 的确定性 eligibility。
 - 这种堆叠方式保留了**每个阶段可单独回退**的 checkpoint，同时又让后续 Task 可以复用前一阶段真实代码，不需要把半成品提前并入 `main`。
 - **当前不要为了“同步 main”把三条功能分支分别 merge。** 等 US1 到达一个真正可发布的 Gate 后，再按项目合并规则统一处理；此时可以用一个 PR 审阅从 T019 到当前顶端的连续故事，而不是制造三次中间态合并。
-- 下一步是 T024；新的工作应从当前最新可用顶端 `feat/us1-order-http-api` 继续建立 checkpoint，而不是回到 `main` 或 T019/T020/T021/T022 的旧顶端重新开发。
+- 下一步是 T025；新的工作应从当前最新可用顶端 `feat/us1-logistics-http-api` 继续建立 checkpoint。开始前先核对 T020 与 T025 的职责重叠，避免重复造轮子。
 - 只有远端已经存在、且本地尚未包含的 commit 才需要 `git pull`；“分支是堆叠的”本身不等于每做完一层都要 pull/merge main。
 
 ## 阶段总览
@@ -79,7 +81,7 @@ main (af50a7b)
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
 | 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ✅ Complete（T008–T018 ✅） |
-| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T021 ✅，当前 T022） |
+| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T024 ✅，下一步 T025 状态核对） |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
 | 6 | 安全降级 | T057–T063 | 依赖失败 / 规则冲突时 Safe Stop 或转人工 | ⬜ |
