@@ -60,7 +60,7 @@
 
 ### 实现
 
-- [ ] T023 [P] [US1] 实现 customer-scoped order list/detail API：`OrderController.java`、`OrderService.java`。
+- [X] T023 [P] [US1] 实现 customer-scoped order list/detail API：`OrderController.java`、`OrderService.java`。→ **已完成**：`GET /api/v1/orders` / `GET /api/v1/orders/{orderId}` 已通过真实 HTTP 集成测试，身份只来自 `CommercePrincipal`，非 CUSTOMER 为 403，cross-owner 与不存在统一为 404 `ORDER_NOT_FOUND`；Java HTTP 定点测试 7/7 通过。
 - [ ] T024 [P] [US1] 实现物流 API 与权威 stall calculation：`LogisticsController.java`、`LogisticsService.java`。
 - [ ] T025 [US1] 实现 deterministic `EligibilityDecision`：`EligibilityService.java`，返回 `eligible`、`allowed_action`、`max_refund_amount`、`approval_required`、rule code/version、reason codes。
 - [X] T026 [US1] 新建 `commerce.refund_requests` migration 与 Entity/Repository：**`V003__refund_schema.sql`**（原计划写 V002，但 `V002` 已被 T017 的 `V002__agent_run_checkpoint.sql` 占用；编号冲突在 T021 报出并修正）、`refund/`；同步扩展 T014 `FixtureLoader.clearFixtureState()`，清理 refund 与本阶段引入的 idempotency state，保证 Eval reset 不残留写入结果。→ **已随 T021 一并交付**：schema（含两个唯一约束）、`RefundRequest`/`RefundRequestRepository`、fixture reset 清理退款行（否则外键会让 reset 直接失败）。
