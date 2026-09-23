@@ -57,9 +57,9 @@ __all__ = [
     "DEFAULT_MAX_ATTEMPTS",
     "INTENT_NOT_DURABLE_ERROR_CODE",
     "UNKNOWN_OUTCOME_ERROR_CODE",
-    "WriteIntentConflictError",
     "RefundWriteIntent",
     "RefundWriteOutcome",
+    "WriteIntentConflictError",
     "create_refund",
     "refund_write_intent",
     "write_may_already_have_committed",
@@ -117,9 +117,9 @@ def _refund_request_fingerprint(
         "reasonCode": reason_code,
         "requestedAmount": _canonical_amount(requested_amount),
     }
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -276,9 +276,7 @@ async def create_refund(
     if may_already_have_committed:
         # Resuming: read before writing. If a previous attempt did commit, this is where we find out
         # -- without sending anything.
-        confirmed = await _confirmed_refunds(
-            client, auth, intent.order_id, intent.idempotency_key
-        )
+        confirmed = await _confirmed_refunds(client, auth, intent.order_id, intent.idempotency_key)
         if confirmed is None:
             return _unknown(attempts=0, intent=intent, trace_ids=trace_ids)
         if confirmed:
@@ -372,9 +370,7 @@ async def _confirmed_refunds(
     key filter we could incorrectly report another concurrent refund as our own success.
     """
     try:
-        call = await client.get_after_sales_status(
-            auth, order_id, idempotency_key=idempotency_key
-        )
+        call = await client.get_after_sales_status(auth, order_id, idempotency_key=idempotency_key)
     except CommerceError as exc:
         logger.warning("could not confirm refund state for the order: %s", type(exc).__name__)
         return None

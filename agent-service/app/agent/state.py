@@ -227,9 +227,7 @@ class WriteIntent(BaseModel):
     # Stable SHA-256 of the logical request payload. The key alone is not enough: a resumed run
     # must prove that it is replaying the same business action, not silently attach an old key to
     # changed reason/amount inputs. Lowercase hex keeps the value portable across checkpoints.
-    request_fingerprint: str = Field(
-        min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
-    )
+    request_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
 
 
 class VerificationOutcome(BaseModel):

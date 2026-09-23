@@ -310,9 +310,7 @@ class Persister:
         assert pending.status is WriteStatus.PENDING
         self.events.append(f"persist:{intent.idempotency_key}")
         self.saved.append(intent)
-        self.state = self.state.model_copy(
-            update={"write_intent": intent, "write": pending}
-        )
+        self.state = self.state.model_copy(update={"write_intent": intent, "write": pending})
 
     def record_outcome(self, outcome: RefundWriteOutcome) -> None:
         self.state = self.state.model_copy(update={"write": outcome.to_state_outcome()})
