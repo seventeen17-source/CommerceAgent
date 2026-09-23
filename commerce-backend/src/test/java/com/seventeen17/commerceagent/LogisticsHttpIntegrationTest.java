@@ -225,12 +225,7 @@ class LogisticsHttpIntegrationTest {
     private void seedOrder(String orderId, String ownerId, OrderStatus status) {
         Order order = Order.create(orderId, ownerId, status, new BigDecimal("199.00"), "USD");
         order.addItem(OrderItem.create(
-                orderId + "-item",
-                orderId + "-product",
-                "T024 Product",
-                "ELECTRONICS",
-                new BigDecimal("199.00"),
-                1));
+                orderId + "-item", orderId + "-product", "T024 Product", "ELECTRONICS", new BigDecimal("199.00"), 1));
         orderRepository.saveAndFlush(order);
     }
 
