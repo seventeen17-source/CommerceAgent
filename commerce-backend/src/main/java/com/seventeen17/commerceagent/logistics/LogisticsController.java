@@ -27,8 +27,7 @@ public class LogisticsController {
     }
 
     @GetMapping("/{orderId}/logistics")
-    LogisticsSnapshot getLogistics(
-            @AuthenticationPrincipal CommercePrincipal principal, @PathVariable String orderId) {
+    LogisticsSnapshot getLogistics(@AuthenticationPrincipal CommercePrincipal principal, @PathVariable String orderId) {
         return logisticsService.getLogistics(principal, orderId);
     }
 }
