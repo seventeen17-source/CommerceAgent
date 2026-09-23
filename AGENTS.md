@@ -192,11 +192,33 @@ DTO、普通 CRUD wiring、fixture、样板配置、机械映射、样式性 UI 
 
 ## 6. Git 与回退规则
 
-实现阶段默认从最新 `main` 创建见名知意的分支。每个阶段/可独立回退的逻辑部分应形成独立分支或清晰的逻辑提交，使回退不会影响无关后续工作。
+**长期规则：一个功能 = 一个独立 feature 分支。禁止把后续功能继续从前一个 feature 分支上“套娃”创建。**
+
+实现阶段使用一条集成开发线 `dev/002-commerce-after-sales-mvp`：
+
+```text
+main                         ← 稳定 Gate
+└─ dev/002-commerce-after-sales-mvp
+   ├─ feat/<feature-a>
+   ├─ feat/<feature-b>
+   └─ feat/<feature-c>
+```
+
+每个功能的标准流程：
+
+1. 从**最新 dev 集成线**创建一个见名知意的 `feat/... `分支；
+2. 只在该 feature 分支完成这个功能、测试和文档；
+3. 验收通过后，保留该 feature 分支作为可回退 checkpoint；
+4. 把已验收功能合入/快进到 `dev/002-commerce-after-sales-mvp`；
+5. 下一个功能必须重新从更新后的 dev 创建新 feature 分支，**不得从上一个 feature 分支继续派生**；
+6. 只有达到明确阶段 Gate，并且用户明确确认后，才把 dev 合入 `main`。
+
+这样“依赖前一个功能”通过 dev 集成线解决，而不是通过 feature→feature 的父子嵌套解决。
 
 要求：
 
-- 分支名表达阶段或能力，例如 `setup/official-scaffolds`、`feat/us1-logistics-refund`；
+- 分支名表达**功能/能力**，例如 `feat/us1-logistics-http-api`，不要仅用模糊编号；
+- 每个 feature 分支是一个独立 checkpoint；历史已存在的 T019–T024 分支继续保留，不删除、不重写；
 - commit 信息表达一个逻辑变化；
 - 不修改无关文件；
 - 合并到 `main` 前需要用户明确确认；
