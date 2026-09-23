@@ -18,7 +18,7 @@ that reading the repository does not already grant -- but it does print a creden
 
 Usage (from ``agent-service/``)::
 
-    uv run python scripts/mint_dev_token.py customer-001
+    uv run python -m scripts.mint_dev_token customer-001
 
 Then paste the printed token into the validation page at http://localhost:5173/.
 
