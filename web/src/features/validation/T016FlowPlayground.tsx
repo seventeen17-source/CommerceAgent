@@ -9,7 +9,7 @@ type ScenarioId =
   | 'trace-mismatch'
 
 type StepStatus = 'pending' | 'success' | 'warning' | 'blocked'
-type LiveStepId = 'create-run' | 'read-run' | 'read-events'
+type LiveStepId = 'read-logistics' | 'create-run' | 'read-run' | 'read-events'
 
 type FlowStep = {
   id: string
@@ -38,7 +38,8 @@ type CallResult =
 
 type CompletedLiveSteps = Record<LiveStepId, boolean>
 
-const API = '/agent/runs'
+const AGENT_API = '/agent/runs'
+const COMMERCE_API = '/commerce/orders'
 
 const scenarios: Scenario[] = [
   { id: 'normal', label: '正常流程', summary: '身份 → 订单 → 物流 → eligibility 全部通过' },
@@ -256,6 +257,18 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
 
   return [
     {
+      id: 'read-logistics',
+      live: 'read-logistics',
+      title: '读取真实物流事实',
+      file: 'LogisticsController.java + LogisticsService.java',
+      action: 'GET /api/v1/orders/{orderId}/logistics',
+      input: 'Bearer token + orderId',
+      work: 'T024 通过 Vite dev proxy 直连 Java :8080；Java 从 principal 校验 ownership，再返回权威物流快照和 stalledHours。',
+      output: 'status / signed / lastMeaningfulEventAt / stalledHours',
+      status: statusFor('read-logistics'),
+      note: '这是 T024 的真实 Java API 页面验收，不经过 Agent Tool；真正 Web → Agent → Tool → Java 链路在 T029/T032 接入。',
+    },
+    {
       id: 'create-run',
       live: 'create-run',
       title: '创建并持久化 Agent Run',
@@ -300,8 +313,10 @@ export function T016FlowPlayground() {
   const [token, setToken] = useState('')
   const [message, setMessage] = useState('我的耳机物流很久没动了，能退款吗？')
   const [runId, setRunId] = useState('')
+  const [orderId, setOrderId] = useState('order-001')
   const [result, setResult] = useState<CallResult>({ kind: 'idle' })
   const [completedLiveSteps, setCompletedLiveSteps] = useState<CompletedLiveSteps>({
+    'read-logistics': false,
     'create-run': false,
     'read-run': false,
     'read-events': false,
@@ -324,11 +339,15 @@ export function T016FlowPlayground() {
       })
       return
     }
+    if (step === 'read-logistics' && !orderId.trim()) {
+      setResult({ kind: 'error', step, status: null, detail: '请先填写 orderId。' })
+      return
+    }
     if (step === 'create-run' && !message.trim()) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写用户请求。' })
       return
     }
-    if (step !== 'create-run' && !runId.trim()) {
+    if (step !== 'read-logistics' && step !== 'create-run' && !runId.trim()) {
       setResult({
         kind: 'error',
         step,
@@ -339,11 +358,13 @@ export function T016FlowPlayground() {
     }
 
     const path =
-      step === 'create-run'
-        ? API
-        : step === 'read-run'
-          ? `${API}/${runId.trim()}`
-          : `${API}/${runId.trim()}/events`
+      step === 'read-logistics'
+        ? `${COMMERCE_API}/${encodeURIComponent(orderId.trim())}/logistics`
+        : step === 'create-run'
+          ? AGENT_API
+          : step === 'read-run'
+            ? `${AGENT_API}/${runId.trim()}`
+            : `${AGENT_API}/${runId.trim()}/events`
     const init: RequestInit =
       step === 'create-run'
         ? { method: 'POST', body: JSON.stringify({ message: message.trim() }) }
@@ -404,6 +425,7 @@ export function T016FlowPlayground() {
           <span className="capability-badge mock">T016 · MOCK FLOW</span>
           <span className="capability-badge persisted">T017 · PERSISTED</span>
           <span className="capability-badge live">T018 · LIVE API</span>
+          <span className="capability-badge live">T024 · LIVE JAVA</span>
         </div>
       </header>
 
@@ -520,7 +542,17 @@ export function T016FlowPlayground() {
                         className="validation-token"
                       />
 
-                      {step.live === 'create-run' ? (
+                      {step.live === 'read-logistics' ? (
+                        <>
+                          <label htmlFor="live-order-id">orderId</label>
+                          <input
+                            id="live-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                        </>
+                      ) : step.live === 'create-run' ? (
                         <>
                           <label htmlFor="live-user-request">User request</label>
                           <textarea
@@ -625,7 +657,10 @@ export function T016FlowPlayground() {
           <span className="focus-node">Run / Checkpoint · T017</span><b>→</b><span>Tool</span><b>→</b>
           <span>CommerceClient · T016</span><b>→</b><span>Java</span><b>→</b><span>PostgreSQL</span>
         </div>
-        <p>T018 提供入口，T017 保存可恢复状态和 Trace，T016 连接 Java 权威业务事实；它们属于同一条链。</p>
+        <p>
+          T024 现在可从页面直连 Java 验证物流权威事实；T018 提供 Agent 入口，T017 保存可恢复状态和 Trace，
+          T016 连接 Java 客户端。真正的 Web → Agent → Tool → Java 物流链路将在 T029/T032 接入。
+        </p>
       </section>
     </main>
   )
