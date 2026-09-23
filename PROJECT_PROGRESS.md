@@ -53,26 +53,32 @@
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
 
-## 当前 US1 分支堆叠关系（T019 → T024）
+## 当前 US1 分支策略（一个功能一个分支）
 
-当前开发采用**线性堆叠分支**，每个 Task 保留独立 checkpoint，暂不把 T019/T020/T021 分别合并到 `main`：
+从现在起，US1 使用 **dev 集成线 + 独立 feature checkpoint**，不再使用 feature→feature 的线性套娃。
 
 ```text
-main (af50a7b)
-└─ feat/us1-order-logistics-read      (T019 7e98084)
-   └─ feat/us1-eligibility-decision   (T020 c3cf512)
-      └─ feat/us1-refund-write        (T021 f7f95c6)
-         └─ feat/us1-agent-write-recovery (T022 1c77a0b)
-            └─ feat/us1-order-http-api    (T023 2dcefd1)
-               └─ feat/us1-logistics-http-api (T024)  ← 当前已验收顶端
+main
+└─ dev/002-commerce-after-sales-mvp     ← 当前已验收功能的集成线
+   ├─ feat/us1-order-logistics-read     ← T019 checkpoint
+   ├─ feat/us1-eligibility-decision     ← T020 checkpoint
+   ├─ feat/us1-refund-write             ← T021 checkpoint
+   ├─ feat/us1-agent-write-recovery     ← T022 checkpoint
+   ├─ feat/us1-order-http-api           ← T023 checkpoint
+   └─ feat/us1-logistics-http-api       ← T024 checkpoint
 ```
 
-- T020 直接建立在 T019 之上，因为 `EligibilityService` 依赖 T019 已落地的 `OrderService` / `LogisticsService`。
-- T021 直接建立在 T020 之上，因为 `RefundService` 在写入前必须重新调用 T020 的确定性 eligibility。
-- 这种堆叠方式保留了**每个阶段可单独回退**的 checkpoint，同时又让后续 Task 可以复用前一阶段真实代码，不需要把半成品提前并入 `main`。
-- **当前不要为了“同步 main”把三条功能分支分别 merge。** 等 US1 到达一个真正可发布的 Gate 后，再按项目合并规则统一处理；此时可以用一个 PR 审阅从 T019 到当前顶端的连续故事，而不是制造三次中间态合并。
-- 下一步是 T025；新的工作应从当前最新可用顶端 `feat/us1-logistics-http-api` 继续建立 checkpoint。开始前先核对 T020 与 T025 的职责重叠，避免重复造轮子。
-- 只有远端已经存在、且本地尚未包含的 commit 才需要 `git pull`；“分支是堆叠的”本身不等于每做完一层都要 pull/merge main。
+规则：
+
+- **一个功能 = 一个独立 `feat/...` 分支**；
+- 功能完成并验收后，feature 分支继续保留作为 checkpoint；
+- 已验收代码进入 `dev/002-commerce-after-sales-mvp`，作为下一功能的统一基线；
+- 下一个功能重新从最新 dev 创建新 feature 分支，禁止继续从前一个 feature 分支派生；
+- `main` 只在明确阶段 Gate 完成、且用户确认后再更新；
+- T019–T024 已经形成的历史分支全部保留，不删除；它们虽然历史上曾线性派生，但从本规则生效后不再继续这种模式；
+- 旧的 2026-09-15 `dev/002-commerce-after-sales-mvp` 历史在重置集成线前先归档，避免丢失任何旧提交。
+
+下一步 T025 若需要开发，应先从**最新 dev**新建独立功能分支；开始前先核对 T020 已实现的 deterministic eligibility，避免重复实现。
 
 ## 阶段总览
 
