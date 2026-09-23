@@ -32,8 +32,7 @@ public class OrderController {
     }
 
     @GetMapping("/{orderId}")
-    OrderSnapshot getOwnOrder(
-            @AuthenticationPrincipal CommercePrincipal principal, @PathVariable String orderId) {
+    OrderSnapshot getOwnOrder(@AuthenticationPrincipal CommercePrincipal principal, @PathVariable String orderId) {
         return orderService.getOrder(principal, orderId);
     }
 }

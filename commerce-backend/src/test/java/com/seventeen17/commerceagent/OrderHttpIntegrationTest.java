@@ -81,8 +81,7 @@ class OrderHttpIntegrationTest {
         seedCustomerOrders();
         String token = localJwtIssuer.issue(CUSTOMER_ID);
 
-        mockMvc.perform(get("/api/v1/orders/{orderId}", OWN_ORDER_ID)
-                        .header("Authorization", "Bearer " + token))
+        mockMvc.perform(get("/api/v1/orders/{orderId}", OWN_ORDER_ID).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.orderId").value(OWN_ORDER_ID))
                 .andExpect(jsonPath("$.status").value("SHIPPED"))
@@ -97,8 +96,7 @@ class OrderHttpIntegrationTest {
         String token = localJwtIssuer.issue(CUSTOMER_ID);
         String message = "The order does not exist or is not accessible to the authenticated user";
 
-        mockMvc.perform(get("/api/v1/orders/{orderId}", OTHER_ORDER_ID)
-                        .header("Authorization", "Bearer " + token))
+        mockMvc.perform(get("/api/v1/orders/{orderId}", OTHER_ORDER_ID).header("Authorization", "Bearer " + token))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("ORDER_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").value(message));
@@ -144,12 +142,7 @@ class OrderHttpIntegrationTest {
     private void seedOrder(String orderId, String ownerId, String productName) {
         Order order = Order.create(orderId, ownerId, OrderStatus.SHIPPED, new BigDecimal("199.00"), "USD");
         order.addItem(OrderItem.create(
-                orderId + "-item",
-                orderId + "-product",
-                productName,
-                "ELECTRONICS",
-                new BigDecimal("199.00"),
-                1));
+                orderId + "-item", orderId + "-product", productName, "ELECTRONICS", new BigDecimal("199.00"), 1));
         orderRepository.saveAndFlush(order);
     }
 }
