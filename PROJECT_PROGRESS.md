@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 3 — US1 MVP
-- **当前 Tasks**：T025（先核对 T020 已实现的 deterministic eligibility 与原 T025 描述是否重复，避免重复实现）
+- **当前 Tasks**：T027/T028 缺口核对（T025 已确认随 T020 提前完成；下一步先判断 RefundService 还缺什么，再决定是否直接进入 Refund HTTP API）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -28,7 +28,7 @@
   - T023 — customer-scoped order list/detail HTTP API：新增 `OrderController` 暴露 `GET /api/v1/orders` 与 `GET /api/v1/orders/{orderId}`；`SecurityConfig` 将两个读端点限制为 `CUSTOMER`，ownership 继续复用 T019 `OrderService`，cross-owner 与不存在统一为 `404 ORDER_NOT_FOUND`；`OrderHttpIntegrationTest` 现有 **7 个** MockMvc + Testcontainers 用例覆盖 list/detail 的 401/403、owner 200、cross-owner/missing concealment。T023 初次全量 Java `clean verify` → **138 tests / BUILD SUCCESS**；Python 四条门禁全绿，`pytest -q` **261 passed, 6 skipped**，`test_commerce_client.py` **32 passed**；review 后新增的两个 HTTP 权限用例已本地定点复验 **7/7 通过**。
   - T024 — customer-scoped logistics HTTP API：新增 `GET /api/v1/orders/{orderId}/logistics`，复用 T019 `LogisticsService` / `LogisticsStallCalculator`；`LogisticsHttpIntegrationTest` **8/8** 通过；本地 `mvnw.cmd clean verify` → **148 tests / BUILD SUCCESS**，Spotless 90 files clean、SpotBugs 0；Web `npm.cmd run build` / `npm.cmd run lint` 全绿；5173 实测 `order-001` → 200 + `IN_TRANSIT` + `stalledHours > 48`，cross-owner `order-002` 与不存在订单均 → 404 `ORDER_NOT_FOUND`；同一页面 09/10/11 真实 Agent Run API 也已实测：Create Run → **201**，Read Run → **200**，Read Events → **200**。
 - **T022 review hardening（已本地复验）**：在原 258 passed / 6 skipped 基线上补齐 3 个恢复边界：① `AfterSalesStatus.refunds/returns` 必填；② unknown-write recovery 用 `idempotencyKey` 过滤权威状态；③ `WriteIntent` 增加稳定 request fingerprint，恢复 payload 漂移时 fail closed。2026-09-23 本地复验：`ruff check` **All checks passed**、`ruff format --check` **41 files**、`mypy app` **Success 25 source files**、`pytest -q` **261 passed, 6 skipped**。
-- **当前优先任务**：T025 — 开始前先核对 T020 已落地的 deterministic eligibility 与 T025 原任务描述，已有能力不重复实现，只补真实缺口。
+- **当前优先任务**：T027/T028 缺口核对 — T025 已确认由 T020 的 `EligibilityService` / `EligibilityDecision` 完整覆盖，不重复开发；下一步检查退款写服务是否只剩被明确延期到 US4 的 approval binding，若是，则直接进入 T028 Refund/After-sales HTTP API。
 - **任务勾选口径说明（T021/T022）**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理，编号修正为 `V003`）；T027 **部分交付**（ownership / state / eligibility / amount 写前重校验、幂等、行锁、审计、状态读面已完成），**仍缺**权威 `approvalRequestId` 绑定（US4/T049）；T029 **客户端写面已交付**，**仍缺** Tool Envelope / allowlist；T031 **恢复核心已交付**，**仍缺** `verify_business_state.py` 与 graph 接线（T032）。
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
@@ -87,7 +87,7 @@ main
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
 | 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ✅ Complete（T008–T018 ✅） |
-| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T024 ✅，下一步 T025 状态核对） |
+| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T026 已实现/对齐，下一步 T027/T028 缺口核对） |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
 | 6 | 安全降级 | T057–T063 | 依赖失败 / 规则冲突时 Safe Stop 或转人工 | ⬜ |
