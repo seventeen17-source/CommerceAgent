@@ -30,6 +30,13 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/agent/, '/api/v1/agent'),
       },
       '/health': { target: 'http://127.0.0.1:8000', changeOrigin: false },
+      // T024 page-level acceptance: call the Java business authority directly from :5173.
+      // This is intentionally a Java API validation path, not the final Agent Tool path.
+      '/commerce': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: false,
+        rewrite: (path) => path.replace(/^\/commerce/, '/api/v1'),
+      },
     },
   },
 })
