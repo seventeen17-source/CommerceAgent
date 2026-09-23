@@ -81,8 +81,7 @@ class LogisticsHttpIntegrationTest {
 
     @Test
     void unauthenticatedLogisticsReadIsRejected() throws Exception {
-        mockMvc.perform(get("/api/v1/orders/{orderId}/logistics", OWN_ORDER_ID))
-                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/orders/{orderId}/logistics", OWN_ORDER_ID)).andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -101,16 +100,9 @@ class LogisticsHttpIntegrationTest {
         seedUser(CUSTOMER_ID, UserRole.CUSTOMER);
         seedOrder(OWN_ORDER_ID, CUSTOMER_ID, OrderStatus.SHIPPED);
         Shipment shipment = seedShipment(
-                "t024-shipment-own",
-                OWN_ORDER_ID,
-                ShipmentStatus.IN_TRANSIT,
-                NOW.minus(Duration.ofHours(96)),
-                null);
+                "t024-shipment-own", OWN_ORDER_ID, ShipmentStatus.IN_TRANSIT, NOW.minus(Duration.ofHours(96)), null);
         logisticsEventRepository.saveAndFlush(LogisticsEvent.create(
-                shipment,
-                "IN_TRANSIT",
-                "T024 more recent authoritative event",
-                NOW.minus(Duration.ofHours(72))));
+                shipment, "IN_TRANSIT", "T024 more recent authoritative event", NOW.minus(Duration.ofHours(72))));
 
         String token = localJwtIssuer.issue(CUSTOMER_ID);
 
