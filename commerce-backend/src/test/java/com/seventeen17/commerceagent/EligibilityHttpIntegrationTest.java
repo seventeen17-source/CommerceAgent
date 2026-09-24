@@ -27,8 +27,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
@@ -212,8 +212,8 @@ class EligibilityHttpIntegrationTest {
         seedUser(CUSTOMER_ID, UserRole.CUSTOMER);
         seedOrder(OWN_ORDER_ID, CUSTOMER_ID);
         seedRule();
-        Shipment shipment = Shipment.create(
-                "t025-shipment-own", OWN_ORDER_ID, "T025", "T025-OWN", ShipmentStatus.IN_TRANSIT);
+        Shipment shipment =
+                Shipment.create("t025-shipment-own", OWN_ORDER_ID, "T025", "T025-OWN", ShipmentStatus.IN_TRANSIT);
         shipment.setLastEventAt(NOW.minus(Duration.ofHours(stalledHours)));
         shipmentRepository.saveAndFlush(shipment);
     }
