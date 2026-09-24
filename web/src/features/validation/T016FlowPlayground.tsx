@@ -460,7 +460,16 @@ export function T016FlowPlayground() {
           <span className="capability-badge persisted">T017 · PERSISTED</span>
           <span className="capability-badge live">T018 · LIVE API</span>
           <span className="capability-badge live">T024 · LIVE JAVA</span>
-          <span className="capability-badge live">T025 · LIVE ELIGIBILITY</span>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('check-eligibility')
+            }}
+          >
+            T025 · LIVE ELIGIBILITY
+          </button>
         </div>
       </header>
 
