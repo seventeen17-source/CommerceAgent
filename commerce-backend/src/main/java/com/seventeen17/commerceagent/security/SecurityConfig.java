@@ -40,6 +40,8 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/orders", "/api/v1/orders/**")
                         .hasRole("CUSTOMER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/after-sales/eligibility")
+                        .hasRole("CUSTOMER")
                         .anyRequest()
                         .authenticated())
                 .exceptionHandling(exceptions -> exceptions
