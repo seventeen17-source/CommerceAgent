@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 3 — US1 MVP
-- **当前 Tasks**：T025（进行中：已完成 T020 复用审计与 HTTP/页面验收入口实现；待本地定点测试、Java 全量 verify、5173 实测后正式勾选）
+- **当前 Tasks**：T028 — Refund / After-sales Status HTTP API（T025 已完成并验收；T026 已随 T021 交付；T027 核心写路径已提前交付，approval binding 明确留到 US4/T049；当前进入 T028 HTTP 暴露与 unknown-write recovery 读面）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -27,8 +27,9 @@
   - T022 — Agent 侧写路径与未知结果恢复：`app/agent/execute_write.py`（**write-ahead intent**：key 先落盘再发请求；单次尝试 → 未知结果先读权威状态 → 同 key 有限预算重试 → 预算耗尽 `UNKNOWN` 升级；intent 落盘失败则一字节都不发）、`app/agent/state.py`（新增 `WriteIntent` + `AgentState.write_intent`，让"从未发出"与"发了但结果未知"可区分）、`app/clients/commerce_client.py`（写面 `create_refund`（`request_is_safe=False`）/ `get_after_sales_status` + `Idempotency-Key` 形状校验 + 禁止 `extra_headers` 覆盖 `Authorization`）、`app/clients/models.py`（`CreateRefundRequest`/`RefundResult`/`AfterSalesStatus`）。新测试 `tests/integration/test_us1_logistics_refund.py` **13 个用例**（有状态假 Java：能"已提交但响应丢失"、能拒绝换 key 的第二笔）。**顺带修掉一个 T017 遗留的护栏漏洞**：`test_state_secret_guard.py` 的 `_carries_text` 不递归进嵌套模型，导致 `SomeModel | None` 类型的字段（`principal`、`write`、`verification`、`eligibility`、`approval`，以及本次新增的 `write_intent`）**一个探针都没有**却仍被判为"已覆盖"；改为递归后这些字段全部进入凭据探针矩阵。Python 四条门禁全绿（`ruff check` **All checks passed**、`ruff format --check` **41 files**、`mypy app` **Success 25 files**、`pytest -q` **258 passed, 6 skipped**）。验收证据见「T022 验收证据」
   - T023 — customer-scoped order list/detail HTTP API：新增 `OrderController` 暴露 `GET /api/v1/orders` 与 `GET /api/v1/orders/{orderId}`；`SecurityConfig` 将两个读端点限制为 `CUSTOMER`，ownership 继续复用 T019 `OrderService`，cross-owner 与不存在统一为 `404 ORDER_NOT_FOUND`；`OrderHttpIntegrationTest` 现有 **7 个** MockMvc + Testcontainers 用例覆盖 list/detail 的 401/403、owner 200、cross-owner/missing concealment。T023 初次全量 Java `clean verify` → **138 tests / BUILD SUCCESS**；Python 四条门禁全绿，`pytest -q` **261 passed, 6 skipped**，`test_commerce_client.py` **32 passed**；review 后新增的两个 HTTP 权限用例已本地定点复验 **7/7 通过**。
   - T024 — customer-scoped logistics HTTP API：新增 `GET /api/v1/orders/{orderId}/logistics`，复用 T019 `LogisticsService` / `LogisticsStallCalculator`；`LogisticsHttpIntegrationTest` **8/8** 通过；本地 `mvnw.cmd clean verify` → **148 tests / BUILD SUCCESS**，Spotless 90 files clean、SpotBugs 0；Web `npm.cmd run build` / `npm.cmd run lint` 全绿；5173 实测 `order-001` → 200 + `IN_TRANSIT` + `stalledHours > 48`，cross-owner `order-002` 与不存在订单均 → 404 `ORDER_NOT_FOUND`；同一页面 09/10/11 真实 Agent Run API 也已实测：Create Run → **201**，Read Run → **200**，Read Events → **200**。
+  - T025 — deterministic EligibilityDecision 正式验收完成：复用 T020 `EligibilityService` / `EligibilityDecision` 核心并补齐受保护 `POST /api/v1/after-sales/eligibility`、HTTP 集成测试与 Flow Playground live 验证；2026-09-25 本地实测 `EligibilityHttpIntegrationTest` **7/7**、Java `clean verify` **BUILD SUCCESS**、Web build 成功、Web lint **0 warnings / 0 errors**；5173 实测 `customer-001 + order-001` → **200 + authoritative EligibilityDecision**，cross-owner `order-002` 与不存在订单均 → **404 ORDER_NOT_FOUND**。
 - **T022 review hardening（已本地复验）**：在原 258 passed / 6 skipped 基线上补齐 3 个恢复边界：① `AfterSalesStatus.refunds/returns` 必填；② unknown-write recovery 用 `idempotencyKey` 过滤权威状态；③ `WriteIntent` 增加稳定 request fingerprint，恢复 payload 漂移时 fail closed。2026-09-23 本地复验：`ruff check` **All checks passed**、`ruff format --check` **41 files**、`mypy app` **Success 25 source files**、`pytest -q` **261 passed, 6 skipped**。
-- **当前优先任务**：T025 — 进行中。已按 `AGENTS.md` / `LEARNING_PROTOCOL.md` 重新定位并审计：T020 已提前实现并测试 deterministic `EligibilityService` / `EligibilityDecision` 核心，T025 不重复重写规则；当前补齐 `POST /api/v1/after-sales/eligibility` 的受保护 HTTP 消费边界、HTTP 集成测试与 Flow Playground 页面级验证。`reasonCode` 仅是描述性上下文，eligibility 请求没有金额字段；金额只来自权威订单与规则。尚未完成本地定点测试、Java `clean verify`、Web build/lint 与 5173 实测，因此 T025 仍未勾选。
+- **当前优先任务**：T028 — Refund / After-sales Status HTTP API。T025 已于 2026-09-25 完成本地定点测试、Java `clean verify`、Web build/lint 与 5173 owner/cross-owner/missing 实测并正式关闭。T026 已全部交付；T027 的 ownership/current-state/eligibility/amount 重校验、幂等、订单行锁、退款写入、订单投影、审计和状态读面已提前交付，真正的 approval binding 仍归 US4/T049。T028 负责把现有 RefundService 暴露为 `POST /api/v1/refunds` 与 `GET /api/v1/orders/{orderId}/after-sales`，其中后者必须支持可选 `idempotencyKey` 过滤，为 unknown-write recovery 提供权威读后验证。
 - **任务勾选口径说明（T021/T022）**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理，编号修正为 `V003`）；T027 **部分交付**（ownership / state / eligibility / amount 写前重校验、幂等、行锁、审计、状态读面已完成），**仍缺**权威 `approvalRequestId` 绑定（US4/T049）；T029 **客户端写面已交付**，**仍缺** Tool Envelope / allowlist；T031 **恢复核心已交付**，**仍缺** `verify_business_state.py` 与 graph 接线（T032）。
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
@@ -78,7 +79,7 @@ main
 - T019–T024 已经形成的历史分支全部保留，不删除；它们虽然历史上曾线性派生，但从本规则生效后不再继续这种模式；
 - 旧的 2026-09-15 `dev/002-commerce-after-sales-mvp` 历史在重置集成线前先归档，避免丢失任何旧提交。
 
-T025 已从**最新 dev**创建独立分支 `feat/us1-eligibility-http-api`；旧 `feat/us1-eligibility-decision` 保留为历史 T020 checkpoint，不删除、不重写。后续 T025 只在新分支完成验收与文档收口。
+T025 已从**最新 dev**创建独立分支 `feat/us1-eligibility-http-api` 并于 2026-09-25 完成验收；该分支继续保留为 T025 checkpoint。旧 `feat/us1-eligibility-decision` 保留为历史 T020 checkpoint，不删除、不重写。T025 合入 `dev/002-commerce-after-sales-mvp` 后，T028 必须重新从最新 dev 创建独立分支 `feat/us1-refund-http-api`，禁止从 T025 feature 继续线性派生。
 
 ## 阶段总览
 
@@ -87,7 +88,7 @@ T025 已从**最新 dev**创建独立分支 `feat/us1-eligibility-http-api`；�
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
 | 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ✅ Complete（T008–T018 ✅） |
-| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T024 ✅，T025 尚未开始） |
+| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T026 ✅；T027 核心写路径已交付、approval binding 留 US4；T028 当前） |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
 | 6 | 安全降级 | T057–T063 | 依赖失败 / 规则冲突时 Safe Stop 或转人工 | ⬜ |
@@ -139,7 +140,7 @@ T025 已从**最新 dev**创建独立分支 `feat/us1-eligibility-http-api`；�
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
 10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
 11. ✅ T018：FastAPI 认证 / principal / run ownership / run 骨架接口（Python 四条门禁全绿 → 234 passed；Web build + lint 通过；**5173 端到端流转实测通过**）—— Phase 2 收口
-12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径已钉死；T020 ✅ 资格决策与拒绝模型已钉死；T021 ✅ 退款写入与幂等/并发已钉死；T022 ✅ Agent 侧写路径与未知结果恢复已钉死；T023 ✅ customer-scoped order HTTP API 已完成，当前 T024）
+12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径；T020 ✅ 资格决策；T021 ✅ 退款写入与幂等/并发测试；T022 ✅ Agent 侧 unknown-write recovery；T023 ✅ Order HTTP；T024 ✅ Logistics HTTP；T025 ✅ Eligibility HTTP；T026 ✅ Refund persistence；T027 核心写路径已提前交付、approval binding 留 US4；当前 T028 Refund / After-sales Status HTTP）
 
 ### T008 验收证据
 
