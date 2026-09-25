@@ -9,7 +9,7 @@ type ScenarioId =
   | 'trace-mismatch'
 
 type StepStatus = 'pending' | 'success' | 'warning' | 'blocked'
-type LiveStepId = 'read-logistics' | 'create-run' | 'read-run' | 'read-events'
+type LiveStepId = 'read-logistics' | 'check-eligibility' | 'create-run' | 'read-run' | 'read-events'
 
 type FlowStep = {
   id: string
@@ -40,6 +40,7 @@ type CompletedLiveSteps = Record<LiveStepId, boolean>
 
 const AGENT_API = '/agent/runs'
 const COMMERCE_API = '/commerce/orders'
+const ELIGIBILITY_API = '/commerce/after-sales/eligibility'
 
 const scenarios: Scenario[] = [
   { id: 'normal', label: '正常流程', summary: '身份 → 订单 → 物流 → eligibility 全部通过' },
@@ -269,6 +270,18 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
       note: '这是 T024 的真实 Java API 页面验收，不经过 Agent Tool；真正 Web → Agent → Tool → Java 链路在 T029/T032 接入。',
     },
     {
+      id: 'check-eligibility',
+      live: 'check-eligibility',
+      title: '读取真实售后资格',
+      file: 'EligibilityController.java + EligibilityService.java',
+      action: 'POST /api/v1/after-sales/eligibility',
+      input: 'Bearer token + orderId + reasonCode',
+      work: 'T025 把已由 T020 验证过的 deterministic EligibilityService 正式接入当前 US1 主链；页面经 Vite dev proxy 调 Java :8080，Java 使用认证 principal、订单、物流和规则事实返回权威 EligibilityDecision。reasonCode 只是描述性上下文，不参与规则选择或金额计算。',
+      output: 'eligible / allowedAction / maxRefundAmount / approvalRequired / ruleCode / ruleVersion / reasonCodes',
+      status: statusFor('check-eligibility'),
+      note: '这是 T025 的页面级验收：验证 deterministic EligibilityDecision 能通过真实 HTTP 边界被消费；仍不冒充 T029/T030/T032 才会完成的 Agent Tool / LangGraph 主链。',
+    },
+    {
       id: 'create-run',
       live: 'create-run',
       title: '创建并持久化 Agent Run',
@@ -314,9 +327,11 @@ export function T016FlowPlayground() {
   const [message, setMessage] = useState('我的耳机物流很久没动了，能退款吗？')
   const [runId, setRunId] = useState('')
   const [orderId, setOrderId] = useState('order-001')
+  const [reasonCode, setReasonCode] = useState('LOGISTICS_DELAY')
   const [result, setResult] = useState<CallResult>({ kind: 'idle' })
   const [completedLiveSteps, setCompletedLiveSteps] = useState<CompletedLiveSteps>({
     'read-logistics': false,
+    'check-eligibility': false,
     'create-run': false,
     'read-run': false,
     'read-events': false,
@@ -339,20 +354,29 @@ export function T016FlowPlayground() {
       })
       return
     }
-    if (step === 'read-logistics' && !orderId.trim()) {
+    if ((step === 'read-logistics' || step === 'check-eligibility') && !orderId.trim()) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 orderId。' })
+      return
+    }
+    if (step === 'check-eligibility' && !reasonCode.trim()) {
+      setResult({ kind: 'error', step, status: null, detail: '请先填写 reasonCode。' })
       return
     }
     if (step === 'create-run' && !message.trim()) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写用户请求。' })
       return
     }
-    if (step !== 'read-logistics' && step !== 'create-run' && !runId.trim()) {
+    if (
+      step !== 'read-logistics' &&
+      step !== 'check-eligibility' &&
+      step !== 'create-run' &&
+      !runId.trim()
+    ) {
       setResult({
         kind: 'error',
         step,
         status: null,
-        detail: '请先执行步骤 08 创建 Run，或在 runId 输入框中填入已有 ID。',
+        detail: '请先执行步骤 10 创建 Run，或在 runId 输入框中填入已有 ID。',
       })
       return
     }
@@ -360,15 +384,25 @@ export function T016FlowPlayground() {
     const path =
       step === 'read-logistics'
         ? `${COMMERCE_API}/${encodeURIComponent(orderId.trim())}/logistics`
-        : step === 'create-run'
-          ? AGENT_API
-          : step === 'read-run'
-            ? `${AGENT_API}/${runId.trim()}`
-            : `${AGENT_API}/${runId.trim()}/events`
+        : step === 'check-eligibility'
+          ? ELIGIBILITY_API
+          : step === 'create-run'
+            ? AGENT_API
+            : step === 'read-run'
+              ? `${AGENT_API}/${runId.trim()}`
+              : `${AGENT_API}/${runId.trim()}/events`
     const init: RequestInit =
-      step === 'create-run'
-        ? { method: 'POST', body: JSON.stringify({ message: message.trim() }) }
-        : { method: 'GET' }
+      step === 'check-eligibility'
+        ? {
+            method: 'POST',
+            body: JSON.stringify({
+              orderId: orderId.trim(),
+              reasonCode: reasonCode.trim(),
+            }),
+          }
+        : step === 'create-run'
+          ? { method: 'POST', body: JSON.stringify({ message: message.trim() }) }
+          : { method: 'GET' }
 
     setResult({ kind: 'pending', step })
     try {
@@ -402,7 +436,7 @@ export function T016FlowPlayground() {
         kind: 'error',
         step,
         status: null,
-        detail: `${String(error)} - Agent API :8000 是否已启动？`,
+        detail: `${String(error)} - 对应服务（Agent :8000 / Java :8080）是否已启动？`,
       })
     }
   }
@@ -426,6 +460,16 @@ export function T016FlowPlayground() {
           <span className="capability-badge persisted">T017 · PERSISTED</span>
           <span className="capability-badge live">T018 · LIVE API</span>
           <span className="capability-badge live">T024 · LIVE JAVA</span>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('check-eligibility')
+            }}
+          >
+            T025 · LIVE ELIGIBILITY
+          </button>
         </div>
       </header>
 
@@ -502,7 +546,11 @@ export function T016FlowPlayground() {
                 <article key={step.id} className="step-detail live-step-detail">
                   <div className="detail-header">
                     <div>
-                      <span className="section-kicker">LIVE STEP · T017 PERSISTENCE VIA T018 API</span>
+                      <span className="section-kicker">
+                        {step.live === 'read-logistics' || step.live === 'check-eligibility'
+                          ? 'LIVE STEP · JAVA BUSINESS AUTHORITY'
+                          : 'LIVE STEP · T017 PERSISTENCE VIA T018 API'}
+                      </span>
                       <h2>{step.title}</h2>
                     </div>
                     <span className={`status-pill ${step.status}`}>
@@ -552,6 +600,23 @@ export function T016FlowPlayground() {
                             placeholder="例如 order-001"
                           />
                         </>
+                      ) : step.live === 'check-eligibility' ? (
+                        <>
+                          <label htmlFor="live-eligibility-order-id">orderId</label>
+                          <input
+                            id="live-eligibility-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                          <label htmlFor="live-reason-code">reasonCode</label>
+                          <input
+                            id="live-reason-code"
+                            value={reasonCode}
+                            onChange={(event) => setReasonCode(event.target.value)}
+                            placeholder="例如 LOGISTICS_DELAY"
+                          />
+                        </>
                       ) : step.live === 'create-run' ? (
                         <>
                           <label htmlFor="live-user-request">User request</label>
@@ -569,7 +634,7 @@ export function T016FlowPlayground() {
                             id={`run-id-${step.live}`}
                             value={runId}
                             onChange={(event) => setRunId(event.target.value)}
-                            placeholder="先执行步骤 08，或填入已有 runId"
+                            placeholder="先执行步骤 10，或填入已有 runId"
                           />
                         </>
                       )}
@@ -658,8 +723,8 @@ export function T016FlowPlayground() {
           <span>CommerceClient · T016</span><b>→</b><span>Java</span><b>→</b><span>PostgreSQL</span>
         </div>
         <p>
-          T024 现在可从页面直连 Java 验证物流权威事实；T018 提供 Agent 入口，T017 保存可恢复状态和 Trace，
-          T016 连接 Java 客户端。真正的 Web → Agent → Tool → Java 物流链路将在 T029/T032 接入。
+          T024/T025 现在可从页面直连 Java 验证物流事实与售后资格；T018 提供 Agent 入口，T017 保存可恢复状态和 Trace，
+          T016 连接 Java 客户端。真正的 Web → Agent → Tool → CommerceClient → Java 链路将在 T029/T030/T032 接入。
         </p>
       </section>
     </main>

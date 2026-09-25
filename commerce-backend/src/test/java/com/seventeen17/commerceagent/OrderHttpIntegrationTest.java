@@ -128,8 +128,7 @@ class OrderHttpIntegrationTest {
         seedUser(APPROVER_ID, UserRole.APPROVER);
         String token = localJwtIssuer.issue(APPROVER_ID);
 
-        mockMvc.perform(get("/api/v1/orders/{orderId}", OWN_ORDER_ID)
-                        .header("Authorization", "Bearer " + token))
+        mockMvc.perform(get("/api/v1/orders/{orderId}", OWN_ORDER_ID).header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("ACCESS_DENIED"));
     }

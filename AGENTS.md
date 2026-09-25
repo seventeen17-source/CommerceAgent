@@ -268,6 +268,66 @@ main                         ← 稳定 Gate
 
 Java 代码的任务验收必须以完整质量门禁为准，而不是“代码写完”或“测试通过”即完成。
 
+### Spotless 预检：任何 Agent 修改 Java 后必须主动处理
+
+本仓库使用 **Spotless + Palantir Java Format**，而且 `spotless:check` 会检查整个 Java 模块，不只检查“本次新改的文件”。因此一个新任务即使业务代码完全正确，也可能因为：
+
+- import 顺序；
+- 链式调用换行；
+- 方法调用/构造器换行；
+- 历史基线里遗留的未格式化 Java 文件；
+
+在最后 `verify` 阶段失败。
+
+为了避免用户每个 Txxx 都重复遇到“测试都过了，最后被 Spotless 卡住”，任何 Agent 只要新增或修改 Java 文件，都必须遵循这个固定流程：
+
+```text
+Java 实现/测试修改完成
+        ↓
+先处理 Spotless 格式
+        ↓
+检查 git diff，确认没有无关大面积格式改动
+        ↓
+再跑定点测试
+        ↓
+最后 mvnw.cmd clean verify
+```
+
+有本地命令执行能力时，优先在提交前运行：
+
+```powershell
+cd commerce-backend
+.\mvnw.cmd spotless:apply
+```
+
+然后必须检查：
+
+```powershell
+git diff --name-only
+git diff
+```
+
+确认 `spotless:apply` 没有顺手改出无关文件后，再进入最终验收。
+
+如果当前 Agent **没有本地命令执行能力**、只能通过 GitHub/远端编辑代码，则必须：
+
+1. 主动按仓库现有 Palantir/Spotless 风格整理 import、缩进和换行；
+2. 不要把格式修复留成“用户自己最后再处理”的默认行为；
+3. 明确提醒最终本地 `clean verify` 仍是唯一构建事实；
+4. 如果 `verify` 报到一个并非本任务修改的旧文件，先比较该文件与 dev 基线：  
+   - 若 SHA/内容与 dev 相同，说明是**继承的基线格式债务**，可做最小格式修复并记录来源；  
+   - 不得误判成当前任务业务逻辑回归，也不得因此批量重排整个仓库。
+
+推荐的 Java 收口顺序固定为：
+
+```powershell
+.\mvnw.cmd spotless:apply
+.\mvnw.cmd "-Dtest=<CurrentTaskTest>" test
+.\mvnw.cmd clean verify
+```
+
+其中 `spotless:apply` 是**格式修复动作**，`clean verify` 是**最终验收动作**；不能因为前者执行成功就把任务视为完成。
+
 固定规则：
 
 1. 新增或修改 Java 文件时，提交前必须按仓库 Spotless / Palantir Java Format 约定整理；不要把格式修复长期留给用户本地。
