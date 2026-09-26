@@ -42,6 +42,8 @@ public class SecurityConfig {
                         .hasRole("CUSTOMER")
                         .requestMatchers(HttpMethod.POST, "/api/v1/after-sales/eligibility")
                         .hasRole("CUSTOMER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/refunds")
+                        .hasRole("CUSTOMER")
                         .anyRequest()
                         .authenticated())
                 .exceptionHandling(exceptions -> exceptions
