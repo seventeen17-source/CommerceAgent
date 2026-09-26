@@ -189,6 +189,24 @@ public class RefundService {
     }
 
     /**
+     * 按逻辑写的 idempotency key 精确读回。这个重载专供 T022/T031 unknown-write recovery。
+     *
+     * <p>先验证订单 ownership，再校验 key 形状，然后用 user + order + key 三重谓词查退款。显式空列表表示：
+     * 当前权威状态下，这个用户在这个订单上没有以该 key 提交过退款；它不能说明同一个 key 是否被用在别的订单。
+     */
+    @Transactional(readOnly = true)
+    public List<RefundResult> listRefunds(CommercePrincipal principal, String orderId, String idempotencyKey) {
+        requireCustomerCapability(principal);
+        orderService.getOrder(principal, orderId);
+        String key = requireValidIdempotencyKey(idempotencyKey);
+        return refundRequestRepository
+                .findByOrderIdAndUserIdAndIdempotencyKey(orderId, principal.userId(), key)
+                .map(RefundResult::from)
+                .stream()
+                .toList();
+    }
+
+    /**
      * 只有客户能为自己发起退款。
      *
      * <p>这是一条**补偿性控制**，不是端点权限声明的替代品：T028 的控制器仍必须按角色限制端点。放在服务里的理由
