@@ -21,4 +21,12 @@ public interface RefundRequestRepository extends JpaRepository<RefundRequest, St
 
     /** 某订单下的退款列表（写后验证与超时恢复的读面）。同样带 owner 谓词做纵深防御。 */
     List<RefundRequest> findByOrderIdAndUserIdOrderByCreatedAtAsc(String orderId, String userId);
+
+    /**
+     * unknown-write recovery 的精确读面：只有 user + order + key 三者同时匹配才算“这次逻辑写已存在”。
+     *
+     * <p>不能只按 order 查：同订单上存在另一笔退款，不代表这次超时请求已经提交。
+     */
+    Optional<RefundRequest> findByOrderIdAndUserIdAndIdempotencyKey(
+            String orderId, String userId, String idempotencyKey);
 }
