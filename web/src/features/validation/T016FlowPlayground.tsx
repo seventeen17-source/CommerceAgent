@@ -9,7 +9,14 @@ type ScenarioId =
   | 'trace-mismatch'
 
 type StepStatus = 'pending' | 'success' | 'warning' | 'blocked'
-type LiveStepId = 'read-logistics' | 'check-eligibility' | 'create-run' | 'read-run' | 'read-events'
+type LiveStepId =
+  | 'read-logistics'
+  | 'check-eligibility'
+  | 'create-run'
+  | 'create-refund'
+  | 'verify-refund'
+  | 'read-run'
+  | 'read-events'
 
 type FlowStep = {
   id: string
@@ -41,6 +48,7 @@ type CompletedLiveSteps = Record<LiveStepId, boolean>
 const AGENT_API = '/agent/runs'
 const COMMERCE_API = '/commerce/orders'
 const ELIGIBILITY_API = '/commerce/after-sales/eligibility'
+const REFUND_API = '/commerce/refunds'
 
 const scenarios: Scenario[] = [
   { id: 'normal', label: '正常流程', summary: '身份 → 订单 → 物流 → eligibility 全部通过' },
@@ -291,7 +299,31 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
       work: 'T018 验证身份与 ownership；T017 在同一事务中写入 AgentRun 和 version=1 的首个 Checkpoint。',
       output: 'runId / RUNNING / currentNode=created / version=1',
       status: statusFor('create-run'),
-      note: '这是用公开 API 验证 T017 持久化，不是另开一套 T018 页面。',
+      note: 'T028 的退款请求把这个 runId 作为溯源字段，但 Java 绝不会把 runId 当成身份或授权依据。',
+    },
+    {
+      id: 'create-refund',
+      live: 'create-refund',
+      title: '创建真实退款请求',
+      file: 'RefundController.java + RefundService.java',
+      action: 'POST /api/v1/refunds',
+      input: 'Bearer token + Idempotency-Key + orderId + reasonCode + runId',
+      work: 'T028 通过真实 HTTP 写入路径调用 Java：RefundService 在提交前重新校验 ownership、当前订单状态、eligibility 与金额；同 key 重放返回同一笔退款，不同 key 的第二笔活动退款被拒绝。',
+      output: 'refundRequestId / status=CREATED / acceptedAmount',
+      status: statusFor('create-refund'),
+      note: '这是 money-moving API。页面收到响应仍不代表 Agent 可以只靠“我发过请求”宣告成功；下一步必须从权威状态读回验证。',
+    },
+    {
+      id: 'verify-refund',
+      live: 'verify-refund',
+      title: '按 key 验证退款事实',
+      file: 'RefundController.java + RefundService.java',
+      action: 'GET /api/v1/orders/{orderId}/after-sales?idempotencyKey=K',
+      input: 'Bearer token + orderId + idempotencyKey',
+      work: 'T028 用 authenticated user + order + idempotencyKey 三重范围查询已提交事实。错误 key 返回显式 refunds=[]，不会把同订单上的其他退款误认为本次超时写成功。',
+      output: 'refunds[] / returns[]；匹配 key 时返回刚才的 refundRequestId',
+      status: statusFor('verify-refund'),
+      note: '这就是 T022/T031 unknown-write recovery 需要的 Java authority read：先确认事实，再决定是否 same-key retry。',
     },
     {
       id: 'read-run',
@@ -328,11 +360,14 @@ export function T016FlowPlayground() {
   const [runId, setRunId] = useState('')
   const [orderId, setOrderId] = useState('order-001')
   const [reasonCode, setReasonCode] = useState('LOGISTICS_DELAY')
+  const [idempotencyKey, setIdempotencyKey] = useState('t028_live_refund_001')
   const [result, setResult] = useState<CallResult>({ kind: 'idle' })
   const [completedLiveSteps, setCompletedLiveSteps] = useState<CompletedLiveSteps>({
     'read-logistics': false,
     'check-eligibility': false,
     'create-run': false,
+    'create-refund': false,
+    'verify-refund': false,
     'read-run': false,
     'read-events': false,
   })
@@ -354,12 +389,22 @@ export function T016FlowPlayground() {
       })
       return
     }
-    if ((step === 'read-logistics' || step === 'check-eligibility') && !orderId.trim()) {
+    if (
+      (step === 'read-logistics' ||
+        step === 'check-eligibility' ||
+        step === 'create-refund' ||
+        step === 'verify-refund') &&
+      !orderId.trim()
+    ) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 orderId。' })
       return
     }
-    if (step === 'check-eligibility' && !reasonCode.trim()) {
+    if ((step === 'check-eligibility' || step === 'create-refund') && !reasonCode.trim()) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 reasonCode。' })
+      return
+    }
+    if ((step === 'create-refund' || step === 'verify-refund') && !idempotencyKey.trim()) {
+      setResult({ kind: 'error', step, status: null, detail: '请先填写 Idempotency-Key。' })
       return
     }
     if (step === 'create-run' && !message.trim()) {
@@ -370,6 +415,7 @@ export function T016FlowPlayground() {
       step !== 'read-logistics' &&
       step !== 'check-eligibility' &&
       step !== 'create-run' &&
+      step !== 'verify-refund' &&
       !runId.trim()
     ) {
       setResult({
@@ -388,9 +434,13 @@ export function T016FlowPlayground() {
           ? ELIGIBILITY_API
           : step === 'create-run'
             ? AGENT_API
-            : step === 'read-run'
-              ? `${AGENT_API}/${runId.trim()}`
-              : `${AGENT_API}/${runId.trim()}/events`
+            : step === 'create-refund'
+              ? REFUND_API
+              : step === 'verify-refund'
+                ? `${COMMERCE_API}/${encodeURIComponent(orderId.trim())}/after-sales?idempotencyKey=${encodeURIComponent(idempotencyKey.trim())}`
+                : step === 'read-run'
+                  ? `${AGENT_API}/${runId.trim()}`
+                  : `${AGENT_API}/${runId.trim()}/events`
     const init: RequestInit =
       step === 'check-eligibility'
         ? {
@@ -402,7 +452,17 @@ export function T016FlowPlayground() {
           }
         : step === 'create-run'
           ? { method: 'POST', body: JSON.stringify({ message: message.trim() }) }
-          : { method: 'GET' }
+          : step === 'create-refund'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({
+                  orderId: orderId.trim(),
+                  reasonCode: reasonCode.trim(),
+                  approvalRequestId: null,
+                  runId: runId.trim(),
+                }),
+              }
+            : { method: 'GET' }
 
     setResult({ kind: 'pending', step })
     try {
@@ -411,6 +471,7 @@ export function T016FlowPlayground() {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token.trim()}`,
+          ...(step === 'create-refund' ? { 'Idempotency-Key': idempotencyKey.trim() } : {}),
         },
       })
       const text = await response.text()
@@ -469,6 +530,16 @@ export function T016FlowPlayground() {
             }}
           >
             T025 · LIVE ELIGIBILITY
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('create-refund')
+            }}
+          >
+            T028 · LIVE REFUND
           </button>
         </div>
       </header>
@@ -547,7 +618,10 @@ export function T016FlowPlayground() {
                   <div className="detail-header">
                     <div>
                       <span className="section-kicker">
-                        {step.live === 'read-logistics' || step.live === 'check-eligibility'
+                        {step.live === 'read-logistics' ||
+                        step.live === 'check-eligibility' ||
+                        step.live === 'create-refund' ||
+                        step.live === 'verify-refund'
                           ? 'LIVE STEP · JAVA BUSINESS AUTHORITY'
                           : 'LIVE STEP · T017 PERSISTENCE VIA T018 API'}
                       </span>
@@ -625,6 +699,52 @@ export function T016FlowPlayground() {
                             value={message}
                             onChange={(event) => setMessage(event.target.value)}
                             rows={2}
+                          />
+                        </>
+                      ) : step.live === 'create-refund' ? (
+                        <>
+                          <label htmlFor="live-refund-order-id">orderId</label>
+                          <input
+                            id="live-refund-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                          <label htmlFor="live-refund-reason-code">reasonCode</label>
+                          <input
+                            id="live-refund-reason-code"
+                            value={reasonCode}
+                            onChange={(event) => setReasonCode(event.target.value)}
+                            placeholder="例如 LOGISTICS_DELAY"
+                          />
+                          <label htmlFor="live-refund-key">Idempotency-Key</label>
+                          <input
+                            id="live-refund-key"
+                            value={idempotencyKey}
+                            onChange={(event) => setIdempotencyKey(event.target.value)}
+                          />
+                          <label htmlFor="live-refund-run-id">runId</label>
+                          <input
+                            id="live-refund-run-id"
+                            value={runId}
+                            onChange={(event) => setRunId(event.target.value)}
+                            placeholder="先执行创建 Run"
+                          />
+                        </>
+                      ) : step.live === 'verify-refund' ? (
+                        <>
+                          <label htmlFor="live-verify-order-id">orderId</label>
+                          <input
+                            id="live-verify-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                          <label htmlFor="live-verify-key">idempotencyKey</label>
+                          <input
+                            id="live-verify-key"
+                            value={idempotencyKey}
+                            onChange={(event) => setIdempotencyKey(event.target.value)}
                           />
                         </>
                       ) : (
@@ -723,8 +843,9 @@ export function T016FlowPlayground() {
           <span>CommerceClient · T016</span><b>→</b><span>Java</span><b>→</b><span>PostgreSQL</span>
         </div>
         <p>
-          T024/T025 现在可从页面直连 Java 验证物流事实与售后资格；T018 提供 Agent 入口，T017 保存可恢复状态和 Trace，
-          T016 连接 Java 客户端。真正的 Web → Agent → Tool → CommerceClient → Java 链路将在 T029/T030/T032 接入。
+          T024/T025/T028 现在可从页面直连 Java 验证物流事实、售后资格、退款写入与按 key 的权威写后验证；T018 提供
+          Agent Run 入口，T017 保存可恢复状态和 Trace，T016 连接 Java 客户端。真正的 Web → Agent → Tool →
+          CommerceClient → Java 自动主链将在 T029/T030/T032 接入。
         </p>
       </section>
     </main>
