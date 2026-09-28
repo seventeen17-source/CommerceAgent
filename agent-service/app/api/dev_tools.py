@@ -54,7 +54,9 @@ class CheckEligibilityRequest(_DebugRequest):
 class GetAfterSalesStatusRequest(_DebugRequest):
     tool_name: Literal["get_after_sales_status"] = Field(alias="toolName")
     order_id: str = Field(alias="orderId", min_length=1, max_length=64)
-    idempotency_key: str | None = Field(default=None, alias="idempotencyKey", min_length=8, max_length=128)
+    idempotency_key: str | None = Field(
+        default=None, alias="idempotencyKey", min_length=8, max_length=128
+    )
 
 
 SafeDebugToolRequest = Annotated[
