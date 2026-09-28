@@ -75,9 +75,7 @@ async def test_ready_handoff_calls_java_with_controlled_descriptive_reason() -> 
 
 @pytest.mark.asyncio
 async def test_java_decision_is_copied_without_agent_recomputing_amount() -> None:
-    tools = _FakeEligibilityTools(
-        ToolEnvelope(success=True, data=_java_decision(), latencyMs=2)
-    )
+    tools = _FakeEligibilityTools(ToolEnvelope(success=True, data=_java_decision(), latencyMs=2))
 
     result = await check_eligibility(
         _ready(),
@@ -124,9 +122,7 @@ async def test_failed_java_evaluation_creates_no_eligibility_snapshot() -> None:
 
 @pytest.mark.asyncio
 async def test_denied_guard_cannot_call_java_eligibility() -> None:
-    tools = _FakeEligibilityTools(
-        ToolEnvelope(success=True, data=_java_decision(), latencyMs=1)
-    )
+    tools = _FakeEligibilityTools(ToolEnvelope(success=True, data=_java_decision(), latencyMs=1))
     denied = EvidenceGuardDecision(
         status=EvidenceGuardStatus.DENIED,
         action=EvidenceAction.READY_FOR_ELIGIBILITY,
