@@ -2,7 +2,7 @@
 
 企业电商售后执行与异常处置 Agent。
 
-> 当前状态：**Phase 3 — US1 MVP**。T028（Refund / After-sales Status HTTP API）已完成并验收，当前进入 T029 Typed Tools。
+> 当前状态：**Phase 3 — US1 MVP**。T029（Typed Tools）已完成并验收，当前进入 T030 Agent 证据收集与受限 capability 决策。
 >
 > 仓库中的性能、安全、时延、成本和成功率等指标，在没有实际 Eval 运行产物之前都只视为目标，不视为已达成结果。
 
@@ -47,11 +47,12 @@ Verified Result + Structured Trace
 - **T026**：`commerce.refund_requests` migration + Entity / Repository 已随 T021 交付；
 - **T027**：RefundService 的 ownership / current-state / eligibility / amount 写前重校验、幂等、行锁、审计和状态读面已落地；真正的 approval binding 留到 US4/T049；
 - **T028**：已暴露 `POST /api/v1/refunds` 与 `GET /api/v1/orders/{orderId}/after-sales`，后者支持可选 `idempotencyKey` 精确过滤，为 unknown-write recovery 提供权威读后验证。HTTP 集成测试 **8/8**，Maven **BUILD SUCCESS**。
+- **T029**：已新增 `app/tools/`，实现六个 US1 typed tools、统一 `ToolEnvelope`、显式 allowlist、risk metadata 与 name→bound implementation 映射；`create_refund_request` 为唯一 high-write Tool，写超时归一为 `WRITE_TIMEOUT_UNKNOWN` 且禁止盲重试。Python 门禁：ruff check ✅、format **41 files**、mypy **25 source files**、pytest **261 passed, 6 skipped, 6 warnings**。
 
 当前下一步：
 
-- **T029**：把现有 `CommerceClient` 读写能力包装成 typed tools，补齐统一 Tool Envelope、allowlist 与 risk level；
-- **T030–T032**：接入 Agent 证据收集、eligibility、refund write、verify-after-write 和 LangGraph 主链。
+- **T030**：实现 `understand_request`、单候选订单解析、`decide_next_evidence`、read-tool execution、evidence validation、`check_eligibility`；
+- **T031–T032**：补独立 verify node，并把安全写入恢复与 LangGraph 主链正式接通。
 
 > 说明：Flow Playground 已有 `T028 · LIVE REFUND` 的 create + verify 控件；最近一次手工 5173 尝试命中了未重启的旧 8080 Java 进程，因此这里不把该次尝试写成成功验收证据。
 
