@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _AGENT_SERVICE_ROOT = Path(__file__).resolve().parents[2]
@@ -68,8 +69,16 @@ class Settings(BaseSettings):
 
     # ---- 模型供应商（research.md 决策 15：不写死供应商，但先支持一个 OpenAI-compatible）----
     model_provider: str = "openai"
+    model_base_url: str = "https://api.openai.com/v1"
+    model_api_key: SecretStr | None = None
     model_name: str = "gpt-4o-mini"
     model_temperature: float = 0.0
+    model_timeout_seconds: float = 30.0
+
+    @property
+    def is_model_api_key_configured(self) -> bool:
+        """Report model credential presence without ever exposing the credential value."""
+        return self.model_api_key is not None
 
     @property
     def agent_database_url(self) -> str:
