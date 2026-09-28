@@ -568,7 +568,7 @@ class PostgresRunStore(RunStore):
                 raise RunStoreError("checkpoint state principal does not match run owner")
 
             next_version = locked["version"] + 1
-            cursor.execute(
+            cursor.execute(  # noqa: S608 - static column list from _RUN_COLUMNS
                 """
                 UPDATE agent.agent_runs
                 SET version = %s,
@@ -614,7 +614,6 @@ class PostgresRunStore(RunStore):
                 state_payload=payload,
             )
             return _run_from_row(row, state=state)
-
 
     def resume(self, run_id: UUID, request: ResumeRequest) -> RunRecord:
         """Claim the resume of an interrupted run, or explain why it was refused.
