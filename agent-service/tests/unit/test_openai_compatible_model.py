@@ -6,7 +6,7 @@ import json
 
 import httpx
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from app.agent.openai_request_understanding import OpenAICompatibleRequestUnderstandingModel
 from app.agent.request_understanding import RequestIntent, understand_request
@@ -97,7 +97,7 @@ async def test_provider_json_still_passes_through_understood_request_guard() -> 
         model_name="test-model",
         transport=httpx.MockTransport(handler),
     ) as client:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             await understand_request(
                 "给我退款",
                 model=OpenAICompatibleRequestUnderstandingModel(client),
