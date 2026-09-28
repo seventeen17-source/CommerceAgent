@@ -244,3 +244,112 @@ async def test_after_sales_status_passes_exact_logical_idempotency_key() -> None
     assert result.data is not None
     assert result.data.refunds[0].refund_request_id == "refund-001"
     assert seen[0].url.params["idempotencyKey"] == "refund_key_001"
+
+
+@pytest.mark.asyncio
+async def test_create_refund_request_wraps_success_without_retrying() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "refundRequestId": "refund-001",
+                "status": "CREATED",
+                "acceptedAmount": "199.00",
+            },
+            headers={TRACE_ID_HEADER: "java-trace-refund1"},
+        )
+
+    async with _client(handler) as client:
+        result = await CommerceTools(client=client, auth=_AUTH).create_refund_request(
+            order_id="order-001",
+            reason_code="LOGISTICS_DELAY",
+            requested_amount=None,
+            idempotency_key="refund_key_001",
+            run_id="11111111-2222-4333-8444-555555555555",
+        )
+
+    assert result.success is True
+    assert result.data is not None
+    assert result.data.refund_request_id == "refund-001"
+    assert result.trace_id == "java-trace-refund1"
+    assert seen[0].headers["Idempotency-Key"] == "refund_key_001"
+
+
+@pytest.mark.asyncio
+async def test_create_refund_request_keeps_known_java_denial_non_retryable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            409,
+            json={
+                "errorCode": "AMOUNT_EXCEEDS_ALLOWED",
+                "message": "rejected",
+                "retryable": False,
+                "traceId": "java-trace-refund2",
+            },
+            headers={TRACE_ID_HEADER: "java-trace-refund2"},
+        )
+
+    async with _client(handler) as client:
+        result = await CommerceTools(client=client, auth=_AUTH).create_refund_request(
+            order_id="order-001",
+            reason_code="LOGISTICS_DELAY",
+            requested_amount=None,
+            idempotency_key="refund_key_002",
+            run_id="11111111-2222-4333-8444-555555555555",
+        )
+
+    assert result.success is False
+    assert result.error_code == "AMOUNT_EXCEEDS_ALLOWED"
+    assert result.retryable is False
+    assert result.trace_id == "java-trace-refund2"
+
+
+@pytest.mark.asyncio
+async def test_create_refund_request_timeout_becomes_unknown_write_not_retryable() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    async with _client(handler) as client:
+        result = await CommerceTools(client=client, auth=_AUTH).create_refund_request(
+            order_id="order-001",
+            reason_code="LOGISTICS_DELAY",
+            requested_amount=None,
+            idempotency_key="refund_key_003",
+            run_id="11111111-2222-4333-8444-555555555555",
+        )
+
+    assert calls == 1
+    assert result.success is False
+    assert result.error_code == "WRITE_TIMEOUT_UNKNOWN"
+    assert result.retryable is False
+    assert result.trace_id is None
+
+
+@pytest.mark.asyncio
+async def test_create_refund_request_rejects_bad_key_before_http_call() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(500)
+
+    async with _client(handler) as client:
+        result = await CommerceTools(client=client, auth=_AUTH).create_refund_request(
+            order_id="order-001",
+            reason_code="LOGISTICS_DELAY",
+            requested_amount=None,
+            idempotency_key="bad.key",
+            run_id="11111111-2222-4333-8444-555555555555",
+        )
+
+    assert calls == []
+    assert result.success is False
+    assert result.error_code == "INVALID_PARAMETER"
+    assert result.retryable is False
