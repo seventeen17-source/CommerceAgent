@@ -57,10 +57,12 @@ async def execute_read_evidence(
     if not result.success:
         return EvidenceExecutionResult(history=history)
 
-    assert result.data is not None
+    logistics = result.data
+    if logistics is None:
+        raise ValueError("successful logistics Tool result is missing data")
     evidence = EvidenceItem(
         evidence_type="LOGISTICS",
         source="get_logistics",
-        data=result.data.model_dump(by_alias=True, mode="json"),
+        data=logistics.model_dump(by_alias=True, mode="json"),
     )
     return EvidenceExecutionResult(evidence=evidence, history=history)
