@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     @property
     def is_model_api_key_configured(self) -> bool:
         """Report model credential presence without ever exposing the credential value."""
-        return self.model_api_key is not None
+        return self.model_api_key is not None and bool(self.model_api_key.get_secret_value())
 
     @property
     def agent_database_url(self) -> str:
