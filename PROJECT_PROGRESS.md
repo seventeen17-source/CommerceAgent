@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 3 — US1 MVP
-- **当前 Tasks**：T029 — Typed Tools（T028 Refund / After-sales Status HTTP API 已完成并验收；T026 已随 T021 交付；T027 核心写路径已提前交付，approval binding 明确留到 US4/T049）
+- **当前 Tasks**：T030 — Agent 证据收集与受限 capability 决策（T029 Typed Tools 已完成并验收；T031 recovery core 已提前随 T022 交付，独立 verify node 与 graph 接线仍待后续）
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -30,7 +30,8 @@
   - T025 — deterministic EligibilityDecision 正式验收完成：复用 T020 `EligibilityService` / `EligibilityDecision` 核心并补齐受保护 `POST /api/v1/after-sales/eligibility`、HTTP 集成测试与 Flow Playground live 验证；2026-09-25 本地实测 `EligibilityHttpIntegrationTest` **7/7**、Java `clean verify` **BUILD SUCCESS**、Web build 成功、Web lint **0 warnings / 0 errors**；5173 实测 `customer-001 + order-001` → **200 + authoritative EligibilityDecision**，cross-owner `order-002` 与不存在订单均 → **404 ORDER_NOT_FOUND**。
   - T028 — Refund / After-sales Status HTTP API 正式验收完成：新增 `RefundController` 暴露 `POST /api/v1/refunds` 与 `GET /api/v1/orders/{orderId}/after-sales`；`SecurityConfig` 限制 CUSTOMER；after-sales 状态读面支持 `idempotencyKey` 精确过滤，避免 unknown-write recovery 把同订单上的其他退款误认成当前逻辑写成功；`RefundHttpIntegrationTest` **8/8**，Maven **BUILD SUCCESS**。Flow Playground 已加入真实 create + verify 控件，但最近一次 5173 手工尝试因 8080 仍运行旧 Java 进程而未形成有效 live 验收证据。
 - **T022 review hardening（已本地复验）**：在原 258 passed / 6 skipped 基线上补齐 3 个恢复边界：① `AfterSalesStatus.refunds/returns` 必填；② unknown-write recovery 用 `idempotencyKey` 过滤权威状态；③ `WriteIntent` 增加稳定 request fingerprint，恢复 payload 漂移时 fail closed。2026-09-23 本地复验：`ruff check` **All checks passed**、`ruff format --check` **41 files**、`mypy app` **Success 25 source files**、`pytest -q` **261 passed, 6 skipped**。
-- **当前优先任务**：T029 — Typed Tools。T028 已正式关闭：`POST /api/v1/refunds` 与 `GET /api/v1/orders/{orderId}/after-sales` 已落地，后者支持可选 `idempotencyKey` 精确过滤；`RefundHttpIntegrationTest` **8/8**，Maven **BUILD SUCCESS**。Flow Playground 已有 `T028 · LIVE REFUND` create + verify 控件；最近一次手工 5173 尝试命中了未重启的旧 8080 Java 进程，因此不把该次 live 尝试记作成功验收证据。下一步补齐 T029 的 Tool Envelope / allowlist / risk level，把现有 CommerceClient 读写能力真正暴露成 Agent 可调用 typed tools。
+- **T029 — Typed Tools 正式验收完成**：新增 `app/tools/models.py` / `registry.py` / `commerce_tools.py`，实现六个 US1 typed tools、统一 Tool Envelope、risk metadata、显式 allowlist 与 name→bound implementation 映射；Registry 只负责 capability allowlist/metadata/binding，不承担 AgentState routing guard。退款写 transport failure 归一为 `WRITE_TIMEOUT_UNKNOWN` 且 `retryable=false`，恢复必须先走 `get_after_sales_status`。2026-09-28 Python 门禁：ruff check ✅、format check **41 files**、mypy **25 source files**、pytest **261 passed, 6 skipped, 6 warnings**。
+- **当前优先任务**：T030 — `understand_request`、单候选订单解析、`decide_next_evidence`、read-tool execution、evidence validation、`check_eligibility`；模型只能在 T029 allowlist 中建议 capability，确定性 routing/state guard 决定当前状态是否允许调用。
 - **任务勾选口径说明（T021/T022）**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理，编号修正为 `V003`）；T027 **部分交付**（ownership / state / eligibility / amount 写前重校验、幂等、行锁、审计、状态读面已完成），**仍缺**权威 `approvalRequestId` 绑定（US4/T049）；T029 **客户端写面已交付**，**仍缺** Tool Envelope / allowlist；T031 **恢复核心已交付**，**仍缺** `verify_business_state.py` 与 graph 接线（T032）。
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
