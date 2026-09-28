@@ -127,9 +127,7 @@ async def test_denied_guard_cannot_execute_a_tool() -> None:
 
 @pytest.mark.asyncio
 async def test_allowed_but_wrong_tool_name_fails_closed_before_execution() -> None:
-    tools = _FakeEvidenceTools(
-        ToolEnvelope(success=True, data=_logistics(), latencyMs=1)
-    )
+    tools = _FakeEvidenceTools(ToolEnvelope(success=True, data=_logistics(), latencyMs=1))
     malformed = EvidenceGuardDecision(
         status=EvidenceGuardStatus.ALLOWED,
         action=EvidenceAction.CALL_TOOL,
