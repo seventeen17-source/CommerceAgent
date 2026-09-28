@@ -43,24 +43,29 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Protocol
 from decimal import Decimal
 from uuid import uuid4
 
-from app.agent.state import AgentState, WriteIntent, WriteOutcome, WriteStatus
+from app.agent.state import AgentState, ToolHistoryEntry, WriteIntent, WriteOutcome, WriteStatus
 from app.clients.auth import AuthContext
 from app.clients.commerce_client import CommerceClient
-from app.clients.errors import CommerceApiError, CommerceError, CommerceTransportError
-from app.clients.models import CreateRefundRequest, RefundResult
+from app.clients.models import AfterSalesStatus, RefundResult
+from app.tools.commerce_tools import CommerceTools
+from app.tools.models import ToolEnvelope
 
 __all__ = [
     "CREATE_REFUND_ACTION",
     "DEFAULT_MAX_ATTEMPTS",
     "INTENT_NOT_DURABLE_ERROR_CODE",
     "UNKNOWN_OUTCOME_ERROR_CODE",
+    "RefundWriteExecutionResult",
     "RefundWriteIntent",
     "RefundWriteOutcome",
+    "RefundWriteTools",
     "WriteIntentConflictError",
     "create_refund",
+    "execute_refund_write",
     "refund_write_intent",
     "write_may_already_have_committed",
 ]
@@ -178,6 +183,40 @@ class RefundWriteOutcome:
         )
 
 
+class RefundWriteTools(Protocol):
+    """T029 Tool capabilities required by the T031 write executor."""
+
+    async def create_refund_request(
+        self,
+        *,
+        order_id: str,
+        reason_code: str,
+        requested_amount: Decimal | None,
+        idempotency_key: str,
+        run_id: str,
+        approval_request_id: str | None = None,
+    ) -> ToolEnvelope[RefundResult]:
+        """Attempt one protected refund write without blind retry."""
+        ...
+
+    async def get_after_sales_status(
+        self,
+        order_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> ToolEnvelope[AfterSalesStatus]:
+        """Read authoritative after-sales state for recovery."""
+        ...
+
+
+@dataclass(frozen=True)
+class RefundWriteExecutionResult:
+    """One T031 write execution plus every Tool call needed to establish its outcome."""
+
+    outcome: RefundWriteOutcome
+    history: tuple[ToolHistoryEntry, ...] = field(default_factory=tuple)
+
+
 def refund_write_intent(
     state: AgentState,
     *,
@@ -246,15 +285,41 @@ async def create_refund(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     may_already_have_committed: bool = False,
 ) -> RefundWriteOutcome:
-    """Create exactly one refund, or report that the outcome could not be established.
+    """Compatibility entrypoint retained for the T022 client-level tests.
 
-    ``persist_intent`` is required, and it is called *before* the first request with both the
-    durable intent and a ``PENDING`` outcome. The callback must persist those two values atomically:
-    a checkpoint that contains the key but still says ``NOT_ATTEMPTED`` is ambiguous on resume.
-    If that persistence fails, nothing is sent.
+    T031 moves orchestration to the T029 Tool boundary. Keeping this function avoids rewriting older
+    callers while ensuring both old and new paths share exactly one recovery policy.
+    """
+    execution = await execute_refund_write(
+        tools=CommerceTools(client=client, auth=auth),
+        intent=intent,
+        persist_intent=persist_intent,
+        max_attempts=max_attempts,
+        may_already_have_committed=may_already_have_committed,
+    )
+    return execution.outcome
+
+
+async def execute_refund_write(
+    *,
+    tools: RefundWriteTools,
+    intent: RefundWriteIntent,
+    persist_intent: Callable[[WriteIntent, WriteOutcome], Awaitable[None]],
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    may_already_have_committed: bool = False,
+    start_step_index: int = 1,
+) -> RefundWriteExecutionResult:
+    """Execute one logical refund through T029 Tools with bounded unknown-result recovery.
+
+    The durable intent is persisted before the first Tool call. A WRITE_TIMEOUT_UNKNOWN never
+    licenses a blind retry: the executor first calls get_after_sales_status with the same
+    idempotency key. Only an authoritative empty result may lead to another attempt, and every
+    attempt reuses the original key.
     """
     if not 1 <= max_attempts <= MAX_ATTEMPTS_LIMIT:
         raise ValueError(f"max_attempts must be between 1 and {MAX_ATTEMPTS_LIMIT}")
+    if start_step_index < 0:
+        raise ValueError("start_step_index must be non-negative")
 
     pending = WriteOutcome(status=WriteStatus.PENDING, action=CREATE_REFUND_ACTION)
     try:
@@ -264,117 +329,167 @@ async def create_refund(
             "refusing to send a refund whose idempotency intent could not be persisted: %s",
             type(exc).__name__,
         )
-        return RefundWriteOutcome(
-            write_status=WriteStatus.FAILED,
-            attempts=0,
-            idempotency_key=intent.idempotency_key,
-            error_code=INTENT_NOT_DURABLE_ERROR_CODE,
+        return RefundWriteExecutionResult(
+            outcome=RefundWriteOutcome(
+                write_status=WriteStatus.FAILED,
+                attempts=0,
+                idempotency_key=intent.idempotency_key,
+                error_code=INTENT_NOT_DURABLE_ERROR_CODE,
+            )
         )
 
+    history: list[ToolHistoryEntry] = []
     trace_ids: list[str] = []
+    next_step_index = start_step_index
 
     if may_already_have_committed:
-        # Resuming: read before writing. If a previous attempt did commit, this is where we find out
-        # -- without sending anything.
-        confirmed = await _confirmed_refunds(client, auth, intent.order_id, intent.idempotency_key)
-        if confirmed is None:
-            return _unknown(attempts=0, intent=intent, trace_ids=trace_ids)
+        confirmed, entry = await _tool_confirmed_refunds(
+            tools,
+            order_id=intent.order_id,
+            idempotency_key=intent.idempotency_key,
+            step_index=next_step_index,
+        )
+        history.append(entry)
+        next_step_index += 1
+        if confirmed is None or len(confirmed) > 1:
+            return RefundWriteExecutionResult(
+                outcome=_unknown(attempts=0, intent=intent, trace_ids=trace_ids),
+                history=tuple(history),
+            )
         if confirmed:
-            return _recovered(confirmed[0], attempts=0, intent=intent, trace_ids=trace_ids)
+            return RefundWriteExecutionResult(
+                outcome=_recovered(confirmed[0], attempts=0, intent=intent, trace_ids=trace_ids),
+                history=tuple(history),
+            )
 
     attempts = 0
     while attempts < max_attempts:
         attempts += 1
-        try:
-            call = await client.create_refund(
-                auth, idempotency_key=intent.idempotency_key, request=_request_body(intent)
+        result = await tools.create_refund_request(
+            order_id=intent.order_id,
+            reason_code=intent.reason_code,
+            requested_amount=intent.requested_amount,
+            idempotency_key=intent.idempotency_key,
+            run_id=intent.run_id,
+        )
+        history.append(
+            _history_entry(
+                step_index=next_step_index,
+                tool_name="create_refund_request",
+                result=result,
             )
-        except CommerceApiError as exc:
-            # "Answered" means Java did not commit, so this failure is known rather than unknown.
-            if exc.trace_id is not None:
-                trace_ids.append(exc.trace_id)
-            if exc.blind_retry_allowed and attempts < max_attempts:
-                continue
-            return RefundWriteOutcome(
+        )
+        next_step_index += 1
+
+        if result.trace_id is not None:
+            trace_ids.append(result.trace_id)
+
+        if result.success:
+            authoritative_write = result.data
+            if authoritative_write is None:
+                raise ValueError("successful refund Tool result is missing data")
+            return RefundWriteExecutionResult(
+                outcome=RefundWriteOutcome(
+                    write_status=WriteStatus.SUCCEEDED,
+                    attempts=attempts,
+                    idempotency_key=intent.idempotency_key,
+                    resource_id=authoritative_write.refund_request_id,
+                    trace_ids=tuple(trace_ids),
+                ),
+                history=tuple(history),
+            )
+
+        if result.error_code == UNKNOWN_OUTCOME_ERROR_CODE:
+            confirmed, entry = await _tool_confirmed_refunds(
+                tools,
+                order_id=intent.order_id,
+                idempotency_key=intent.idempotency_key,
+                step_index=next_step_index,
+            )
+            history.append(entry)
+            next_step_index += 1
+
+            if confirmed is None or len(confirmed) > 1:
+                return RefundWriteExecutionResult(
+                    outcome=_unknown(attempts=attempts, intent=intent, trace_ids=trace_ids),
+                    history=tuple(history),
+                )
+            if confirmed:
+                return RefundWriteExecutionResult(
+                    outcome=_recovered(
+                        confirmed[0],
+                        attempts=attempts,
+                        intent=intent,
+                        trace_ids=trace_ids,
+                    ),
+                    history=tuple(history),
+                )
+
+            # The authority answered and found no refund for this key *yet*. The same key is the only
+            # safe retry identity; exhausting the budget remains UNKNOWN because the timed-out
+            # request may still finish later.
+            continue
+
+        if result.retryable and attempts < max_attempts:
+            continue
+
+        return RefundWriteExecutionResult(
+            outcome=RefundWriteOutcome(
                 write_status=WriteStatus.FAILED,
                 attempts=attempts,
                 idempotency_key=intent.idempotency_key,
-                error_code=exc.error_code,
+                error_code=result.error_code,
                 trace_ids=tuple(trace_ids),
-            )
-        except CommerceTransportError as exc:
-            logger.warning("refund write outcome unknown for order: %s", exc.reason)
-            confirmed = await _confirmed_refunds(
-                client, auth, intent.order_id, intent.idempotency_key
-            )
-            if confirmed is None:
-                # We cannot even read the state we would need to decide. Retrying would be a guess.
-                return _unknown(attempts=attempts, intent=intent, trace_ids=trace_ids)
-            if confirmed:
-                return _recovered(
-                    confirmed[0], attempts=attempts, intent=intent, trace_ids=trace_ids
-                )
-            # The authoritative read says nothing was committed *yet*. That is not the same as
-            # "nothing ever will be" (the timed-out request may still finish), which is why the only
-            # safe next step is the same key -- never a new one.
-            continue
-        else:
-            trace_ids.append(call.trace_id)
-            return RefundWriteOutcome(
-                write_status=WriteStatus.SUCCEEDED,
-                attempts=attempts,
-                idempotency_key=intent.idempotency_key,
-                resource_id=call.value.refund_request_id,
-                trace_ids=tuple(trace_ids),
-            )
+            ),
+            history=tuple(history),
+        )
 
-    return _unknown(attempts=attempts, intent=intent, trace_ids=trace_ids)
-
-
-def _request_body(intent: RefundWriteIntent) -> CreateRefundRequest:
-    """The wire body.
-
-    Built from the contract's own field names (``model_validate`` with camelCase keys) rather than
-    from Python kwargs: the alias is what actually travels, and mypy -- without the pydantic
-    plugin -- only knows the aliased signature. Validation still happens, and ``extra="forbid"``
-    still applies.
-
-    ``approval_request_id`` is deliberately absent: V1 has no authoritative approval record, and the
-    Java side refuses a reference it cannot validate rather than storing it as if it were proof
-    (US4/T049 adds the real binding).
-    """
-    return CreateRefundRequest.model_validate(
-        {
-            "orderId": intent.order_id,
-            "reasonCode": intent.reason_code,
-            "requestedAmount": intent.requested_amount,
-            "runId": intent.run_id,
-        }
+    return RefundWriteExecutionResult(
+        outcome=_unknown(attempts=attempts, intent=intent, trace_ids=trace_ids),
+        history=tuple(history),
     )
 
 
-async def _confirmed_refunds(
-    client: CommerceClient,
-    auth: AuthContext,
+async def _tool_confirmed_refunds(
+    tools: RefundWriteTools,
+    *,
     order_id: str,
     idempotency_key: str,
-) -> list[RefundResult] | None:
-    """The authoritative refund list for an order, or ``None`` when it could not be established.
+    step_index: int,
+) -> tuple[list[RefundResult] | None, ToolHistoryEntry]:
+    """Return key-scoped refunds, preserving failed-read versus authoritative-empty semantics."""
+    result = await tools.get_after_sales_status(
+        order_id,
+        idempotency_key=idempotency_key,
+    )
+    history = _history_entry(
+        step_index=step_index,
+        tool_name="get_after_sales_status",
+        result=result,
+    )
+    if not result.success:
+        return None, history
 
-    ``None`` and ``[]`` are different answers and must never be merged: ``[]`` means "the backend
-    answered, and no refund exists", which is what makes a same-key retry safe. ``None`` means
-    "we do not know", which makes any retry a guess.
+    authoritative = result.data
+    if authoritative is None:
+        raise ValueError("successful after-sales Tool result is missing data")
+    return authoritative.refunds, history
 
-    Recovery is bound to the durable idempotency key. A different refund on the same order is an
-    important business fact, but it is not proof that *this* logical write committed. Without the
-    key filter we could incorrectly report another concurrent refund as our own success.
-    """
-    try:
-        call = await client.get_after_sales_status(auth, order_id, idempotency_key=idempotency_key)
-    except CommerceError as exc:
-        logger.warning("could not confirm refund state for the order: %s", type(exc).__name__)
-        return None
-    return call.value.refunds
+
+def _history_entry[T](
+    *,
+    step_index: int,
+    tool_name: str,
+    result: ToolEnvelope[T],
+) -> ToolHistoryEntry:
+    return ToolHistoryEntry(
+        step_index=step_index,
+        tool_name=tool_name,
+        success=result.success,
+        error_code=result.error_code,
+        retryable=result.retryable,
+        trace_id=result.trace_id,
+    )
 
 
 def _unknown(
