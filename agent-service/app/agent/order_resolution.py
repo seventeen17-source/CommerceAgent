@@ -88,9 +88,9 @@ async def resolve_single_order(
     if not listed.success:
         return OrderResolution(
             status=OrderResolutionStatus.UNRESOLVED,
-            error_code=listed.errorCode,
+            error_code=listed.error_code,
             retryable=listed.retryable,
-            trace_id=listed.traceId,
+            trace_id=listed.trace_id,
         )
 
     assert listed.data is not None
@@ -112,9 +112,9 @@ async def _confirm_candidate(order_id: str, *, tools: OrderReadTools) -> OrderRe
         return OrderResolution(
             status=OrderResolutionStatus.UNRESOLVED,
             candidate_order_ids=[order_id],
-            error_code=confirmed.errorCode,
+            error_code=confirmed.error_code,
             retryable=confirmed.retryable,
-            trace_id=confirmed.traceId,
+            trace_id=confirmed.trace_id,
         )
 
     assert confirmed.data is not None
@@ -123,5 +123,5 @@ async def _confirm_candidate(order_id: str, *, tools: OrderReadTools) -> OrderRe
         candidate_order_ids=[order_id],
         resolved_order_id=confirmed.data.order_id,
         order=confirmed.data,
-        trace_id=confirmed.traceId,
+        trace_id=confirmed.trace_id,
     )
