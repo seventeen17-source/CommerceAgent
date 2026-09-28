@@ -74,18 +74,21 @@ def test_envelope_rejects_ambiguous_success_failure_shapes(payload: dict[str, ob
 
 
 
-def test_registry_resolves_only_explicit_bound_commerce_tool_methods() -> None:
-    client = CommerceClient(base_url="http://commerce.test/api/v1", timeout_seconds=1.0)
-    tools = CommerceTools(
-        client=client,
-        auth=AuthContext(token="header.payload.signature"),
-    )
-    registry = ToolRegistry(tools=tools)
+@pytest.mark.asyncio
+async def test_registry_resolves_only_explicit_bound_commerce_tool_methods() -> None:
+    async with CommerceClient(
+        base_url="http://commerce.test/api/v1", timeout_seconds=1.0
+    ) as client:
+        tools = CommerceTools(
+            client=client,
+            auth=AuthContext(token="header.payload.signature"),
+        )
+        registry = ToolRegistry(tools=tools)
 
-    assert registry.resolve("get_order").__self__ is tools
-    assert registry.resolve("get_order").__name__ == "get_order"
-    assert registry.resolve("create_refund_request").__self__ is tools
-    assert registry.resolve("create_refund_request").__name__ == "create_refund_request"
+        assert registry.resolve("get_order").__self__ is tools
+        assert registry.resolve("get_order").__name__ == "get_order"
+        assert registry.resolve("create_refund_request").__self__ is tools
+        assert registry.resolve("create_refund_request").__name__ == "create_refund_request"
 
 
 def test_registry_cannot_resolve_unregistered_or_unbound_implementation() -> None:
