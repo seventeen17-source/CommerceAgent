@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.tools import REGISTERED_TOOL_NAMES, ToolEnvelope, ToolRegistry, ToolRisk
+from app.clients.auth import AuthContext
+from app.clients.commerce_client import CommerceClient
+from app.tools import REGISTERED_TOOL_NAMES, CommerceTools, ToolEnvelope, ToolRegistry, ToolRisk
 
 
 def test_us1_registry_exposes_only_the_six_declared_capabilities() -> None:
@@ -69,3 +71,26 @@ def test_success_envelope_uses_contract_field_names() -> None:
 def test_envelope_rejects_ambiguous_success_failure_shapes(payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         ToolEnvelope[dict[str, str]].model_validate(payload)
+
+
+
+def test_registry_resolves_only_explicit_bound_commerce_tool_methods() -> None:
+    client = CommerceClient(base_url="http://commerce.test/api/v1", timeout_seconds=1.0)
+    tools = CommerceTools(
+        client=client,
+        auth=AuthContext(token="header.payload.signature"),
+    )
+    registry = ToolRegistry(tools=tools)
+
+    assert registry.resolve("get_order").__self__ is tools
+    assert registry.resolve("get_order").__name__ == "get_order"
+    assert registry.resolve("create_refund_request").__self__ is tools
+    assert registry.resolve("create_refund_request").__name__ == "create_refund_request"
+
+
+def test_registry_cannot_resolve_unregistered_or_unbound_implementation() -> None:
+    with pytest.raises(ValueError, match="unregistered tool"):
+        ToolRegistry().resolve("__dict__")
+
+    with pytest.raises(RuntimeError, match="not bound"):
+        ToolRegistry().resolve("get_order")
