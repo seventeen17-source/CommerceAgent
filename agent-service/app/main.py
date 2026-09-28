@@ -36,6 +36,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
+from app.api.dev_t030 import router as dev_t030_router
 from app.api.dev_tools import router as dev_tools_router
 from app.api.runs import router as runs_router
 from app.clients.commerce_client import CommerceClient
@@ -129,6 +130,7 @@ def create_app(
 
     app.include_router(runs_router, prefix="/api/v1")
     app.include_router(dev_tools_router, prefix="/api/v1")
+    app.include_router(dev_t030_router, prefix="/api/v1")
 
     @app.get("/health", tags=["ops"])
     async def health(request: Request) -> dict[str, object]:
