@@ -19,6 +19,7 @@ type LiveStepId =
   | 'tool-get-logistics'
   | 'tool-check-eligibility'
   | 'tool-after-sales'
+  | 't030-live-agent'
   | 'read-run'
   | 'read-events'
 
@@ -54,6 +55,7 @@ const COMMERCE_API = '/commerce/orders'
 const ELIGIBILITY_API = '/commerce/after-sales/eligibility'
 const REFUND_API = '/commerce/refunds'
 const TOOL_DEBUG_API = '/agent/dev/tools/execute'
+const T030_DEBUG_API = '/agent/dev/t030/run'
 
 const scenarios: Scenario[] = [
   { id: 'normal', label: '正常流程', summary: '身份 → 订单 → 物流 → eligibility 全部通过' },
@@ -376,6 +378,18 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
       status: statusFor('tool-after-sales'),
     },
     {
+      id: 't030-live-agent',
+      live: 't030-live-agent',
+      title: 'T030 Agent：证据驱动资格链',
+      file: 'app/api/dev_t030.py + app/agent/*',
+      action: 'POST /api/v1/agent/dev/t030/run',
+      input: 'Bearer token + 用户自然语言',
+      work: '真实 LLM 先理解用户请求；订单线索必须经过 Java ownership 校验；模型只能在受限 evidence capability 中建议下一步，Guard 审核后执行真实物流 Tool；拿到 LOGISTICS 后重新判断，最后交给 Java EligibilityService 做确定性资格结论。',
+      output: 'understood / orderResolution / rounds[] / evidence[] / eligibility / toolHistory[]',
+      status: statusFor('t030-live-agent'),
+      note: '这是 T030 的 dev/live 验收 harness：真实 LLM + 真实 Tool + 真实 Java；正式 LangGraph 节点装配仍由 T032 完成。',
+    },
+    {
       id: 'read-run',
       live: 'read-run',
       title: '读取持久化 Run',
@@ -422,6 +436,7 @@ export function T016FlowPlayground() {
     'tool-get-logistics': false,
     'tool-check-eligibility': false,
     'tool-after-sales': false,
+    't030-live-agent': false,
     'read-run': false,
     'read-events': false,
   })
@@ -473,7 +488,7 @@ export function T016FlowPlayground() {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 Idempotency-Key。' })
       return
     }
-    if (step === 'create-run' && !message.trim()) {
+    if ((step === 'create-run' || step === 't030-live-agent') && !message.trim()) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写用户请求。' })
       return
     }
@@ -486,6 +501,7 @@ export function T016FlowPlayground() {
       step !== 'tool-get-logistics' &&
       step !== 'tool-check-eligibility' &&
       step !== 'tool-after-sales' &&
+      step !== 't030-live-agent' &&
       !runId.trim()
     ) {
       setResult({
@@ -513,6 +529,8 @@ export function T016FlowPlayground() {
                     step === 'tool-check-eligibility' ||
                     step === 'tool-after-sales'
                   ? TOOL_DEBUG_API
+                : step === 't030-live-agent'
+                  ? T030_DEBUG_API
                 : step === 'read-run'
                   ? `${AGENT_API}/${runId.trim()}`
                   : `${AGENT_API}/${runId.trim()}/events`
@@ -555,6 +573,8 @@ export function T016FlowPlayground() {
                   idempotencyKey: idempotencyKey.trim(),
                 }),
               }
+          : step === 't030-live-agent'
+            ? { method: 'POST', body: JSON.stringify({ userRequest: message.trim() }) }
           : step === 'create-refund'
             ? {
                 method: 'POST',
@@ -653,6 +673,16 @@ export function T016FlowPlayground() {
             }}
           >
             T029 · LIVE TOOL
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('t030-live-agent')
+            }}
+          >
+            T030 · LIVE AGENT
           </button>
         </div>
       </header>
