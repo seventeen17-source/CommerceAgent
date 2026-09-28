@@ -93,8 +93,10 @@ async def resolve_single_order(
             trace_id=listed.trace_id,
         )
 
-    assert listed.data is not None
-    candidate_ids = [order.order_id for order in listed.data]
+    listed_orders = listed.data
+    if listed_orders is None:
+        raise ValueError("successful list_user_orders Tool result is missing data")
+    candidate_ids = [order.order_id for order in listed_orders]
     if not candidate_ids:
         return OrderResolution(status=OrderResolutionStatus.UNRESOLVED)
     if len(candidate_ids) > 1:
@@ -117,11 +119,13 @@ async def _confirm_candidate(order_id: str, *, tools: OrderReadTools) -> OrderRe
             trace_id=confirmed.trace_id,
         )
 
-    assert confirmed.data is not None
+    confirmed_order = confirmed.data
+    if confirmed_order is None:
+        raise ValueError("successful get_order Tool result is missing data")
     return OrderResolution(
         status=OrderResolutionStatus.RESOLVED,
         candidate_order_ids=[order_id],
-        resolved_order_id=confirmed.data.order_id,
-        order=confirmed.data,
+        resolved_order_id=confirmed_order.order_id,
+        order=confirmed_order,
         trace_id=confirmed.trace_id,
     )
