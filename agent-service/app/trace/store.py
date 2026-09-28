@@ -269,6 +269,18 @@ class RunStore:
     def transition(self, run_id: UUID, transition: Transition) -> RunRecord:
         raise NotImplementedError
 
+    def checkpoint_state(
+        self,
+        run_id: UUID,
+        *,
+        expected_version: int,
+        state: AgentState,
+        current_node: str,
+        next_action: str | None = None,
+        reason_code: str | None = None,
+    ) -> RunRecord:
+        raise NotImplementedError
+
     def resume(self, run_id: UUID, request: ResumeRequest) -> RunRecord:
         raise NotImplementedError
 
@@ -512,6 +524,97 @@ class PostgresRunStore(RunStore):
                 state_payload=refreshed["state_json"],
             )
             return _run_from_row(refreshed, state=refreshed_state)
+
+    def checkpoint_state(
+        self,
+        run_id: UUID,
+        *,
+        expected_version: int,
+        state: AgentState,
+        current_node: str,
+        next_action: str | None = None,
+        reason_code: str | None = None,
+    ) -> RunRecord:
+        """Persist a full same-status AgentState snapshot with CAS protection.
+
+        This is the durability seam graph nodes need for facts that are not row projections, such as
+        write_intent, write and verification. Lifecycle changes still belong to transition(); this
+        method deliberately refuses a status change so one write path cannot bypass transition
+        guards.
+        """
+        if state.run_id != run_id:
+            raise RunStoreError("checkpoint state run_id does not match target run")
+
+        payload = state.model_dump(mode="json")
+        validate_payload(payload, "run.state_json")
+
+        with self._connect() as connection, transaction(connection) as cursor:
+            locked = self._lock_run(cursor, run_id)
+            current_status = RunStatus(locked["status"])
+
+            if current_status in TERMINAL_STATUSES:
+                raise TerminalRunError(run_id=str(run_id), status=current_status)
+            if locked["version"] != expected_version:
+                raise RunVersionConflictError(
+                    run_id=str(run_id),
+                    expected_version=expected_version,
+                    actual_version=locked["version"],
+                )
+            if state.status is not current_status:
+                raise RunStoreError(
+                    "checkpoint_state cannot change run status; use transition() instead"
+                )
+            if state.principal.user_id != locked["user_id"]:
+                raise RunStoreError("checkpoint state principal does not match run owner")
+
+            next_version = locked["version"] + 1
+            cursor.execute(
+                """
+                UPDATE agent.agent_runs
+                SET version = %s,
+                    intent = %s,
+                    resolved_order_id = %s,
+                    current_node = %s,
+                    next_action = %s,
+                    step_count = %s,
+                    retry_count = %s,
+                    state_json = %s
+                WHERE run_id = %s AND version = %s
+                RETURNING """ + _RUN_COLUMNS,
+                (
+                    next_version,
+                    state.intent,
+                    state.resolved_order_id,
+                    current_node,
+                    next_action,
+                    state.step_count,
+                    state.retry_count,
+                    Jsonb(payload),
+                    run_id,
+                    expected_version,
+                ),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise RunStoreError(
+                    f"compare-and-swap checkpoint on run {run_id} matched no row "
+                    f"at version {expected_version}"
+                )
+
+            self._insert_checkpoint(
+                cursor,
+                run_id=run_id,
+                version=next_version,
+                status=current_status,
+                current_node=current_node,
+                next_action=next_action,
+                step_count=state.step_count,
+                retry_count=state.retry_count,
+                reason_code=reason_code,
+                state_payload=payload,
+            )
+            return _run_from_row(row, state=state)
+
 
     def resume(self, run_id: UUID, request: ResumeRequest) -> RunRecord:
         """Claim the resume of an interrupted run, or explain why it was refused.
