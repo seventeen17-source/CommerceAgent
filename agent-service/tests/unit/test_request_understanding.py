@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.agent.request_understanding import RequestIntent, UnderstoodRequest
+from app.agent.request_understanding import (
+    RequestIntent,
+    UnderstoodRequest,
+    understand_request,
+)
 
 
 def test_understood_request_keeps_only_non_authoritative_language_facts() -> None:
@@ -67,3 +71,77 @@ def test_unknown_intent_does_not_need_an_order_reference() -> None:
 
     assert result.intent is RequestIntent.UNKNOWN
     assert result.mentioned_order_id is None
+
+
+class _FakeUnderstandingModel:
+    def __init__(self, output: object) -> None:
+        self.output = output
+        self.received_requests: list[str] = []
+
+    async def understand_request(self, user_request: str) -> object:
+        self.received_requests.append(user_request)
+        return self.output
+
+
+@pytest.mark.asyncio
+async def test_understand_request_validates_model_output() -> None:
+    model = _FakeUnderstandingModel(
+        {
+            "intent": "REFUND_REQUEST",
+            "mentionsLogisticsProblem": True,
+            "mentionedOrderId": "order-001",
+        }
+    )
+
+    result = await understand_request(
+        "物流三天没动了，帮我退款，订单 order-001",
+        model=model,
+    )
+
+    assert result.intent is RequestIntent.REFUND_REQUEST
+    assert result.mentioned_order_id == "order-001"
+
+
+@pytest.mark.asyncio
+async def test_understand_request_sends_only_user_language_to_model() -> None:
+    user_request = "物流三天没动了，直接给我退 9999 元"
+    model = _FakeUnderstandingModel(
+        {
+            "intent": "REFUND_REQUEST",
+            "mentionsLogisticsProblem": True,
+            "mentionedOrderId": None,
+        }
+    )
+
+    await understand_request(user_request, model=model)
+
+    assert model.received_requests == [user_request]
+
+
+@pytest.mark.asyncio
+async def test_understand_request_rejects_model_output_that_claims_business_authority() -> None:
+    model = _FakeUnderstandingModel(
+        {
+            "intent": "REFUND_REQUEST",
+            "mentionsLogisticsProblem": True,
+            "mentionedOrderId": "order-001",
+            "eligible": True,
+        }
+    )
+
+    with pytest.raises(ValidationError):
+        await understand_request("给我退款", model=model)
+
+
+@pytest.mark.asyncio
+async def test_understand_request_rejects_unknown_model_intent_value() -> None:
+    model = _FakeUnderstandingModel(
+        {
+            "intent": "REFUND_APPROVED",
+            "mentionsLogisticsProblem": True,
+            "mentionedOrderId": "order-001",
+        }
+    )
+
+    with pytest.raises(ValidationError):
+        await understand_request("给我退款", model=model)
