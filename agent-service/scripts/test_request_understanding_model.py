@@ -35,7 +35,7 @@ async def main() -> None:
             model=OpenAICompatibleRequestUnderstandingModel(client),
         )
 
-    print(result.model_dump(by_alias=True))
+    print(result.model_dump_json(by_alias=True, indent=2))
 
 
 if __name__ == "__main__":
