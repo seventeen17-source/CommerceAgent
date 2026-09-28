@@ -15,6 +15,10 @@ type LiveStepId =
   | 'create-run'
   | 'create-refund'
   | 'verify-refund'
+  | 'tool-get-order'
+  | 'tool-get-logistics'
+  | 'tool-check-eligibility'
+  | 'tool-after-sales'
   | 'read-run'
   | 'read-events'
 
@@ -49,6 +53,7 @@ const AGENT_API = '/agent/runs'
 const COMMERCE_API = '/commerce/orders'
 const ELIGIBILITY_API = '/commerce/after-sales/eligibility'
 const REFUND_API = '/commerce/refunds'
+const TOOL_DEBUG_API = '/agent/dev/tools/execute'
 
 const scenarios: Scenario[] = [
   { id: 'normal', label: '正常流程', summary: '身份 → 订单 → 物流 → eligibility 全部通过' },
@@ -326,6 +331,51 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
       note: '这就是 T022/T031 unknown-write recovery 需要的 Java authority read：先确认事实，再决定是否 same-key retry。',
     },
     {
+      id: 'tool-get-order',
+      live: 'tool-get-order',
+      title: 'T029 Tool：读取订单',
+      file: 'app/tools/registry.py + commerce_tools.py',
+      action: 'POST /api/v1/agent/dev/tools/execute',
+      input: 'Bearer token + toolName=get_order + orderId',
+      work: '5173 先到 Python Agent Service；ToolRegistry 校验 capability，再绑定 CommerceTools.get_order，随后 CommerceClient 调 Java 权威订单 API。',
+      output: 'ToolEnvelope<OrderSnapshot>',
+      status: statusFor('tool-get-order'),
+      note: '这一步验证的不是 Java API 本身，而是 Web → Python Tool → CommerceClient → Java 的 T029 链路。',
+    },
+    {
+      id: 'tool-get-logistics',
+      live: 'tool-get-logistics',
+      title: 'T029 Tool：读取物流',
+      file: 'app/tools/registry.py + commerce_tools.py',
+      action: 'POST /api/v1/agent/dev/tools/execute',
+      input: 'Bearer token + toolName=get_logistics + orderId',
+      work: 'ToolRegistry 解析 get_logistics；CommerceTools 把 Java 成功/失败统一包装为 ToolEnvelope。',
+      output: 'success / data / errorCode / retryable / latencyMs / traceId',
+      status: statusFor('tool-get-logistics'),
+    },
+    {
+      id: 'tool-check-eligibility',
+      live: 'tool-check-eligibility',
+      title: 'T029 Tool：售后资格判定',
+      file: 'app/tools/registry.py + commerce_tools.py',
+      action: 'POST /api/v1/agent/dev/tools/execute',
+      input: 'Bearer token + toolName=check_after_sales_eligibility + orderId + reasonCode',
+      work: 'Agent Tool 只传订单和原因码；退款金额仍由 Java EligibilityService 权威计算。',
+      output: 'ToolEnvelope<EligibilityDecision>',
+      status: statusFor('tool-check-eligibility'),
+    },
+    {
+      id: 'tool-after-sales',
+      live: 'tool-after-sales',
+      title: 'T029 Tool：读取售后状态',
+      file: 'app/tools/registry.py + commerce_tools.py',
+      action: 'POST /api/v1/agent/dev/tools/execute',
+      input: 'Bearer token + toolName=get_after_sales_status + orderId + idempotencyKey',
+      work: '通过 Tool 层按 logical key 读取 Java 权威售后状态，为 T031 unknown-write recovery 提供事实。',
+      output: 'ToolEnvelope<AfterSalesStatus>',
+      status: statusFor('tool-after-sales'),
+    },
+    {
       id: 'read-run',
       live: 'read-run',
       title: '读取持久化 Run',
@@ -368,6 +418,10 @@ export function T016FlowPlayground() {
     'create-run': false,
     'create-refund': false,
     'verify-refund': false,
+    'tool-get-order': false,
+    'tool-get-logistics': false,
+    'tool-check-eligibility': false,
+    'tool-after-sales': false,
     'read-run': false,
     'read-events': false,
   })
@@ -393,17 +447,29 @@ export function T016FlowPlayground() {
       (step === 'read-logistics' ||
         step === 'check-eligibility' ||
         step === 'create-refund' ||
-        step === 'verify-refund') &&
+        step === 'verify-refund' ||
+        step === 'tool-get-order' ||
+        step === 'tool-get-logistics' ||
+        step === 'tool-check-eligibility' ||
+        step === 'tool-after-sales') &&
       !orderId.trim()
     ) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 orderId。' })
       return
     }
-    if ((step === 'check-eligibility' || step === 'create-refund') && !reasonCode.trim()) {
+    if (
+      (step === 'check-eligibility' ||
+        step === 'create-refund' ||
+        step === 'tool-check-eligibility') &&
+      !reasonCode.trim()
+    ) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 reasonCode。' })
       return
     }
-    if ((step === 'create-refund' || step === 'verify-refund') && !idempotencyKey.trim()) {
+    if (
+      (step === 'create-refund' || step === 'verify-refund' || step === 'tool-after-sales') &&
+      !idempotencyKey.trim()
+    ) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 Idempotency-Key。' })
       return
     }
@@ -416,6 +482,10 @@ export function T016FlowPlayground() {
       step !== 'check-eligibility' &&
       step !== 'create-run' &&
       step !== 'verify-refund' &&
+      step !== 'tool-get-order' &&
+      step !== 'tool-get-logistics' &&
+      step !== 'tool-check-eligibility' &&
+      step !== 'tool-after-sales' &&
       !runId.trim()
     ) {
       setResult({
@@ -438,6 +508,11 @@ export function T016FlowPlayground() {
               ? REFUND_API
               : step === 'verify-refund'
                 ? `${COMMERCE_API}/${encodeURIComponent(orderId.trim())}/after-sales?idempotencyKey=${encodeURIComponent(idempotencyKey.trim())}`
+                : step === 'tool-get-order' ||
+                    step === 'tool-get-logistics' ||
+                    step === 'tool-check-eligibility' ||
+                    step === 'tool-after-sales'
+                  ? TOOL_DEBUG_API
                 : step === 'read-run'
                   ? `${AGENT_API}/${runId.trim()}`
                   : `${AGENT_API}/${runId.trim()}/events`
@@ -452,6 +527,34 @@ export function T016FlowPlayground() {
           }
         : step === 'create-run'
           ? { method: 'POST', body: JSON.stringify({ message: message.trim() }) }
+          : step === 'tool-get-order'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({ toolName: 'get_order', orderId: orderId.trim() }),
+              }
+          : step === 'tool-get-logistics'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({ toolName: 'get_logistics', orderId: orderId.trim() }),
+              }
+          : step === 'tool-check-eligibility'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({
+                  toolName: 'check_after_sales_eligibility',
+                  orderId: orderId.trim(),
+                  reasonCode: reasonCode.trim(),
+                }),
+              }
+          : step === 'tool-after-sales'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({
+                  toolName: 'get_after_sales_status',
+                  orderId: orderId.trim(),
+                  idempotencyKey: idempotencyKey.trim(),
+                }),
+              }
           : step === 'create-refund'
             ? {
                 method: 'POST',
@@ -541,6 +644,16 @@ export function T016FlowPlayground() {
           >
             T028 · LIVE REFUND
           </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('tool-get-order')
+            }}
+          >
+            T029 · LIVE TOOL
+          </button>
         </div>
       </header>
 
@@ -623,6 +736,11 @@ export function T016FlowPlayground() {
                         step.live === 'create-refund' ||
                         step.live === 'verify-refund'
                           ? 'LIVE STEP · JAVA BUSINESS AUTHORITY'
+                          : step.live === 'tool-get-order' ||
+                              step.live === 'tool-get-logistics' ||
+                              step.live === 'tool-check-eligibility' ||
+                              step.live === 'tool-after-sales'
+                            ? 'LIVE STEP · T029 PYTHON TOOL LAYER'
                           : 'LIVE STEP · T017 PERSISTENCE VIA T018 API'}
                       </span>
                       <h2>{step.title}</h2>
@@ -689,6 +807,46 @@ export function T016FlowPlayground() {
                             value={reasonCode}
                             onChange={(event) => setReasonCode(event.target.value)}
                             placeholder="例如 LOGISTICS_DELAY"
+                          />
+                        </>
+                      ) : step.live === 'tool-get-order' || step.live === 'tool-get-logistics' ? (
+                        <>
+                          <label htmlFor={`live-tool-order-${step.live}`}>orderId</label>
+                          <input
+                            id={`live-tool-order-${step.live}`}
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                        </>
+                      ) : step.live === 'tool-check-eligibility' ? (
+                        <>
+                          <label htmlFor="live-tool-elig-order">orderId</label>
+                          <input
+                            id="live-tool-elig-order"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                          />
+                          <label htmlFor="live-tool-elig-reason">reasonCode</label>
+                          <input
+                            id="live-tool-elig-reason"
+                            value={reasonCode}
+                            onChange={(event) => setReasonCode(event.target.value)}
+                          />
+                        </>
+                      ) : step.live === 'tool-after-sales' ? (
+                        <>
+                          <label htmlFor="live-tool-after-order">orderId</label>
+                          <input
+                            id="live-tool-after-order"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                          />
+                          <label htmlFor="live-tool-after-key">idempotencyKey</label>
+                          <input
+                            id="live-tool-after-key"
+                            value={idempotencyKey}
+                            onChange={(event) => setIdempotencyKey(event.target.value)}
                           />
                         </>
                       ) : step.live === 'create-run' ? (
@@ -843,9 +1001,9 @@ export function T016FlowPlayground() {
           <span>CommerceClient · T016</span><b>→</b><span>Java</span><b>→</b><span>PostgreSQL</span>
         </div>
         <p>
-          T024/T025/T028 现在可从页面直连 Java 验证物流事实、售后资格、退款写入与按 key 的权威写后验证；T018 提供
-          Agent Run 入口，T017 保存可恢复状态和 Trace，T016 连接 Java 客户端。真正的 Web → Agent → Tool →
-          CommerceClient → Java 自动主链将在 T029/T030/T032 接入。
+          T024/T025/T028 可从页面直连 Java 验证业务权威；T029 现在新增 Web → Python Agent Service →
+          ToolRegistry / CommerceTools → CommerceClient → Java 的真实 Tool 调试链。T018 提供 Agent Run 入口，
+          T017 保存可恢复状态和 Trace；T030/T032 再把 Tool 选择与 LangGraph 自动主链接起来。
         </p>
       </section>
     </main>
