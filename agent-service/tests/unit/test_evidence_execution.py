@@ -106,9 +106,7 @@ async def test_failed_read_is_recorded_but_never_promoted_to_evidence() -> None:
 
 @pytest.mark.asyncio
 async def test_denied_guard_cannot_execute_a_tool() -> None:
-    tools = _FakeEvidenceTools(
-        ToolEnvelope(success=True, data=_logistics(), latencyMs=1)
-    )
+    tools = _FakeEvidenceTools(ToolEnvelope(success=True, data=_logistics(), latencyMs=1))
     denied = EvidenceGuardDecision(
         status=EvidenceGuardStatus.DENIED,
         action=EvidenceAction.CALL_TOOL,
