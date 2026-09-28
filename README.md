@@ -2,7 +2,7 @@
 
 企业电商售后执行与异常处置 Agent。
 
-> 当前状态：**Phase 1 — Setup**。T002–T005 已完成并有本地验证证据，当前准备进入 T006–T007。
+> 当前状态：**Phase 3 — US1 MVP**。T028（Refund / After-sales Status HTTP API）已完成并验收，当前进入 T029 Typed Tools。
 >
 > 仓库中的性能、安全、时延、成本和成功率等指标，在没有实际 Eval 运行产物之前都只视为目标，不视为已达成结果。
 
@@ -38,17 +38,22 @@ Verified Result + Structured Trace
 
 ## 当前实现进度
 
-Phase 1 当前已经完成：
+项目已经完成 Setup + Foundation，并进入 **Phase 3 — US1 物流异常退款闭环**。当前已完成的主链能力包括：
 
-- **T002**：Spring Initializr 生成 `commerce-backend/`，Java 21 + Spring Boot 4.1.1，Maven Wrapper 可用；
-- **T003**：`uv init` 生成 `agent-service/`，Python 3.13，依赖与 `uv.lock` 已落地；
-- **T004**：Vite React + TypeScript 生成 `web/`，前端 build 已验证；
-- **T005**：PostgreSQL + `commerce` / `agent` / `policy` schema + 独立 DB role + Docker Compose 已配置，并实测 `agent_app` 无权访问 `commerce.*`。
+- **T018**：FastAPI Agent Run 骨架、认证 / ownership、Checkpoint / Structured Trace 持久化，以及 5173 Flow Playground 基线；
+- **T019–T020**：ownership-scoped 订单 / 物流读取、权威物流停滞计算、deterministic EligibilityDecision；
+- **T021–T022**：受保护退款写入、数据库幂等约束、订单行锁、unknown-write recovery、write-ahead intent；
+- **T023–T025**：订单、物流、Eligibility 的真实 HTTP API 与 5173 live 验证；
+- **T026**：`commerce.refund_requests` migration + Entity / Repository 已随 T021 交付；
+- **T027**：RefundService 的 ownership / current-state / eligibility / amount 写前重校验、幂等、行锁、审计和状态读面已落地；真正的 approval binding 留到 US4/T049；
+- **T028**：已暴露 `POST /api/v1/refunds` 与 `GET /api/v1/orders/{orderId}/after-sales`，后者支持可选 `idempotencyKey` 精确过滤，为 unknown-write recovery 提供权威读后验证。HTTP 集成测试 **8/8**，Maven **BUILD SUCCESS**。
 
 当前下一步：
 
-- **T006**：Java/Python 代码质量与静态检查配置；
-- **T007**：dev/test/eval 环境配置与数据库连接配置。
+- **T029**：把现有 `CommerceClient` 读写能力包装成 typed tools，补齐统一 Tool Envelope、allowlist 与 risk level；
+- **T030–T032**：接入 Agent 证据收集、eligibility、refund write、verify-after-write 和 LangGraph 主链。
+
+> 说明：Flow Playground 已有 `T028 · LIVE REFUND` 的 create + verify 控件；最近一次手工 5173 尝试命中了未重启的旧 8080 Java 进程，因此这里不把该次尝试写成成功验收证据。
 
 > `pgvector/pgvector` 镜像已作为未来能力基线使用，但 **T005 不启用 `vector` extension，也不创建向量表**；是否启用向量检索由 US6 / T065 决定。
 
