@@ -20,6 +20,7 @@ type LiveStepId =
   | 'tool-check-eligibility'
   | 'tool-after-sales'
   | 't030-live-agent'
+  | 't031-live-write'
   | 'read-run'
   | 'read-events'
 
@@ -56,6 +57,7 @@ const ELIGIBILITY_API = '/commerce/after-sales/eligibility'
 const REFUND_API = '/commerce/refunds'
 const TOOL_DEBUG_API = '/agent/dev/tools/execute'
 const T030_DEBUG_API = '/agent/dev/t030/run'
+const T031_DEBUG_API = '/agent/dev/t031/run'
 
 const scenarios: Scenario[] = [
   { id: 'normal', label: '正常流程', summary: '身份 → 订单 → 物流 → eligibility 全部通过' },
@@ -390,6 +392,18 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
       note: '这是 T030 的 dev/live 验收 harness：真实 LLM + 真实 Tool + 真实 Java；正式 LangGraph 节点装配仍由 T032 完成。',
     },
     {
+      id: 't031-live-write',
+      live: 't031-live-write',
+      title: 'T031 Agent：安全退款写入 + 权威验证',
+      file: 'app/api/dev_t031.py + execute_write.py + verify_business_state.py',
+      action: 'POST /api/v1/agent/dev/t031/run',
+      input: 'Bearer token + runId + orderId + reasonCode',
+      work: '先重新读取 Java eligibility；服务器自行生成/复用 durable idempotency key，并在 money-moving Tool 前通过 RunStore checkpoint_state 持久化 write intent；未知结果先按同 key 读权威 after-sales 状态，最后再执行 verify_business_state。',
+      output: 'write / verification / idempotencyKey / toolHistory；只有 VERIFIED_SUCCESS 才 completed=true',
+      status: statusFor('t031-live-write'),
+      note: '这是 T031 的 dev/live 验收 harness。浏览器不能提交 requestedAmount，也不能选择任意 Tool 或 idempotency key；正式 LangGraph 装配仍由 T032 完成。',
+    },
+    {
       id: 'read-run',
       live: 'read-run',
       title: '读取持久化 Run',
@@ -437,6 +451,7 @@ export function T016FlowPlayground() {
     'tool-check-eligibility': false,
     'tool-after-sales': false,
     't030-live-agent': false,
+    't031-live-write': false,
     'read-run': false,
     'read-events': false,
   })
@@ -466,7 +481,8 @@ export function T016FlowPlayground() {
         step === 'tool-get-order' ||
         step === 'tool-get-logistics' ||
         step === 'tool-check-eligibility' ||
-        step === 'tool-after-sales') &&
+        step === 'tool-after-sales' ||
+        step === 't031-live-write') &&
       !orderId.trim()
     ) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 orderId。' })
@@ -475,7 +491,8 @@ export function T016FlowPlayground() {
     if (
       (step === 'check-eligibility' ||
         step === 'create-refund' ||
-        step === 'tool-check-eligibility') &&
+        step === 'tool-check-eligibility' ||
+        step === 't031-live-write') &&
       !reasonCode.trim()
     ) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 reasonCode。' })
@@ -531,6 +548,8 @@ export function T016FlowPlayground() {
                   ? TOOL_DEBUG_API
                 : step === 't030-live-agent'
                   ? T030_DEBUG_API
+                : step === 't031-live-write'
+                  ? T031_DEBUG_API
                 : step === 'read-run'
                   ? `${AGENT_API}/${runId.trim()}`
                   : `${AGENT_API}/${runId.trim()}/events`
@@ -575,6 +594,15 @@ export function T016FlowPlayground() {
               }
           : step === 't030-live-agent'
             ? { method: 'POST', body: JSON.stringify({ userRequest: message.trim() }) }
+          : step === 't031-live-write'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({
+                  runId: runId.trim(),
+                  orderId: orderId.trim(),
+                  reasonCode: reasonCode.trim(),
+                }),
+              }
           : step === 'create-refund'
             ? {
                 method: 'POST',
@@ -684,6 +712,16 @@ export function T016FlowPlayground() {
           >
             T030 · LIVE AGENT
           </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('t031-live-write')
+            }}
+          >
+            T031 · LIVE WRITE + VERIFY
+          </button>
         </div>
       </header>
 
@@ -771,6 +809,10 @@ export function T016FlowPlayground() {
                               step.live === 'tool-check-eligibility' ||
                               step.live === 'tool-after-sales'
                             ? 'LIVE STEP · T029 PYTHON TOOL LAYER'
+                          : step.live === 't030-live-agent'
+                            ? 'LIVE STEP · T030 AGENT EVIDENCE ROUTING'
+                          : step.live === 't031-live-write'
+                            ? 'LIVE STEP · T031 SAFE WRITE + VERIFY'
                           : 'LIVE STEP · T017 PERSISTENCE VIA T018 API'}
                       </span>
                       <h2>{step.title}</h2>
@@ -888,6 +930,33 @@ export function T016FlowPlayground() {
                             onChange={(event) => setMessage(event.target.value)}
                             rows={2}
                           />
+                        </>
+                      ) : step.live === 't031-live-write' ? (
+                        <>
+                          <label htmlFor="live-t031-run-id">runId</label>
+                          <input
+                            id="live-t031-run-id"
+                            value={runId}
+                            onChange={(event) => setRunId(event.target.value)}
+                            placeholder="先执行创建 Run"
+                          />
+                          <label htmlFor="live-t031-order-id">orderId</label>
+                          <input
+                            id="live-t031-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                          <label htmlFor="live-t031-reason-code">reasonCode</label>
+                          <input
+                            id="live-t031-reason-code"
+                            value={reasonCode}
+                            onChange={(event) => setReasonCode(event.target.value)}
+                            placeholder="例如 LOGISTICS_DELAY"
+                          />
+                          <p className="helper-text">
+                            idempotency key 由 Agent 生成并先写入 checkpoint；页面不允许手填。
+                          </p>
                         </>
                       ) : step.live === 'create-refund' ? (
                         <>
