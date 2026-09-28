@@ -5,9 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from decimal import Decimal
 from time import perf_counter
-from typing import TypeVar
-
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from app.clients.auth import AuthContext
 from app.clients.commerce_client import CommerceCall, CommerceClient
@@ -29,8 +27,6 @@ from app.clients.models import (
 from app.tools.models import ToolEnvelope
 
 __all__ = ["CommerceTools"]
-
-T = TypeVar("T")
 
 
 class CommerceTools:
@@ -67,7 +63,9 @@ class CommerceTools:
         """
         started = perf_counter()
         try:
-            request = EligibilityRequest(order_id=order_id, reason_code=reason_code)
+            request = EligibilityRequest.model_validate(
+                {"orderId": order_id, "reasonCode": reason_code}
+            )
         except ValidationError:
             return _invalid_parameter(started)
 
@@ -110,12 +108,14 @@ class CommerceTools:
         """
         started = perf_counter()
         try:
-            request = CreateRefundRequest(
-                order_id=order_id,
-                reason_code=reason_code,
-                requested_amount=requested_amount,
-                approval_request_id=approval_request_id,
-                run_id=run_id,
+            request = CreateRefundRequest.model_validate(
+                {
+                    "orderId": order_id,
+                    "reasonCode": reason_code,
+                    "requestedAmount": requested_amount,
+                    "approvalRequestId": approval_request_id,
+                    "runId": run_id,
+                }
             )
             call = await self._client.create_refund(
                 self._auth,
@@ -155,7 +155,7 @@ class CommerceTools:
         )
 
 
-async def _read_tool(
+async def _read_tool[T](
     operation: Awaitable[CommerceCall[T]],
     *,
     started: float | None = None,
@@ -200,7 +200,7 @@ async def _read_tool(
     )
 
 
-def _invalid_parameter(started: float) -> ToolEnvelope[T]:
+def _invalid_parameter[T](started: float) -> ToolEnvelope[T]:
     """Fail closed on a Tool input that cannot form a contract request."""
     return ToolEnvelope[T](
         success=False,
