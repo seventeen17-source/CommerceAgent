@@ -69,9 +69,9 @@ async def test_adapter_sends_only_minimal_evidence_shape_to_model() -> None:
 
     body = json.loads(seen[0].content)
     prompt = body["messages"][1]["content"]
-    assert "\"intent\":\"REFUND_REQUEST\"" in prompt
-    assert "\"orderStatus\":\"SHIPPED\"" in prompt
-    assert "\"observedEvidenceTypes\":[\"ORDER\"]" in prompt
+    assert '"intent":"REFUND_REQUEST"' in prompt
+    assert '"orderStatus":"SHIPPED"' in prompt
+    assert '"observedEvidenceTypes":["ORDER"]' in prompt
     assert "order-001" not in prompt
     assert "customer-001" not in prompt
     assert "unit-test-secret" not in prompt
