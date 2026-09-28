@@ -47,7 +47,7 @@ Verified Result + Structured Trace
 - **T026**：`commerce.refund_requests` migration + Entity / Repository 已随 T021 交付；
 - **T027**：RefundService 的 ownership / current-state / eligibility / amount 写前重校验、幂等、行锁、审计和状态读面已落地；真正的 approval binding 留到 US4/T049；
 - **T028**：已暴露 `POST /api/v1/refunds` 与 `GET /api/v1/orders/{orderId}/after-sales`，后者支持可选 `idempotencyKey` 精确过滤，为 unknown-write recovery 提供权威读后验证。HTTP 集成测试 **8/8**，Maven **BUILD SUCCESS**。
-- **T029**：已新增 `app/tools/`，实现六个 US1 typed tools、统一 `ToolEnvelope`、显式 allowlist、risk metadata 与 name→bound implementation 映射；`create_refund_request` 为唯一 high-write Tool，写超时归一为 `WRITE_TIMEOUT_UNKNOWN` 且禁止盲重试。Python 门禁：ruff check ✅、format **41 files**、mypy **25 source files**、pytest **261 passed, 6 skipped, 6 warnings**。
+- **T029**：已新增 `app/tools/`，实现六个 US1 typed tools、统一 `ToolEnvelope`、显式 allowlist、risk metadata 与 name→bound implementation 映射；`create_refund_request` 为唯一 high-write Tool，写超时归一为 `WRITE_TIMEOUT_UNKNOWN` 且禁止盲重试。另新增 dev/test-only `/api/v1/agent/dev/tools/execute` 与 `T029 · LIVE TOOL` Flow Playground，用于观察安全只读/判定 Tool 的真实链路（不暴露 high-write Tool）。5173 已实测 `get_order`、`get_logistics`、`check_after_sales_eligibility`、`get_after_sales_status`，并验证 missing key → `refunds=[]`、cross-owner 与 missing order → 同样 `ORDER_NOT_FOUND`。最终 Python `ruff check` / `ruff format --check` / `mypy` 全绿，`pytest` **285 passed, 6 skipped, 6 warnings**；Web `npm.cmd run build` / `npm.cmd run lint` 全绿。
 
 当前下一步：
 
