@@ -34,6 +34,11 @@ from app.agent.state import (
     PrincipalContext,
     PrincipalRole,
     RunStatus,
+    VerificationOutcome,
+    VerificationStatus,
+    WriteIntent,
+    WriteOutcome,
+    WriteStatus,
 )
 from app.security.secrets import SensitiveStateError
 from app.trace.checkpoint import (
@@ -202,6 +207,103 @@ def test_a_transition_that_leaves_a_field_unset_does_not_erase_it(
     finally:
         store.delete_run(state.run_id)
 
+
+
+def test_full_state_checkpoint_persists_write_intent_and_verification(
+    connection_factory: ConnectionFactory,
+) -> None:
+    """T031 durability seam: money-write identity and verification survive a process restart."""
+    store = PostgresRunStore(connection_factory)
+    state = build_state()
+    try:
+        created = create_run(store, state)
+        updated_state = state.model_copy(
+            update={
+                "write_intent": WriteIntent(
+                    action="CREATE_REFUND_REQUEST",
+                    target_id="order-001",
+                    idempotency_key="t031_checkpoint_key_001",
+                    request_fingerprint="a" * 64,
+                ),
+                "write": WriteOutcome(
+                    status=WriteStatus.SUCCEEDED,
+                    action="CREATE_REFUND_REQUEST",
+                    resource_id="refund-001",
+                ),
+                "verification": VerificationOutcome(
+                    status=VerificationStatus.VERIFIED_SUCCESS,
+                    resource_id="refund-001",
+                    details={"refundStatus": "CREATED"},
+                ),
+            }
+        )
+
+        checkpointed = store.checkpoint_state(
+            state.run_id,
+            expected_version=created.version,
+            state=updated_state,
+            current_node="verify_business_state",
+            next_action="finalize",
+        )
+
+        assert checkpointed.version == 2
+        assert checkpointed.state is not None
+        assert checkpointed.state.write_intent is not None
+        assert checkpointed.state.write_intent.idempotency_key == "t031_checkpoint_key_001"
+        assert checkpointed.state.write.status is WriteStatus.SUCCEEDED
+        assert checkpointed.state.verification.status is VerificationStatus.VERIFIED_SUCCESS
+        assert checkpointed.state.verification.resource_id == "refund-001"
+
+        reloaded = store.get_run(state.run_id)
+        assert reloaded.state is not None
+        assert reloaded.state.write_intent is not None
+        assert reloaded.state.write_intent.idempotency_key == "t031_checkpoint_key_001"
+        checkpoints = store.list_checkpoints(state.run_id)
+        assert [checkpoint.version for checkpoint in checkpoints] == [1, 2]
+        assert checkpoints[-1].current_node == "verify_business_state"
+    finally:
+        store.delete_run(state.run_id)
+
+
+def test_stale_full_state_checkpoint_is_refused(
+    connection_factory: ConnectionFactory,
+) -> None:
+    """A stale write node must not overwrite a newer durable money state."""
+    store = PostgresRunStore(connection_factory)
+    state = build_state()
+    try:
+        created = create_run(store, state)
+        first_state = state.model_copy(
+            update={
+                "write_intent": WriteIntent(
+                    action="CREATE_REFUND_REQUEST",
+                    target_id="order-001",
+                    idempotency_key="t031_checkpoint_key_001",
+                    request_fingerprint="b" * 64,
+                )
+            }
+        )
+        store.checkpoint_state(
+            state.run_id,
+            expected_version=created.version,
+            state=first_state,
+            current_node="execute_write",
+        )
+
+        with pytest.raises(RunVersionConflictError):
+            store.checkpoint_state(
+                state.run_id,
+                expected_version=created.version,
+                state=state,
+                current_node="stale_writer",
+            )
+
+        reloaded = store.get_run(state.run_id)
+        assert reloaded.state is not None
+        assert reloaded.state.write_intent is not None
+        assert reloaded.state.write_intent.idempotency_key == "t031_checkpoint_key_001"
+    finally:
+        store.delete_run(state.run_id)
 
 # --------------------------------------------------------------------------------------------
 # Compare-and-swap: a stale writer must lose
