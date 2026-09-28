@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Generic, TypeVar
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = ["ToolEnvelope", "ToolRisk"]
-
-T = TypeVar("T")
 
 
 class ToolRisk(StrEnum):
@@ -19,7 +15,7 @@ class ToolRisk(StrEnum):
     HIGH_WRITE = "high_write"
 
 
-class ToolEnvelope(BaseModel, Generic[T]):
+class ToolEnvelope[T](BaseModel):
     """Stable result shape returned by every registered Agent Tool."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
