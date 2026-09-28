@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from decimal import Decimal
 from time import perf_counter
+
 from pydantic import ValidationError
 
 from app.clients.auth import AuthContext
