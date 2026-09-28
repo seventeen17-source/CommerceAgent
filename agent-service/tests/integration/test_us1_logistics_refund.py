@@ -50,13 +50,17 @@ from app.agent.state import (
     AgentState,
     PrincipalContext,
     PrincipalRole,
+    VerificationOutcome,
+    VerificationStatus,
     WriteIntent,
     WriteOutcome,
     WriteStatus,
 )
+from app.agent.verify_business_state import verify_refund_business_state
 from app.clients.auth import AuthContext
 from app.clients.commerce_client import CommerceClient
 from app.clients.models import EligibilityRequest
+from app.tools import CommerceTools
 
 #: A placeholder, not a credential -- same convention as the other client tests: the name avoids a
 #: "token"/"password" root so ruff's hardcoded-secret rule (S105/S106) stays enabled for real code.
@@ -315,6 +319,9 @@ class Persister:
     def record_outcome(self, outcome: RefundWriteOutcome) -> None:
         self.state = self.state.model_copy(update={"write": outcome.to_state_outcome()})
 
+    def record_verification(self, verification: VerificationOutcome) -> None:
+        self.state = self.state.model_copy(update={"verification": verification})
+
 
 async def _us1_refund_flow(
     *,
@@ -360,9 +367,14 @@ async def _us1_refund_flow(
     if not outcome.succeeded:
         return outcome
 
-    # Post-write verification: the authoritative read, not the write response, is the evidence.
-    verified = (await client.get_after_sales_status(_AUTH, java.ORDER_ID)).value.refunds
-    assert [refund.refund_request_id for refund in verified] == [outcome.resource_id]
+    # T031 formal verification node: the authoritative read, not the write response, is final.
+    verification = await verify_refund_business_state(
+        tools=CommerceTools(client=client, auth=_AUTH),
+        order_id=java.ORDER_ID,
+        idempotency_key=outcome.idempotency_key,
+        expected_refund_request_id=outcome.resource_id,
+    )
+    persister.record_verification(verification)
     return outcome
 
 
@@ -393,6 +405,8 @@ async def test_stalled_logistics_produces_exactly_one_verified_refund() -> None:
     assert state.write_intent.idempotency_key == java.write_keys[0]
     assert state.write.status is WriteStatus.SUCCEEDED
     assert state.write.resource_id == FakeJava.REFUND_ID
+    assert state.verification.status is VerificationStatus.VERIFIED_SUCCESS
+    assert state.verification.resource_id == FakeJava.REFUND_ID
 
 
 @pytest.mark.asyncio
