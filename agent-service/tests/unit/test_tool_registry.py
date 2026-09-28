@@ -9,6 +9,8 @@ from app.clients.auth import AuthContext
 from app.clients.commerce_client import CommerceClient
 from app.tools import REGISTERED_TOOL_NAMES, CommerceTools, ToolEnvelope, ToolRegistry, ToolRisk
 
+_FAKE_JWT = "header.payload.signature"
+
 
 def test_us1_registry_exposes_only_the_six_declared_capabilities() -> None:
     assert REGISTERED_TOOL_NAMES == {
@@ -73,7 +75,6 @@ def test_envelope_rejects_ambiguous_success_failure_shapes(payload: dict[str, ob
         ToolEnvelope[dict[str, str]].model_validate(payload)
 
 
-
 @pytest.mark.asyncio
 async def test_registry_resolves_only_explicit_bound_commerce_tool_methods() -> None:
     async with CommerceClient(
@@ -81,7 +82,7 @@ async def test_registry_resolves_only_explicit_bound_commerce_tool_methods() -> 
     ) as client:
         tools = CommerceTools(
             client=client,
-            auth=AuthContext(token="header.payload.signature"),
+            auth=AuthContext(token=_FAKE_JWT),
         )
         registry = ToolRegistry(tools=tools)
 
