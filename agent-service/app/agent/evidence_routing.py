@@ -20,8 +20,8 @@ from app.tools.registry import ToolRegistry
 
 __all__ = [
     "EvidenceAction",
-    "EvidenceGuardDecision",
     "EvidenceDecisionModel",
+    "EvidenceGuardDecision",
     "EvidenceGuardStatus",
     "EvidenceReasonCode",
     "EvidenceRoutingContext",
@@ -79,8 +79,6 @@ class NextEvidenceProposal(BaseModel):
         return self
 
 
-
-
 class EvidenceRoutingContext(BaseModel):
     """Minimal, non-sensitive facts the model may use to propose the next evidence step."""
 
@@ -104,12 +102,15 @@ def build_evidence_routing_context(
         if item.evidence_type not in observed:
             observed.append(item.evidence_type)
 
-    return EvidenceRoutingContext(
-        intent=understood.intent.value,
-        mentions_logistics_problem=understood.mentions_logistics_problem,
-        order_status=order.status,
-        observed_evidence_types=observed,
+    return EvidenceRoutingContext.model_validate(
+        {
+            "intent": understood.intent.value,
+            "mentionsLogisticsProblem": understood.mentions_logistics_problem,
+            "orderStatus": order.status,
+            "observedEvidenceTypes": observed,
+        }
     )
+
 
 class EvidenceDecisionModel(Protocol):
     """Provider-independent model boundary for deciding what evidence is useful next."""
@@ -169,9 +170,12 @@ def guard_evidence_proposal(
             reason_code="READY_FOR_DETERMINISTIC_ELIGIBILITY",
         )
 
-    assert proposal.tool is not None
+    tool_name = proposal.tool
+    if tool_name is None:
+        return _denied(proposal.action, None, "TOOL_REQUIRED")
+
     raw_guard = guard_evidence_tool_name(
-        proposal.tool,
+        tool_name,
         observed_evidence_types=observed_evidence_types,
         registry=registry,
     )
