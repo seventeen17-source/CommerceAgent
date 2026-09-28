@@ -879,11 +879,11 @@ export function T016FlowPlayground() {
                             onChange={(event) => setIdempotencyKey(event.target.value)}
                           />
                         </>
-                      ) : step.live === 'create-run' ? (
+                      ) : step.live === 'create-run' || step.live === 't030-live-agent' ? (
                         <>
-                          <label htmlFor="live-user-request">User request</label>
+                          <label htmlFor={`live-user-request-${step.live}`}>User request</label>
                           <textarea
-                            id="live-user-request"
+                            id={`live-user-request-${step.live}`}
                             value={message}
                             onChange={(event) => setMessage(event.target.value)}
                             rows={2}
