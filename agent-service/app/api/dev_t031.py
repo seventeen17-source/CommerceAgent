@@ -277,7 +277,11 @@ async def run_t031_live(
         working_state,
         current_node="verify_business_state",
         next_action="finalize",
-        reason_code=None if verification.status is VerificationStatus.VERIFIED_SUCCESS else "VERIFY_FAILED",
+        reason_code=(
+            None
+            if verification.status is VerificationStatus.VERIFIED_SUCCESS
+            else "VERIFY_FAILED"
+        ),
     )
 
     return T031LiveResponse(
