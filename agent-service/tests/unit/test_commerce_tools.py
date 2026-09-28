@@ -96,7 +96,7 @@ async def test_get_order_tool_rejects_unsafe_model_argument_without_sending_requ
 
 
 @pytest.mark.asyncio
-async def test_get_order_tool_normalizes_no_authoritative_answer_as_retryable_dependency_failure() -> None:
+async def test_get_order_tool_maps_no_authoritative_answer_to_retryable_failure() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("timed out", request=request)
 
