@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable
+from decimal import Decimal
 from time import perf_counter
 from typing import TypeVar
 
@@ -17,11 +18,13 @@ from app.clients.errors import (
 )
 from app.clients.models import (
     AfterSalesStatus,
+    CreateRefundRequest,
     EligibilityDecision,
     EligibilityRequest,
     LogisticsSnapshot,
     OrderSnapshot,
     OrderSummary,
+    RefundResult,
 )
 from app.tools.models import ToolEnvelope
 
@@ -86,6 +89,69 @@ class CommerceTools:
                 order_id,
                 idempotency_key=idempotency_key,
             )
+        )
+
+    async def create_refund_request(
+        self,
+        *,
+        order_id: str,
+        reason_code: str,
+        requested_amount: Decimal | None,
+        idempotency_key: str,
+        run_id: str,
+        approval_request_id: str | None = None,
+    ) -> ToolEnvelope[RefundResult]:
+        """Attempt one protected refund write without performing any blind retry.
+
+        A transport failure here means the business outcome is unknown: Java may already have
+        committed. The Tool therefore returns WRITE_TIMEOUT_UNKNOWN with retryable=False. T031 must
+        first call get_after_sales_status with the same idempotency key before deciding whether a
+        same-key retry is safe.
+        """
+        started = perf_counter()
+        try:
+            request = CreateRefundRequest(
+                order_id=order_id,
+                reason_code=reason_code,
+                requested_amount=requested_amount,
+                approval_request_id=approval_request_id,
+                run_id=run_id,
+            )
+            call = await self._client.create_refund(
+                self._auth,
+                idempotency_key=idempotency_key,
+                request=request,
+            )
+        except ValidationError:
+            return _invalid_parameter(started)
+        except UnsafeRequestParameterError as exc:
+            return ToolEnvelope[RefundResult](
+                success=False,
+                errorCode=exc.error_code,
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+            )
+        except CommerceApiError as exc:
+            return ToolEnvelope[RefundResult](
+                success=False,
+                errorCode=exc.error_code,
+                retryable=exc.retryable,
+                latencyMs=_elapsed_ms(started),
+                traceId=exc.trace_id,
+            )
+        except CommerceTransportError:
+            return ToolEnvelope[RefundResult](
+                success=False,
+                errorCode="WRITE_TIMEOUT_UNKNOWN",
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+            )
+
+        return ToolEnvelope[RefundResult](
+            success=True,
+            data=call.value,
+            latencyMs=_elapsed_ms(started),
+            traceId=call.trace_id,
         )
 
 
