@@ -12,6 +12,9 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.agent.request_understanding import UnderstoodRequest
+from app.agent.state import EvidenceItem
+from app.clients.models import OrderSnapshot
 from app.tools.models import ToolRisk
 from app.tools.registry import ToolRegistry
 
@@ -23,6 +26,7 @@ __all__ = [
     "EvidenceReasonCode",
     "EvidenceRoutingContext",
     "NextEvidenceProposal",
+    "build_evidence_routing_context",
     "decide_next_evidence",
     "guard_evidence_proposal",
     "guard_evidence_tool_name",
@@ -87,6 +91,25 @@ class EvidenceRoutingContext(BaseModel):
     order_status: str = Field(alias="orderStatus", min_length=1, max_length=64)
     observed_evidence_types: list[str] = Field(alias="observedEvidenceTypes", max_length=32)
 
+
+def build_evidence_routing_context(
+    understood: UnderstoodRequest,
+    *,
+    order: OrderSnapshot,
+    evidence: list[EvidenceItem],
+) -> EvidenceRoutingContext:
+    """Build the minimal second-round model context from authoritative observed facts."""
+    observed = ["ORDER"]
+    for item in evidence:
+        if item.evidence_type not in observed:
+            observed.append(item.evidence_type)
+
+    return EvidenceRoutingContext(
+        intent=understood.intent.value,
+        mentions_logistics_problem=understood.mentions_logistics_problem,
+        order_status=order.status,
+        observed_evidence_types=observed,
+    )
 
 class EvidenceDecisionModel(Protocol):
     """Provider-independent model boundary for deciding what evidence is useful next."""
