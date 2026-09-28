@@ -18,9 +18,9 @@ from app.clients.models import EligibilityDecision
 from app.tools.models import ToolEnvelope
 
 __all__ = [
+    "US1_ELIGIBILITY_REASON_CODE",
     "EligibilityExecutionResult",
     "EligibilityTools",
-    "US1_ELIGIBILITY_REASON_CODE",
     "check_eligibility",
 ]
 
@@ -78,8 +78,9 @@ async def check_eligibility(
     if not result.success:
         return EligibilityExecutionResult(history=history)
 
-    assert result.data is not None
     authoritative = result.data
+    if authoritative is None:
+        raise ValueError("successful eligibility Tool result is missing data")
     snapshot = EligibilitySnapshot(
         eligible=authoritative.eligible,
         allowed_action=authoritative.allowed_action,
