@@ -8,7 +8,7 @@ before any Tool can run.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -18,9 +18,12 @@ from app.tools.registry import ToolRegistry
 __all__ = [
     "EvidenceAction",
     "EvidenceGuardDecision",
+    "EvidenceDecisionModel",
     "EvidenceGuardStatus",
     "EvidenceReasonCode",
+    "EvidenceRoutingContext",
     "NextEvidenceProposal",
+    "decide_next_evidence",
     "guard_evidence_proposal",
     "guard_evidence_tool_name",
 ]
@@ -70,6 +73,37 @@ class NextEvidenceProposal(BaseModel):
             if self.reason_code is not EvidenceReasonCode.ENOUGH_EVIDENCE_FOR_ELIGIBILITY:
                 raise ValueError("READY_FOR_ELIGIBILITY requires its matching reason code")
         return self
+
+
+
+
+class EvidenceRoutingContext(BaseModel):
+    """Minimal, non-sensitive facts the model may use to propose the next evidence step."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    intent: str = Field(min_length=1, max_length=100)
+    mentions_logistics_problem: bool = Field(alias="mentionsLogisticsProblem")
+    order_status: str = Field(alias="orderStatus", min_length=1, max_length=64)
+    observed_evidence_types: list[str] = Field(alias="observedEvidenceTypes", max_length=32)
+
+
+class EvidenceDecisionModel(Protocol):
+    """Provider-independent model boundary for deciding what evidence is useful next."""
+
+    async def decide_next_evidence(self, context: EvidenceRoutingContext) -> object:
+        """Return one JSON-like routing proposal without executing any Tool."""
+        ...
+
+
+async def decide_next_evidence(
+    context: EvidenceRoutingContext,
+    *,
+    model: EvidenceDecisionModel,
+) -> NextEvidenceProposal:
+    """Ask the model for a proposal, then enforce the narrow proposal schema."""
+    raw_output = await model.decide_next_evidence(context)
+    return NextEvidenceProposal.model_validate(raw_output)
 
 
 class EvidenceGuardStatus(StrEnum):
