@@ -142,9 +142,7 @@ async def test_denied_guard_cannot_call_java_eligibility() -> None:
 
 @pytest.mark.asyncio
 async def test_logistics_tool_decision_cannot_skip_into_eligibility() -> None:
-    tools = _FakeEligibilityTools(
-        ToolEnvelope(success=True, data=_java_decision(), latencyMs=1)
-    )
+    tools = _FakeEligibilityTools(ToolEnvelope(success=True, data=_java_decision(), latencyMs=1))
     still_collecting = EvidenceGuardDecision(
         status=EvidenceGuardStatus.ALLOWED,
         action=EvidenceAction.CALL_TOOL,
