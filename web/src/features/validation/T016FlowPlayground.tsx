@@ -420,7 +420,7 @@ export function T016FlowPlayground() {
   const [started, setStarted] = useState(false)
   const [openStep, setOpenStep] = useState<string | null>('auth')
   const [token, setToken] = useState('')
-  const [message, setMessage] = useState('我的耳机物流很久没动了，能退款吗？')
+  const [message, setMessage] = useState('订单 order-001 物流三天没动了，帮我退款')
   const [runId, setRunId] = useState('')
   const [orderId, setOrderId] = useState('order-001')
   const [reasonCode, setReasonCode] = useState('LOGISTICS_DELAY')
