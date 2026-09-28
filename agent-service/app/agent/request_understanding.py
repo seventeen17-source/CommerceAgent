@@ -11,12 +11,18 @@ A mentioned order id is only a clue extracted from text. It is not an authoritat
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.state import Identifier
 
-__all__ = ["RequestIntent", "UnderstoodRequest"]
+__all__ = [
+    "RequestIntent",
+    "RequestUnderstandingModel",
+    "UnderstoodRequest",
+    "understand_request",
+]
 
 
 class RequestIntent(StrEnum):
@@ -39,3 +45,30 @@ class UnderstoodRequest(BaseModel):
     intent: RequestIntent
     mentions_logistics_problem: bool = Field(alias="mentionsLogisticsProblem")
     mentioned_order_id: Identifier | None = Field(default=None, alias="mentionedOrderId")
+
+
+class RequestUnderstandingModel(Protocol):
+    """Minimal model boundary used by the request-understanding step.
+
+    The adapter receives only the user's natural-language request. Authentication, principal,
+    Java business facts, and tool implementations stay outside the model boundary.
+    """
+
+    async def understand_request(self, user_request: str) -> object:
+        """Return JSON-like structured output for one user request."""
+        ...
+
+
+async def understand_request(
+    user_request: str,
+    *,
+    model: RequestUnderstandingModel,
+) -> UnderstoodRequest:
+    """Interpret untrusted language and validate the model structured output.
+
+    This function intentionally does not mutate AgentState. T030 later decides how a validated
+    language clue becomes a candidate order, while T032 owns graph-node state transitions.
+    """
+
+    raw_output = await model.understand_request(user_request)
+    return UnderstoodRequest.model_validate(raw_output)
