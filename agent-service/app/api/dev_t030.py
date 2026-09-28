@@ -7,7 +7,7 @@ and the real Java authority without granting the model write capability.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, cast
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -27,7 +27,7 @@ from app.agent.openai_evidence_routing import OpenAICompatibleEvidenceDecisionMo
 from app.agent.openai_request_understanding import OpenAICompatibleRequestUnderstandingModel
 from app.agent.order_resolution import OrderResolution, OrderResolutionStatus, resolve_single_order
 from app.agent.request_understanding import UnderstoodRequest, understand_request
-from app.agent.state import EvidenceItem, EligibilitySnapshot, ToolHistoryEntry
+from app.agent.state import EligibilitySnapshot, EvidenceItem, ToolHistoryEntry
 from app.clients.commerce_client import CommerceClient
 from app.llm.openai_compatible import ModelClientError, OpenAICompatibleJsonClient
 from app.security.dependencies import AppSettings, AuthenticatedCall, authenticate
@@ -128,8 +128,13 @@ async def run_t030_live(
                     orderResolution=resolution,
                 )
 
-            assert resolution.resolved_order_id is not None
-            assert resolution.order is not None
+            resolved_order_id = resolution.resolved_order_id
+            resolved_order = resolution.order
+            if resolved_order_id is None or resolved_order is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="RESOLVED_ORDER_INVARIANT_BROKEN",
+                )
             evidence: list[EvidenceItem] = []
             history: list[ToolHistoryEntry] = []
             rounds: list[T030EvidenceRound] = []
@@ -138,13 +143,13 @@ async def run_t030_live(
             for round_index in range(1, 4):
                 context = build_evidence_routing_context(
                     understood,
-                    order=resolution.order,
+                    order=resolved_order,
                     evidence=evidence,
                 )
                 proposal = await decide_next_evidence(context, model=evidence_model)
                 guard = guard_evidence_proposal(
                     proposal,
-                    resolved_order_id=resolution.resolved_order_id,
+                    resolved_order_id=resolved_order_id,
                     observed_evidence_types=set(context.observed_evidence_types),
                     registry=registry,
                 )
@@ -171,7 +176,7 @@ async def run_t030_live(
                 if proposal.action is EvidenceAction.READY_FOR_ELIGIBILITY:
                     eligibility_result = await check_eligibility(
                         guard,
-                        resolved_order_id=resolution.resolved_order_id,
+                        resolved_order_id=resolved_order_id,
                         step_index=len(history) + 1,
                         tools=tools,
                     )
@@ -193,7 +198,7 @@ async def run_t030_live(
 
                 execution = await execute_read_evidence(
                     guard,
-                    resolved_order_id=resolution.resolved_order_id,
+                    resolved_order_id=resolved_order_id,
                     step_index=len(history) + 1,
                     tools=tools,
                 )
