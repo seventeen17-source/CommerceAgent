@@ -910,7 +910,25 @@ T083  最终作品集 README
 
 ## 13. 当前阶段怎么映射到总图
 
-当前项目导航文件把实现起点定义为 Phase 1 / T001–T007。
+> **状态说明（2026-09-29 更新）**：本节写于 Phase 1，当时导航文件把实现起点定义为 T001–T007。
+> **真实进度只有一个入口：[`PROJECT_PROGRESS.md`](../PROJECT_PROGRESS.md)** —— 不要用本节的文字判断"当前"。
+> 下面的 Phase 1 映射保留为**"如何把新东西放进总图"的范例**，不是现状。
+
+当前阶段（Phase 3 / US1 MVP，T032 进行中）用同一张图映射是这样：
+
+```text
+T032 LangGraph Assembly
+→ ② Agent Service 的 Agent Brain 子框：只负责控制流（节点 / 路由 / step-retry 预算）；
+  不拥有业务事实（Java 拥有），也不拥有 run 的最终状态（RunStore 拥有）
+
+T031 execute_write / verify_business_state
+→ 同一框内的「安全写入」子层：决定【如何安全地】做一次写，以及写后如何读权威校验
+
+T017 RunStore（agent.agent_runs / agent_checkpoints / agent.tool_executions）
+→ ④ PostgreSQL 的 agent.* schema：当前 run 的唯一状态与恢复依据
+```
+
+下面以当时的 Phase 1 / T001–T007 为例，演示映射方法：
 
 ```text
 T002
