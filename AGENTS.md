@@ -174,6 +174,42 @@ DTO、普通 CRUD wiring、fixture、样板配置、机械映射、样式性 UI 
 
 不要维护额外的重复甘特图、复杂 Excel 日报或人为“完成百分比”。
 
+### 文档纪律：哪份文件负责什么
+
+同一件事只能有一个"会过期的真相"。写文档前先确认它属于哪一类：
+
+| 文档 | 负责 | **不负责** |
+|---|---|---|
+| `PROJECT_PROGRESS.md` | **进度与下一步的唯一入口**：当前 Phase / 当前 Task / Gate / Blocker | 任务细节与验收证据（放 `tasks.md` 与该文件的「验收证据」小节） |
+| `specs/*/tasks.md` | 任务清单与每条任务的验收证据 | "现在做到哪"（那是 `PROJECT_PROGRESS.md`） |
+| `specs/*/plan.md`、`spec.md`、`contracts/` | 技术与产品**规格**、契约 | 实现状态（不写"已实现/未实现"） |
+| 设计文档（如 `t032-runtime-design.md`） | 设计**应该长什么样** | 实现进度（**不加"实现状态"列**） |
+| 模块 `README.md`（`agent-service/`、`web/`、`commerce-backend/`） | 模块职责、本机命令、指路 | 进度（只写"进度见 `PROJECT_PROGRESS.md`"） |
+| `docs/devlog/YYYY-MM-DD.md` | 当天**发生过的**事实与决策 | 回改历史（见下） |
+
+三条硬规则：
+
+1. **能指的不要断言**：需要引用现状时写"进度见 `PROJECT_PROGRESS.md`"，而不是把"当前是 T0xx"抄进架构文档、模块 README 或契约里。抄一份就等于多一份会过期的真相。
+2. **会过期的只留一个地方**：`PROJECT_PROGRESS.md` 是唯一允许出现"当前任务 / 当前 Phase / 下一步"的文件。`main` 上尤其禁止写"当前活跃分支 / 真实活跃任务 Txxx"这类路标（它已经误导过多个 Agent）。
+3. **历史记录不回改**：`docs/devlog/` 里旧日期的"下一步"在当天是真的，不要为了让文档"看起来一致"去改它。**过期路标要改，历史记录不改。**
+4. **本文件自身的演进方向是 dev → main**：`AGENTS.md` 的规则在 `dev/002-commerce-after-sales-mvp`（及其 feature 分支）上演进，`main` 在阶段 Gate 时**接收同步为逐字一致**。方向这样定，是因为教训必须能在当天到达正在干活的那条线——把新规则留在 `main` 上，等于没写（曾经真实发生过：防误判的规则只存在于 `main`，而干活的人读的是自己分支那份）。
+   - 两次 Gate 之间，`main` 上这份**允许略旧**；但**不允许出现"同一节讲两套冲突说法"**：差异只能是「dev 有、main 还没同步」，不能是「两边都有、说法不同」。
+   - 因此**禁止在 `main` 上直接编辑 `AGENTS.md`** 去另立变体；要改规则就在 dev 线改，Gate 时同步下行。
+
+`docs/` 目录下每份文件的职责见 [`docs/README.md`](docs/README.md)。
+
+### 持续验证页规则
+
+`web/` 中用于本地流转验证的页面是从 T016 开始持续升级的 **CommerceAgent Flow Playground**，不是当前任务的临时快照，也不是每个任务重新开一张页面。
+
+- T016 的调用链、故障注入按钮和步骤解释是稳定基线；后续任务在**同一个 Flow Playground** 中增加测试按钮、状态查看器或真实数据能力；
+- 页面布局职责固定为三区：上方“故障注入”增加场景按钮；左侧“调用链”按真实执行顺序追加新的主链步骤/接口；右侧 `STEP DETAIL` 同时展示当前步骤的输入、处理、输出、真实请求控件与原始响应。不得在调用链下方按 Txxx 另开验证区块；
+- 左侧调用链只记录会进入端到端主流程、且值得逐步观察的节点。辅助查询、纯调试端点或同一步内部 HTTP 调用放在对应步骤的右侧详情中，不要求每个接口都机械新增一步；
+- 内部允许按任务拆分 React 组件，但视觉与操作上必须保持一条连续的调试链路，不得按 Txxx 纵向堆成互不关联的独立页面；
+- 默认只追加或扩展当前任务自己的控制能力，不得整体替换 `App.tsx`，也不得删除、改写先前任务的验证能力；
+- 确需重构宿主结构时，必须先证明既有区块仍可访问、既有流转仍可执行，并在 devlog 记录迁移理由与验证证据；
+- 真实产品 UI 仍按对应业务任务实现；Playground 不冒充最终产品，但会从教学模拟器逐步长成 Agent 调试器与 Demo Console。
+
 ## 5. Devlog 规则
 
 每次实际开发会话结束后，在 `docs/devlog/YYYY-MM-DD.md` 创建或更新当天记录。保持 3–5 分钟可完成，至少包含：
@@ -190,11 +226,33 @@ DTO、普通 CRUD wiring、fixture、样板配置、机械映射、样式性 UI 
 
 ## 6. Git 与回退规则
 
-实现阶段默认从最新 `main` 创建见名知意的分支。每个阶段/可独立回退的逻辑部分应形成独立分支或清晰的逻辑提交，使回退不会影响无关后续工作。
+**长期规则：一个功能 = 一个独立 feature 分支。禁止把后续功能继续从前一个 feature 分支上“套娃”创建。**
+
+实现阶段使用一条集成开发线 `dev/002-commerce-after-sales-mvp`：
+
+```text
+main                         ← 稳定 Gate
+└─ dev/002-commerce-after-sales-mvp
+   ├─ feat/<feature-a>
+   ├─ feat/<feature-b>
+   └─ feat/<feature-c>
+```
+
+每个功能的标准流程：
+
+1. 从**最新 dev 集成线**创建一个见名知意的 `feat/... `分支；
+2. 只在该 feature 分支完成这个功能、测试和文档；
+3. 验收通过后，保留该 feature 分支作为可回退 checkpoint；
+4. 把已验收功能合入/快进到 `dev/002-commerce-after-sales-mvp`；
+5. 下一个功能必须重新从更新后的 dev 创建新 feature 分支，**不得从上一个 feature 分支继续派生**；
+6. 只有达到明确阶段 Gate，并且用户明确确认后，才把 dev 合入 `main`。
+
+这样“依赖前一个功能”通过 dev 集成线解决，而不是通过 feature→feature 的父子嵌套解决。
 
 要求：
 
-- 分支名表达阶段或能力，例如 `setup/official-scaffolds`、`feat/us1-logistics-refund`；
+- 分支名表达**功能/能力**，例如 `feat/us1-logistics-http-api`，不要仅用模糊编号；
+- 每个 feature 分支是一个独立 checkpoint；历史已存在的 T019–T024 分支继续保留，不删除、不重写；
 - commit 信息表达一个逻辑变化；
 - 不修改无关文件；
 - 合并到 `main` 前需要用户明确确认；
@@ -243,6 +301,66 @@ DTO、普通 CRUD wiring、fixture、样板配置、机械映射、样式性 UI 
 ## 9. Java 质量门禁规则
 
 Java 代码的任务验收必须以完整质量门禁为准，而不是“代码写完”或“测试通过”即完成。
+
+### Spotless 预检：任何 Agent 修改 Java 后必须主动处理
+
+本仓库使用 **Spotless + Palantir Java Format**，而且 `spotless:check` 会检查整个 Java 模块，不只检查“本次新改的文件”。因此一个新任务即使业务代码完全正确，也可能因为：
+
+- import 顺序；
+- 链式调用换行；
+- 方法调用/构造器换行；
+- 历史基线里遗留的未格式化 Java 文件；
+
+在最后 `verify` 阶段失败。
+
+为了避免用户每个 Txxx 都重复遇到“测试都过了，最后被 Spotless 卡住”，任何 Agent 只要新增或修改 Java 文件，都必须遵循这个固定流程：
+
+```text
+Java 实现/测试修改完成
+        ↓
+先处理 Spotless 格式
+        ↓
+检查 git diff，确认没有无关大面积格式改动
+        ↓
+再跑定点测试
+        ↓
+最后 mvnw.cmd clean verify
+```
+
+有本地命令执行能力时，优先在提交前运行：
+
+```powershell
+cd commerce-backend
+.\mvnw.cmd spotless:apply
+```
+
+然后必须检查：
+
+```powershell
+git diff --name-only
+git diff
+```
+
+确认 `spotless:apply` 没有顺手改出无关文件后，再进入最终验收。
+
+如果当前 Agent **没有本地命令执行能力**、只能通过 GitHub/远端编辑代码，则必须：
+
+1. 主动按仓库现有 Palantir/Spotless 风格整理 import、缩进和换行；
+2. 不要把格式修复留成“用户自己最后再处理”的默认行为；
+3. 明确提醒最终本地 `clean verify` 仍是唯一构建事实；
+4. 如果 `verify` 报到一个并非本任务修改的旧文件，先比较该文件与 dev 基线：  
+   - 若 SHA/内容与 dev 相同，说明是**继承的基线格式债务**，可做最小格式修复并记录来源；  
+   - 不得误判成当前任务业务逻辑回归，也不得因此批量重排整个仓库。
+
+推荐的 Java 收口顺序固定为：
+
+```powershell
+.\mvnw.cmd spotless:apply
+.\mvnw.cmd "-Dtest=<CurrentTaskTest>" test
+.\mvnw.cmd clean verify
+```
+
+其中 `spotless:apply` 是**格式修复动作**，`clean verify` 是**最终验收动作**；不能因为前者执行成功就把任务视为完成。
 
 固定规则：
 
