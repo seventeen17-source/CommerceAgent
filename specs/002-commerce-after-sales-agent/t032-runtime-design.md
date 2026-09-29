@@ -315,7 +315,30 @@ Java      负责业务事实（什么是真的）
 
 ---
 
-## 8. 命名纪律（禁止清单）
+## 8. 终止状态语义（SAFE_STOP ≠ FAILED）
+
+终态由 `terminal_decision_for(state)` 推导（`app/agent/routing.py`），取值只能是 `RunStatus` 的七个（`app/agent/state.py:76`）：
+
+```text
+正常完成 ─────────────▶ COMPLETED          已验证的业务结果（成功，或权威确认"没有这笔"）
+缺事实，不猜 ─────────▶ WAITING_USER       订单不唯一 / 无法确认，等用户补充
+需权威审批 ───────────▶ WAITING_APPROVAL   US5 / T049
+主动拒绝继续 ─────────▶ SAFE_STOP          「继续做可能越过安全边界」
+转人工 ───────────────▶ ESCALATED          规则冲突 / 无法判定
+我们这边坏了 ─────────▶ FAILED             基础设施或代码错误
+```
+
+1. `SAFE_STOP` **不是 error**：它是 Agent 在安全边界内**主动做出的停止决策**。判据：`SAFE_STOP` = **我们正确地没做**；`FAILED` = **我们没能正确地做**。把两者混在一起，等于把一次正确的拒绝记成一次故障。
+2. `SAFE_STOP` **必须带机器可读的 reason code**（`SafeStopReason`，`routing.py:76`）：ownership 无法确认、eligibility 不满足、金额无界、预算耗尽、写结果无法确认…… 这个不变量由 `TerminalDecision` 的构造器保证——**`SAFE_STOP` 而不带 reason，在类型上构造不出来**。
+3. **告警口径必须分开**：`FAILED` 要叫人（我们的服务坏了）；`SAFE_STOP` 是产品的正常行为，把它半夜叫起来看，只会把值班的人训练成忽略告警。
+4. **Eval 口径也必须分开**：Agent 的价值指标包含"该停的时候能不能停"。把安全停止算成失败，Eval 就在**惩罚正确行为**。
+5. **人工处置不同**：`SAFE_STOP` 需要**业务侧**补事实（补订单号 / 补审批）；`FAILED` 需要**工程侧**看日志。
+6. **retention 也不同**（T017 已实现）：`COMPLETED` / `ESCALATED` 7 天后压缩 payload 与 trace；`FAILED` / `SAFE_STOP` **保留 trace 90 天**——"钱可能动了却说不清"时，trace 是唯一能对账的东西。
+7. 任何路径都**不允许把 `UNKNOWN` 写成成功**：`verification = UNKNOWN` ⇒ 终态必须是 `SAFE_STOP`（reason `VERIFICATION_UNKNOWN`），不是 `COMPLETED`。
+
+---
+
+## 9. 命名纪律（禁止清单）
 
 以后修改本设计或实现时，以下名字**一律禁止出现**：
 
@@ -333,7 +356,7 @@ Java      负责业务事实（什么是真的）
 
 ---
 
-## 9. 待决项（记录下来，不在 T032 解决）
+## 10. 待决项（记录下来，不在 T032 解决）
 
 1. **HITL 与 `interrupt()`**：本设计选 `compile(checkpointer=None)`，因此没有框架原生 `interrupt()`。US5/T049 需要在两条路里选：自管 resume（已有 `RunStore.resume` + CAS 赢家），或引入 LangGraph checkpointer 但降级为"图内记忆"、run 状态仍以 RunStore 为准。
 2. **`langgraph-checkpoint-postgres` 当前声明但未使用**：保留（T049 可能用到），但必须在 `PROJECT_PROGRESS.md` 写明"当前未使用"，避免被误读为持久化路径。
