@@ -111,7 +111,11 @@ Java      负责业务事实（什么是真的）
 
 1. 每个节点只做两件事：`state = advance(state, **changes)` 与 `return {"state": state}`。
    **禁止 `model_copy(update=...)`**：实测它跳过校验，会让 `extra="forbid"`、预算守卫、凭据扫描在图里静默失效。
-2. Graph 的 state schema 是单字段包装 `GraphState = TypedDict{"state": AgentState}`，只为让 LangGraph 别碰我们的校验载荷。
+2. Graph 的 state schema 是 `GraphState = TypedDict{"state": AgentState, "decision": Decision}`：
+   `state` 是权威载荷（每次变更都经 `advance()` 重建校验）；`decision` 是**控制面**的瞬时数据
+   （当前节点的提议、guard 裁定、节点自述的 safe-stop 原因），**不进 `AgentState`、不持久化**——
+   它在 durable 层的对应物是 run 行的 `next_action` 与 tool trace。**把提议与事实分开存，
+   是防止提议被后来的人当成证据。**
 3. **Router 的输入是 `(AgentState, ToolRegistry risk metadata, stage guard)`**：LLM 生成候选动作，Router 决定合法下一节点。LLM 提议，Router 约束。
 4. 预算两层：条件边上的守卫主拦（超限 → `safe_stop`）；`advance()` 内的 `validate_budgets` 兜底（命中即 `SAFE_STOP`，不是 500、也不是 `FAILED`）。
 5. `verify = UNKNOWN` 时 finalize **不得**输出成功。

@@ -324,3 +324,18 @@ class AgentState(BaseModel):
             RunStatus.FAILED,
             RunStatus.SAFE_STOP,
         }
+
+
+def advance(state: AgentState, /, **changes: Any) -> AgentState:
+    """Return a validated copy of ``state`` with ``changes`` applied.
+
+    This is the graph's **only** way to change state. ``model_copy(update=...)`` looks equivalent
+    but skips validation, which would silently disable ``extra="forbid"``,
+    :meth:`AgentState.validate_budgets` and the whole-state credential scan for every node in the
+    graph. Measured on the pinned langgraph (1.2.11): node updates are merged into channels without
+    re-validating the model, so a node that bypassed this helper would fail open.
+
+    A rejected change raises ``ValidationError``; the graph must surface that as ``SAFE_STOP``
+    rather than letting it become a 500, because "we refused to continue" is not "we broke".
+    """
+    return AgentState.model_validate({**state.model_dump(), **changes})
