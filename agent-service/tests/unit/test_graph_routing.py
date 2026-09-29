@@ -79,6 +79,18 @@ def make_eligibility(**overrides: Any) -> dict[str, Any]:
     return base
 
 
+def make_intent(**overrides: Any) -> dict[str, Any]:
+    """A durable write intent, as T022 persists it before the request is sent."""
+    base: dict[str, Any] = {
+        "action": "CREATE_REFUND_REQUEST",
+        "target_id": "order-001",
+        "idempotency_key": "0123456789abcdef",
+        "request_fingerprint": "a" * 64,
+    }
+    base.update(overrides)
+    return base
+
+
 class TestAdvance:
     """`advance()` is the only legal state mutation; it must validate, not just copy."""
 
@@ -346,9 +358,14 @@ class TestRouteAfterWrite:
         state = make_state(write={"status": WriteStatus.NOT_ATTEMPTED})
         assert route_after_write(state) is Node.FINALIZE
 
+    def test_an_outcome_without_a_durable_intent_has_no_key_to_verify_with(self) -> None:
+        """T022: no intent means nothing was ever sent, so there is nothing to read back."""
+        state = make_state(write={"status": WriteStatus.FAILED, "error_code": "INTERNAL_ERROR"})
+        assert route_after_write(state) is Node.FINALIZE
+
     @pytest.mark.parametrize("status", [WriteStatus.SUCCEEDED, WriteStatus.UNKNOWN])
     def test_any_attempted_write_is_verified_against_java(self, status: WriteStatus) -> None:
-        state = make_state(write={"status": status})
+        state = make_state(write={"status": status}, write_intent=make_intent())
         assert route_after_write(state) is Node.VERIFY
 
 

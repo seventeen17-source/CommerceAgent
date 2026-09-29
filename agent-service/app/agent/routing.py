@@ -336,12 +336,17 @@ def route_after_eligibility(state: AgentState, decision: Decision | None = None)
 
 
 def route_after_write(state: AgentState, decision: Decision | None = None) -> Node:
-    """After the write attempt: always read authority back, unless nothing was ever sent."""
+    """After the write attempt: read authority back, unless nothing was ever sent.
+
+    Verification is scoped by the idempotency key, so it needs a durable intent to ask with. No
+    intent means nothing was ever sent (T022) - which also means there is no question to ask, and no
+    key to ask it with.
+    """
     if state.is_terminal:
         return Node.FINALIZE
     if safe_stop_reason_for(state, decision) is not None:
         return Node.SAFE_STOP
-    if state.write.status is WriteStatus.NOT_ATTEMPTED:
+    if state.write_intent is None or state.write.status is WriteStatus.NOT_ATTEMPTED:
         return Node.FINALIZE
     # Any attempted write is verified against Java, including one reported as succeeded: a write
     # response is not the final business fact.

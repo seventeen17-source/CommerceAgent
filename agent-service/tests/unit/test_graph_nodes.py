@@ -8,6 +8,7 @@ is the property worth pinning here: a node is cheap to re-read, a wrong edge is 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -19,12 +20,32 @@ from app.agent.evidence_routing import (
     EvidenceGuardStatus,
 )
 from app.agent.graph import GraphNode, GraphState, GraphUpdate, build_graph
-from app.agent.nodes import GraphDeps, build_evidence_nodes, build_read_nodes
+from app.agent.nodes import GraphDeps, build_evidence_nodes, build_read_nodes, build_write_nodes
 from app.agent.order_resolution import OrderResolution, OrderResolutionStatus
 from app.agent.request_understanding import UnderstoodRequest
-from app.agent.routing import Decision, Node, SafeStopReason, route_after_decision
-from app.agent.state import AgentState, advance
-from app.clients.models import LogisticsSnapshot, OrderSnapshot, OrderSummary
+from app.agent.routing import (
+    Decision,
+    Node,
+    SafeStopReason,
+    route_after_decision,
+    route_after_eligibility,
+)
+from app.agent.state import (
+    AgentState,
+    VerificationStatus,
+    WriteIntent,
+    WriteOutcome,
+    WriteStatus,
+    advance,
+)
+from app.clients.models import (
+    AfterSalesStatus,
+    EligibilityDecision,
+    LogisticsSnapshot,
+    OrderSnapshot,
+    OrderSummary,
+    RefundResult,
+)
 from app.tools.models import ToolEnvelope
 from app.tools.registry import ToolRegistry
 
@@ -149,6 +170,23 @@ class UnusedDependency:
     async def get_logistics(self, order_id: str) -> object:
         raise AssertionError("evidence execution must not run in this stage")
 
+    async def check_after_sales_eligibility(self, order_id: str, reason_code: str) -> object:
+        raise AssertionError("eligibility must not run in this stage")
+
+    async def create_refund_request(self, **kwargs: Any) -> object:
+        raise AssertionError("a refund write must not run in this stage")
+
+    async def get_after_sales_status(
+        self, order_id: str, *, idempotency_key: str | None = None
+    ) -> object:
+        raise AssertionError("after-sales reads must not run in this stage")
+
+
+async def unused_persist(
+    state: AgentState, intent: WriteIntent, outcome: WriteOutcome
+) -> AgentState:
+    raise AssertionError("no write intent may be persisted in this test")
+
 
 def make_deps(*, understanding: Any, orders: Any) -> GraphDeps:
     unused = UnusedDependency()
@@ -158,6 +196,10 @@ def make_deps(*, understanding: Any, orders: Any) -> GraphDeps:
         evidence_model=unused,
         evidence=unused,
         registry=ToolRegistry(),
+        eligibility=unused,
+        writes=unused,
+        after_sales=unused,
+        persist_intent=unused_persist,
     )
 
 
@@ -300,12 +342,17 @@ def logistics_proposal() -> dict[str, Any]:
 
 
 def make_evidence_deps(*, model: Any, tools: Any) -> GraphDeps:
+    unused = UnusedDependency()
     return GraphDeps(
         understanding=FakeUnderstanding(),
         orders=ConfirmedOrderTools("order-001"),
         evidence_model=model,
         evidence=tools,
         registry=ToolRegistry(),
+        eligibility=unused,
+        writes=unused,
+        after_sales=unused,
+        persist_intent=unused_persist,
     )
 
 
@@ -561,3 +608,286 @@ class TestEvidenceNodes:
 
         assert update["decision"].safe_stop_reason is SafeStopReason.EVIDENCE_CONTEXT_MISSING
         assert route_after_decision(update["state"], update["decision"]) is Node.SAFE_STOP
+
+
+def make_write_intent() -> dict[str, Any]:
+    """A durable write intent, as T022 persists it before the request is sent."""
+    return {
+        "action": "CREATE_REFUND_REQUEST",
+        "target_id": "order-001",
+        "idempotency_key": "0123456789abcdef",
+        "request_fingerprint": "a" * 64,
+    }
+
+
+class FakeEligibilityTools:
+    """Java's eligibility answer, or its absence."""
+
+    def __init__(
+        self,
+        *,
+        decision: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        retryable: bool = False,
+    ) -> None:
+        self._decision = decision
+        self._error_code = error_code
+        self._retryable = retryable
+
+    async def check_after_sales_eligibility(
+        self, order_id: str, reason_code: str
+    ) -> ToolEnvelope[EligibilityDecision]:
+        if self._error_code is not None:
+            return ToolEnvelope[EligibilityDecision](
+                success=False,
+                error_code=self._error_code,
+                retryable=self._retryable,
+                latency_ms=1,
+                trace_id=TRACE,
+            )
+        payload = self._decision or {
+            "eligible": True,
+            "allowedAction": "REFUND_ONLY",
+            "maxRefundAmount": "199.00",
+            "approvalRequired": False,
+        }
+        return ToolEnvelope[EligibilityDecision](
+            success=True,
+            data=EligibilityDecision.model_validate(payload),
+            latency_ms=1,
+            trace_id=TRACE,
+        )
+
+
+def refund_result(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "refundRequestId": "refund-001",
+        "status": "CREATED",
+        "acceptedAmount": "199.00",
+    }
+    base.update(overrides)
+    return base
+
+
+class FakeRefundWriteTools:
+    """A backend that answers however the test says, recording the call order."""
+
+    def __init__(self, *, mode: str = "success", calls: list[str] | None = None) -> None:
+        self._mode = mode
+        self.calls: list[str] = calls if calls is not None else []
+
+    async def create_refund_request(self, **kwargs: Any) -> ToolEnvelope[RefundResult]:
+        self.calls.append("create_refund_request")
+        if self._mode == "success":
+            return ToolEnvelope[RefundResult](
+                success=True,
+                data=RefundResult.model_validate(refund_result()),
+                latency_ms=1,
+                trace_id=TRACE,
+            )
+        return ToolEnvelope[RefundResult](
+            success=False,
+            error_code="WRITE_TIMEOUT_UNKNOWN",
+            retryable=False,
+            latency_ms=1,
+            trace_id=TRACE,
+        )
+
+    async def get_after_sales_status(
+        self, order_id: str, *, idempotency_key: str | None = None
+    ) -> ToolEnvelope[AfterSalesStatus]:
+        self.calls.append("get_after_sales_status")
+        refunds = [refund_result()] if self._mode == "recovered" else []
+        return ToolEnvelope[AfterSalesStatus](
+            success=True,
+            data=AfterSalesStatus.model_validate({"refunds": refunds, "returns": []}),
+            latency_ms=1,
+            trace_id=TRACE,
+        )
+
+
+class FakeAfterSalesReads:
+    """The authority's answer to "does a refund exist for this key?"."""
+
+    def __init__(self, refunds: list[dict[str, Any]]) -> None:
+        self._refunds = refunds
+        self.keys: list[str | None] = []
+
+    async def get_after_sales_status(
+        self, order_id: str, *, idempotency_key: str | None = None
+    ) -> ToolEnvelope[AfterSalesStatus]:
+        self.keys.append(idempotency_key)
+        return ToolEnvelope[AfterSalesStatus](
+            success=True,
+            data=AfterSalesStatus.model_validate({"refunds": self._refunds, "returns": []}),
+            latency_ms=1,
+            trace_id=TRACE,
+        )
+
+
+def make_write_deps(
+    *,
+    eligibility: Any = None,
+    writes: Any = None,
+    after_sales: Any = None,
+    persist: Any = None,
+) -> GraphDeps:
+    unused = UnusedDependency()
+    return GraphDeps(
+        understanding=FakeUnderstanding(),
+        orders=ConfirmedOrderTools("order-001"),
+        evidence_model=unused,
+        evidence=unused,
+        registry=ToolRegistry(),
+        eligibility=eligibility or unused,
+        writes=writes or unused,
+        after_sales=after_sales or unused,
+        persist_intent=persist or unused_persist,
+    )
+
+
+def eligible_state(**overrides: Any) -> AgentState:
+    base: dict[str, Any] = {
+        "resolved_order_id": "order-001",
+        "eligibility": {
+            "eligible": True,
+            "allowed_action": "REFUND_ONLY",
+            "max_refund_amount": Decimal("199.00"),
+            "approval_required": False,
+        },
+    }
+    base.update(overrides)
+    return make_state(**base)
+
+
+class TestEligibilityNode:
+    @pytest.mark.asyncio
+    async def test_java_decision_is_copied_never_computed(self) -> None:
+        nodes = build_write_nodes(make_write_deps(eligibility=FakeEligibilityTools()))
+        update = await nodes[Node.CHECK_ELIGIBILITY](
+            {"state": make_state(resolved_order_id="order-001")}
+        )
+
+        assert update["state"].eligibility is not None
+        assert update["state"].eligibility.allowed_action == "REFUND_ONLY"
+        assert update["state"].tool_history[0].tool_name == "check_after_sales_eligibility"
+        assert update["decision"].safe_stop_reason is None
+
+    @pytest.mark.asyncio
+    async def test_a_transient_failure_retries_the_same_question(self) -> None:
+        nodes = build_write_nodes(
+            make_write_deps(
+                eligibility=FakeEligibilityTools(
+                    error_code="ELIGIBILITY_UNAVAILABLE", retryable=True
+                )
+            )
+        )
+        update = await nodes[Node.CHECK_ELIGIBILITY](
+            {"state": make_state(resolved_order_id="order-001")}
+        )
+
+        assert update["decision"].retry_current_stage is True
+        assert update["state"].retry_count == 1
+        assert update["state"].eligibility is None
+
+    @pytest.mark.asyncio
+    async def test_no_answer_and_no_budget_stops_instead_of_claiming_not_eligible(self) -> None:
+        """Finishing here would report "not eligible" - a claim we cannot make."""
+        nodes = build_write_nodes(
+            make_write_deps(
+                eligibility=FakeEligibilityTools(
+                    error_code="ELIGIBILITY_UNAVAILABLE", retryable=True
+                )
+            )
+        )
+        state = make_state(resolved_order_id="order-001", retry_count=2, max_retries=2)
+        update = await nodes[Node.CHECK_ELIGIBILITY]({"state": state})
+
+        assert update["decision"].safe_stop_reason is SafeStopReason.ELIGIBILITY_UNAVAILABLE
+        assert route_after_eligibility(update["state"], update["decision"]) is Node.SAFE_STOP
+
+
+class TestRefundWriteNode:
+    @pytest.mark.asyncio
+    async def test_the_intent_is_durable_before_the_request_is_sent(self) -> None:
+        """The whole ordering, asserted as one list: persist first, then send."""
+        order: list[str] = []
+        writes = FakeRefundWriteTools(calls=order)
+
+        async def persist(state: AgentState, intent: WriteIntent, outcome: WriteOutcome):
+            order.append("persist_intent")
+            return advance(state, write_intent=intent, write=outcome)
+
+        nodes = build_write_nodes(make_write_deps(writes=writes, persist=persist))
+        update = await nodes[Node.REFUND_WRITE]({"state": eligible_state()})
+
+        assert order == ["persist_intent", "create_refund_request"]
+        assert update["state"].write_intent is not None
+        assert update["state"].write.status is WriteStatus.SUCCEEDED
+        assert update["state"].write.resource_id == "refund-001"
+
+    @pytest.mark.asyncio
+    async def test_a_write_whose_intent_cannot_be_made_durable_sends_nothing(self) -> None:
+        writes = FakeRefundWriteTools()
+
+        async def failing_persist(state: AgentState, intent: WriteIntent, outcome: WriteOutcome):
+            raise RuntimeError("the checkpoint store is unavailable")
+
+        nodes = build_write_nodes(make_write_deps(writes=writes, persist=failing_persist))
+        update = await nodes[Node.REFUND_WRITE]({"state": eligible_state()})
+
+        assert writes.calls == []
+        assert update["state"].write_intent is None
+        assert update["decision"].safe_stop_reason is SafeStopReason.WRITE_INTENT_NOT_DURABLE
+
+    @pytest.mark.asyncio
+    async def test_an_unconfirmable_write_is_reported_as_unknown_not_success(self) -> None:
+        writes = FakeRefundWriteTools(mode="unknown")
+        nodes = build_write_nodes(make_write_deps(writes=writes))
+
+        async def persist(state: AgentState, intent: WriteIntent, outcome: WriteOutcome):
+            return advance(state, write_intent=intent, write=outcome)
+
+        nodes = build_write_nodes(make_write_deps(writes=writes, persist=persist))
+        update = await nodes[Node.REFUND_WRITE]({"state": eligible_state()})
+
+        assert update["state"].write.status is WriteStatus.UNKNOWN
+        assert update["state"].write_intent is not None
+        assert update["state"].write.status is not WriteStatus.SUCCEEDED
+
+
+class TestVerifyNode:
+    @pytest.mark.asyncio
+    async def test_verification_reads_the_same_key_and_reports_a_negative_honestly(self) -> None:
+        reads = FakeAfterSalesReads([])
+        nodes = build_write_nodes(make_write_deps(after_sales=reads))
+        state = make_state(
+            resolved_order_id="order-001",
+            write_intent=make_write_intent(),
+            write={"status": "UNKNOWN"},
+        )
+        update = await nodes[Node.VERIFY]({"state": state})
+
+        assert reads.keys == ["0123456789abcdef"]
+        assert update["state"].verification.status is VerificationStatus.VERIFIED_FAILURE
+
+    @pytest.mark.asyncio
+    async def test_verification_recognises_the_refund_the_key_identifies(self) -> None:
+        reads = FakeAfterSalesReads([refund_result()])
+        nodes = build_write_nodes(make_write_deps(after_sales=reads))
+        state = make_state(
+            resolved_order_id="order-001",
+            write_intent=make_write_intent(),
+            write={"status": "SUCCEEDED", "resource_id": "refund-001"},
+        )
+        update = await nodes[Node.VERIFY]({"state": state})
+
+        assert update["state"].verification.status is VerificationStatus.VERIFIED_SUCCESS
+        assert update["state"].verification.resource_id == "refund-001"
+
+    @pytest.mark.asyncio
+    async def test_verification_without_a_durable_intent_refuses_instead_of_guessing(self) -> None:
+        nodes = build_write_nodes(make_write_deps(after_sales=FakeAfterSalesReads([])))
+        update = await nodes[Node.VERIFY]({"state": eligible_state()})
+
+        assert update["decision"].safe_stop_reason is SafeStopReason.WRITE_INTENT_NOT_DURABLE

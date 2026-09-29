@@ -11,8 +11,16 @@ touches a field, and the only field it can influence is the untrusted `user_requ
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from app.agent.eligibility_execution import (
+    US1_ELIGIBILITY_REASON_CODE,
+    EligibilityTools,
+)
+from app.agent.eligibility_execution import (
+    check_eligibility as run_eligibility_check,
+)
 from app.agent.evidence_execution import EvidenceReadTools, execute_read_evidence
 from app.agent.evidence_routing import (
     EvidenceDecisionModel,
@@ -20,14 +28,34 @@ from app.agent.evidence_routing import (
     decide_next_evidence,
     guard_evidence_proposal,
 )
+from app.agent.execute_write import (
+    INTENT_NOT_DURABLE_ERROR_CODE,
+    RefundWriteTools,
+    execute_refund_write,
+    refund_write_intent,
+    write_may_already_have_committed,
+)
 from app.agent.graph import GraphNode, GraphState, GraphUpdate
 from app.agent.order_resolution import OrderReadTools, resolve_single_order
 from app.agent.request_understanding import RequestUnderstandingModel, understand_request
-from app.agent.routing import Decision, Node, SafeStopReason
-from app.agent.state import AgentState, advance
+from app.agent.routing import Decision, Node, SafeStopReason, eligibility_handoff
+from app.agent.state import AgentState, WriteIntent, WriteOutcome, advance
+from app.agent.verify_business_state import AfterSalesReadTools, verify_refund_business_state
 from app.tools.registry import ToolRegistry
 
-__all__ = ["GraphDeps", "build_evidence_nodes", "build_read_nodes", "spend_one_step"]
+__all__ = [
+    "GraphDeps",
+    "PersistWriteIntent",
+    "build_evidence_nodes",
+    "build_read_nodes",
+    "build_write_nodes",
+    "spend_one_step",
+]
+
+#: Persist the write intent **before** the request is sent, and hand back the state that now carries
+#: it. The graph nodes only need the contract, which is why this is a parameter rather than an
+#: import: the durability implementation belongs to whoever owns `RunStore`.
+type PersistWriteIntent = Callable[[AgentState, WriteIntent, WriteOutcome], Awaitable[AgentState]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +71,10 @@ class GraphDeps:
     evidence_model: EvidenceDecisionModel
     evidence: EvidenceReadTools
     registry: ToolRegistry
+    eligibility: EligibilityTools
+    writes: RefundWriteTools
+    after_sales: AfterSalesReadTools
+    persist_intent: PersistWriteIntent
 
 
 def spend_one_step(state: AgentState) -> AgentState:
@@ -201,3 +233,133 @@ def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         return GraphUpdate(state=moved, decision=Decision(guard=guard))
 
     return {Node.DECIDE_EVIDENCE: decide_evidence, Node.EXECUTE_EVIDENCE: execute_evidence}
+
+
+def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
+    """Build the money path: ask Java what is allowed, write once, then read authority back.
+
+    These three nodes are the only ones that can lead to money moving, and each of them delegates
+    rather than decides: eligibility is Java's judgement, recovery policy is T031's, and the final
+    business fact is whatever the authority says afterwards.
+    """
+
+    async def check_eligibility(graph: GraphState) -> GraphUpdate:
+        """Hand off to Java's deterministic eligibility service with a routing-layer token."""
+        state = spend_one_step(graph["state"])
+        if state.resolved_order_id is None:
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.EVIDENCE_CONTEXT_MISSING),
+            )
+
+        result = await run_eligibility_check(
+            eligibility_handoff(graph.get("decision")),
+            resolved_order_id=state.resolved_order_id,
+            step_index=state.step_count,
+            tools=deps.eligibility,
+        )
+        history = [*state.tool_history, result.history]
+        if result.eligibility is None:
+            if result.history.retryable and state.retry_count < state.max_retries:
+                moved = advance(state, retry_count=state.retry_count + 1, tool_history=history)
+                return GraphUpdate(state=moved, decision=Decision(retry_current_stage=True))
+            # Java could not answer and we are out of attempts. Finishing here would report "not
+            # eligible", which is a claim we cannot make; the run stops instead.
+            moved = advance(state, tool_history=history)
+            return GraphUpdate(
+                state=moved,
+                decision=Decision(safe_stop_reason=SafeStopReason.ELIGIBILITY_UNAVAILABLE),
+            )
+
+        moved = advance(state, eligibility=result.eligibility, tool_history=history)
+        return GraphUpdate(state=moved, decision=Decision())
+
+    async def refund_write(graph: GraphState) -> GraphUpdate:
+        """Attempt one logical refund exactly once, and let T031 own every retry decision.
+
+        The node does not retry on any outcome. `RefundWriteOutcome` reports how many attempts T031
+        already spent, and a second retry loop here would re-run a policy - read authority first,
+        reuse the same key, give up as UNKNOWN - that has exactly one owner.
+        """
+        state = spend_one_step(graph["state"])
+        snapshot = state.eligibility
+        if (
+            state.resolved_order_id is None
+            or snapshot is None
+            or snapshot.max_refund_amount is None
+        ):
+            # The router only sends a bounded, eligible refund here. Reaching this branch means the
+            # routing table is incomplete, and refusing beats writing an amount we cannot bound.
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.ELIGIBILITY_AMOUNT_UNBOUNDED),
+            )
+
+        intent = refund_write_intent(
+            state,
+            order_id=state.resolved_order_id,
+            reason_code=US1_ELIGIBILITY_REASON_CODE,
+            requested_amount=snapshot.max_refund_amount,
+        )
+
+        # The callback T031 calls before its first Tool call. Whatever it returns is the state that
+        # now carries a durable intent; if it raises, `persisted` is untouched, and the state this
+        # node returns will have no intent - which is exactly true.
+        persisted = state
+
+        async def persist(intent_record: WriteIntent, pending: WriteOutcome) -> None:
+            nonlocal persisted
+            persisted = await deps.persist_intent(persisted, intent_record, pending)
+
+        execution = await execute_refund_write(
+            tools=deps.writes,
+            intent=intent,
+            persist_intent=persist,
+            may_already_have_committed=write_may_already_have_committed(state),
+            start_step_index=state.step_count,
+        )
+        outcome = execution.outcome
+        moved = advance(
+            persisted,
+            write=outcome.to_state_outcome(),
+            tool_history=[*persisted.tool_history, *execution.history],
+        )
+        if outcome.error_code == INTENT_NOT_DURABLE_ERROR_CODE:
+            # Nothing was sent, and that was the right call: a write whose key might not survive us
+            # is the one write we must not attempt. The trace keeps why.
+            return GraphUpdate(
+                state=moved,
+                decision=Decision(safe_stop_reason=SafeStopReason.WRITE_INTENT_NOT_DURABLE),
+            )
+        return GraphUpdate(state=moved, decision=Decision())
+
+    async def verify(graph: GraphState) -> GraphUpdate:
+        """Read the authoritative after-sales state back, scoped by the same key, and never retry.
+
+        A write response is not the final business fact, and this node is where that belief is
+        cashed in: `WriteOutcome` says what we were told, `VerificationOutcome` says what is true.
+        """
+        state = spend_one_step(graph["state"])
+        intent = state.write_intent
+        if intent is None or state.resolved_order_id is None:
+            # Verification is scoped by the key, so without a durable intent there is no question to
+            # ask - and reaching here would mean an incomplete routing table.
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.WRITE_INTENT_NOT_DURABLE),
+            )
+
+        verification = await verify_refund_business_state(
+            tools=deps.after_sales,
+            order_id=state.resolved_order_id,
+            idempotency_key=intent.idempotency_key,
+            expected_refund_request_id=state.write.resource_id,
+        )
+        moved = advance(state, verification=verification)
+        return GraphUpdate(state=moved, decision=Decision())
+
+    return {
+        Node.CHECK_ELIGIBILITY: check_eligibility,
+        Node.REFUND_WRITE: refund_write,
+        Node.VERIFY: verify,
+    }
