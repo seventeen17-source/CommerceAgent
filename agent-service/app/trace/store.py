@@ -568,7 +568,7 @@ class PostgresRunStore(RunStore):
                 raise RunStoreError("checkpoint state principal does not match run owner")
 
             next_version = locked["version"] + 1
-            cursor.execute(  # noqa: S608 - static column list from _RUN_COLUMNS
+            cursor.execute(
                 """
                 UPDATE agent.agent_runs
                 SET version = %s,
@@ -580,7 +580,8 @@ class PostgresRunStore(RunStore):
                     retry_count = %s,
                     state_json = %s
                 WHERE run_id = %s AND version = %s
-                RETURNING """ + _RUN_COLUMNS,
+                RETURNING """
+                + _RUN_COLUMNS,
                 (
                     next_version,
                     state.intent,

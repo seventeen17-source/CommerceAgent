@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.execute_write import (
-    CREATE_REFUND_ACTION,
     RefundWriteExecutionResult,
     execute_refund_write,
     refund_write_intent,
@@ -155,18 +154,12 @@ async def run_t031_live(
     record = _owned_run(store, body.run_id, call)
     state = record.to_state()
     if state is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="RUN_CHECKPOINT_COMPACTED"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="RUN_CHECKPOINT_COMPACTED")
     if state.resolved_order_id is not None and state.resolved_order_id != body.order_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="RESOLVED_ORDER_CONFLICT"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="RESOLVED_ORDER_CONFLICT")
 
     tools = CommerceTools(client=_client(request), auth=call.auth)
-    eligibility_result = await tools.check_after_sales_eligibility(
-        body.order_id, body.reason_code
-    )
+    eligibility_result = await tools.check_after_sales_eligibility(body.order_id, body.reason_code)
     if not eligibility_result.success or eligibility_result.data is None:
         return T031LiveResponse(
             completed=False,
@@ -215,9 +208,7 @@ async def run_t031_live(
 
     async def persist_intent(value: WriteIntent, pending: WriteOutcome) -> None:
         nonlocal working_record, working_state
-        working_state = working_state.model_copy(
-            update={"write_intent": value, "write": pending}
-        )
+        working_state = working_state.model_copy(update={"write_intent": value, "write": pending})
         working_record = _checkpoint(
             store,
             working_record,
@@ -259,9 +250,7 @@ async def run_t031_live(
             idempotencyKey=execution.outcome.idempotency_key,
             write=working_state.write,
             verification=working_state.verification,
-            toolHistory=[
-                entry.model_dump(mode="json") for entry in execution.history
-            ],
+            toolHistory=[entry.model_dump(mode="json") for entry in execution.history],
         )
 
     verification = await verify_refund_business_state(
@@ -278,9 +267,7 @@ async def run_t031_live(
         current_node="verify_business_state",
         next_action="finalize",
         reason_code=(
-            None
-            if verification.status is VerificationStatus.VERIFIED_SUCCESS
-            else "VERIFY_FAILED"
+            None if verification.status is VerificationStatus.VERIFIED_SUCCESS else "VERIFY_FAILED"
         ),
     )
 

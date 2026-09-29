@@ -1,7 +1,7 @@
 """Authoritative verify-after-write node logic for T031.
 
 A successful write response is not the final business fact. This module reads the Java-owned
-after-sales state scoped by the durable idempotency key and only then produces a VerificationOutcome.
+after-sales state scoped by the durable idempotency key, then produces a VerificationOutcome.
 It deliberately does not retry writes; execute_write.py owns retry/recovery policy and T032 will own
 graph routing.
 """

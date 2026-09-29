@@ -208,7 +208,6 @@ def test_a_transition_that_leaves_a_field_unset_does_not_erase_it(
         store.delete_run(state.run_id)
 
 
-
 def test_full_state_checkpoint_persists_write_intent_and_verification(
     connection_factory: ConnectionFactory,
 ) -> None:
@@ -304,6 +303,7 @@ def test_stale_full_state_checkpoint_is_refused(
         assert reloaded.state.write_intent.idempotency_key == "t031_checkpoint_key_001"
     finally:
         store.delete_run(state.run_id)
+
 
 # --------------------------------------------------------------------------------------------
 # Compare-and-swap: a stale writer must lose

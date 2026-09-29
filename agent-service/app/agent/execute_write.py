@@ -43,8 +43,8 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Protocol
 from decimal import Decimal
+from typing import Protocol
 from uuid import uuid4
 
 from app.agent.state import AgentState, ToolHistoryEntry, WriteIntent, WriteOutcome, WriteStatus
@@ -425,7 +425,7 @@ async def execute_refund_write(
                     history=tuple(history),
                 )
 
-            # The authority answered and found no refund for this key *yet*. The same key is the only
+            # The authority answered and found no refund for this key *yet*. The same key is the
             # safe retry identity; exhausting the budget remains UNKNOWN because the timed-out
             # request may still finish later.
             continue

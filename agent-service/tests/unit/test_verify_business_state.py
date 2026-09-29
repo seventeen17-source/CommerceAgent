@@ -43,9 +43,7 @@ def _status(*refunds: RefundResult) -> AfterSalesStatus:
 
 @pytest.mark.asyncio
 async def test_success_requires_authoritative_readback_bound_to_same_key() -> None:
-    tools = _FakeAfterSalesTools(
-        ToolEnvelope(success=True, data=_status(_refund()), latencyMs=3)
-    )
+    tools = _FakeAfterSalesTools(ToolEnvelope(success=True, data=_status(_refund()), latencyMs=3))
 
     result = await verify_refund_business_state(
         tools=tools,
@@ -63,9 +61,7 @@ async def test_success_requires_authoritative_readback_bound_to_same_key() -> No
 
 @pytest.mark.asyncio
 async def test_empty_authoritative_result_is_verified_failure_not_success() -> None:
-    tools = _FakeAfterSalesTools(
-        ToolEnvelope(success=True, data=_status(), latencyMs=2)
-    )
+    tools = _FakeAfterSalesTools(ToolEnvelope(success=True, data=_status(), latencyMs=2))
 
     result = await verify_refund_business_state(
         tools=tools,

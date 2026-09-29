@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 3 — US1 MVP
-- **当前 Tasks**：T031 — Write Execution + Verify-after-write Recovery（**能力层已交付，产品层未接线**）。代码事实：`app/agent/execute_write.py` 的写恢复已改走 T029 typed tools；`app/agent/verify_business_state.py` 已存在并可按同一 idempotency key 读 Java 权威状态；`PostgresRunStore.checkpoint_state()` 已提供 CAS 全量状态快照；`app/api/dev_t031.py` 提供 dev-only live harness。**但 `agent/` 下不存在 `graph.py` / `routing.py`，`verify_business_state` 的非测试调用方只有 `dev_t031.py`** —— 即没有任何生产代码把一次 run 驱动起来。因此 T031 的准确状态是「能力层闭环、产品层未接线」，把能力接成 E2E 的是 **T032**。
+- **当前 Tasks**：T032 — LangGraph 装配（`graph.py` / `routing.py`）：START → understand → resolve → evidence loop → eligibility → refund write → verify → finalize，含最大 step/retry budget。**T031 已于 2026-09-29 收口并勾选**（交付物齐备、四条 Python 门禁全绿）。当前唯一缺口就是**生产调用链**：`agent/` 下不存在 `graph.py` / `routing.py`，`verify_business_state` 的非测试调用方只有 dev-only 的 `app/api/dev_t031.py`，T029/T030 的 live 证据同样走 `/agent/dev/...` 调试路由。
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
@@ -32,10 +32,10 @@
 - **T022 review hardening（已本地复验）**：在原 258 passed / 6 skipped 基线上补齐 3 个恢复边界：① `AfterSalesStatus.refunds/returns` 必填；② unknown-write recovery 用 `idempotencyKey` 过滤权威状态；③ `WriteIntent` 增加稳定 request fingerprint，恢复 payload 漂移时 fail closed。2026-09-23 本地复验：`ruff check` **All checks passed**、`ruff format --check` **41 files**、`mypy app` **Success 25 source files**、`pytest -q` **261 passed, 6 skipped**。
 - **T029 — Typed Tools 正式验收完成**：新增 `app/tools/models.py` / `registry.py` / `commerce_tools.py`，实现六个 US1 typed tools、统一 Tool Envelope、risk metadata、显式 allowlist 与 name→bound implementation 映射；Registry 只负责 capability allowlist/metadata/binding，不承担 AgentState routing guard。退款写 transport failure 归一为 `WRITE_TIMEOUT_UNKNOWN` 且 `retryable=false`，恢复必须先走 `get_after_sales_status`。为满足“每个 T 可运行、可观察”的验收口径，补充 dev/test-only `/api/v1/agent/dev/tools/execute` 与 `T029 · LIVE TOOL` Flow Playground（刻意不暴露 high-write Tool）。5173 实测 `get_order`、`get_logistics`（`order-001` 的 `stalledHours=384`）、`check_after_sales_eligibility`（eligible + REFUND_ONLY + maxRefundAmount 199.0）、`get_after_sales_status`（同 key 找到真实 CREATED refund；不存在 key 返回 `refunds=[]`），并验证 cross-owner `order-002` 与真实 missing `order-999` 对 Agent 均为 `ORDER_NOT_FOUND`。最终 Python ruff/format/mypy 全绿，`pytest` **285 passed, 6 skipped, 6 warnings**；Web build/lint 全绿。
 - **T030 — Agent 证据收集与受限 capability 决策正式验收完成**：新增真实 OpenAI-compatible request understanding 与 next-evidence adapter；`mentionedOrderId` 仅作线索，只有 Java ownership-confirmed `get_order` 成功才写入 `resolved_order_id`；模型 evidence 输出被收窄为 `get_logistics` / `READY_FOR_ELIGIBILITY`，再由确定性 guard 检查 registry risk、resolved order、重复证据与阶段权限；只有成功 Tool 响应进入 `EvidenceItem`，Java 继续权威计算 `stalledHours`；最终 `EligibilitySnapshot` 只复制 Java `EligibilityDecision`，Python/LLM 不计算 eligibility 或金额。新增 dev/test-only `/api/v1/agent/dev/t030/run` 与同一 Flow Playground 的 `T030 · LIVE AGENT`。最终 Python ruff/format/mypy 全绿，`pytest` **333 passed, 6 skipped, 6 warnings**；Web build/lint 全绿；5173 实测 `customer-001 + order-001` → `completed=true`，`customer-001 + order-002` → `ORDER_NOT_FOUND / completed=false`，证明 cross-owner 在 Agent evidence loop 之前停止。
-- **T031 — Write Execution + Verify-after-write Recovery（能力层已交付、产品层未接线）**：Agent 侧写后权威校验与持久化接缝：`app/agent/verify_business_state.py`（按**同一** idempotency key 读 Java 权威 after-sales 状态再产出 `VerificationOutcome`：读失败 → `UNKNOWN`；权威返回空 → `VERIFIED_FAILURE`；同 key 多条或 refund id 与直连写响应不符 → `UNKNOWN`。**它自己不重试**，重试策略归 `execute_write.py`、路由归 T032）；`execute_write.py` 从直连 `CommerceClient` **改写为经 T029 typed tools 执行与恢复**（`RefundWriteTools` 协议）；`PostgresRunStore.checkpoint_state()` 新增 **CAS 全量状态快照**（`expected_version` + 行锁，同状态才可写、拒绝借它改 status、payload 的 principal 必须等于 run owner，让 `write_intent` / `write` / `verification` 这些非行投影字段可落盘）；`app/api/dev_t031.py`（**dev-only** `POST /api/v1/agent/dev/t031/run`）按「先 checkpoint intent → 再发钱移动的 Tool → 最后读回 Java 权威」顺序提供 live harness；Flow Playground 在同一页面追加 safe write verification 步骤。**本地实测（2026-09-28，真实 PostgreSQL）**：`tests/integration/test_trace_store.py` **23 passed**（含并发 resume 用例）、`tests/integration/test_run_api.py` **18 passed**、`tests/unit/test_execute_write_tools.py` + `tests/unit/test_verify_business_state.py` **9 passed**。**明确未验收**：Python 四条门禁未在 `ba5cd87` 之后重跑；`tasks.md` T031 仍为 `[ ]`；Java 侧 `RefundHttpIntegrationTest.java` 有未提交的纯格式改动、对应 `clean verify` 无证据。
-- **当前优先任务**：**T032 — 用 `graph.py` / `routing.py` 把 T019–T031 已交付的能力接成生产闭环**（START → understand → resolve → evidence loop → eligibility → refund write → verify → finalize，含最大 step/retry budget）。在 T032 之前，T031 只能记作「能力已交付、无生产调用方」：`verify_business_state.py` / typed-tool 写恢复 / CAS checkpoint 都有实现与测试，但唯一非测试调用方是 dev-only `app/api/dev_t031.py`，T029/T030 的 live 证据同理走 `/agent/dev/...` 调试路由。
+- **T031 — Write Execution + Verify-after-write Recovery（已完成并验收，2026-09-29）**：Agent 侧写后权威校验与持久化接缝：`app/agent/verify_business_state.py`（按**同一** idempotency key 读 Java 权威 after-sales 状态再产出 `VerificationOutcome`：读失败 → `UNKNOWN`；权威返回空 → `VERIFIED_FAILURE`；同 key 多条或 refund id 与直连写响应不符 → `UNKNOWN`。**它自己不重试**，重试策略归 `execute_write.py`、路由归 T032）；`execute_write.py` 从直连 `CommerceClient` **改写为经 T029 typed tools 执行与恢复**（`RefundWriteTools` 协议）；`PostgresRunStore.checkpoint_state()` 新增 **CAS 全量状态快照**（`expected_version` + 行锁，同状态才可写、拒绝借它改 status、payload 的 principal 必须等于 run owner，让 `write_intent` / `write` / `verification` 这些非行投影字段可落盘）；`app/api/dev_t031.py`（**dev-only** `POST /api/v1/agent/dev/t031/run`）按「先 checkpoint intent → 再发钱移动的 Tool → 最后读回 Java 权威」顺序提供 live harness；Flow Playground 在同一页面追加 safe write verification 步骤。**本地实测（2026-09-28，真实 PostgreSQL）**：`tests/integration/test_trace_store.py` **23 passed**（含并发 resume 用例）、`tests/integration/test_run_api.py` **18 passed**、`tests/unit/test_execute_write_tools.py` + `tests/unit/test_verify_business_state.py` **9 passed**。**2026-09-29 收口**：这 9 个远端提交当时**并未跑过 Python 门禁**，收口时查出 5 处 `ruff check` 违规（`execute_write.py` import 未排序 + 超长行、`verify_business_state.py` 超长行、`dev_t031.py` 未使用导入、`store.py` 无用 `noqa`）与 4 个待格式化文件，全部修掉后四条门禁全绿：`ruff check .` **All checks passed**、`ruff format --check .` **73 files already formatted**、`mypy app` **Success: 42 source files**、`pytest -q` **344 passed, 6 skipped, 6 warnings**。**仍存在的事实**：`verify_business_state.py` 的非测试调用方只有 dev-only `app/api/dev_t031.py`，端到端 Gate 未跑通 —— 这不算 T031 未完成，它是 **T032 的前置**。**Java 侧未验收**：`commerce-backend/.../RefundHttpIntegrationTest.java`（T028 的测试文件）仍有未提交的纯格式改动；本沙箱下 Testcontainers 需要 Docker 命名管道，`clean verify` 无法执行，按 `AGENTS.md` §9 规则 6 以你本地构建为准。
+- **当前优先任务**：**T032 — 用 `graph.py` / `routing.py` 把 T019–T031 已验收的能力接成生产闭环**（START → understand → resolve → evidence loop → eligibility → refund write → verify → finalize，含最大 step/retry budget）。这是 US1 Gate 的最后一块砖：`verify_business_state.py` / typed-tool 写恢复 / CAS checkpoint 都已验收，但唯一非测试调用方是 dev-only `app/api/dev_t031.py`，T029/T030 的 live 证据同样走 `/agent/dev/...` —— **没有 graph，这些能力永远只能被调试路由和测试调用**。
 - **进度判定口径（本文件不自我认证）**：本文件、`tasks.md` 与 devlog 的标记只用于**定位阶段**，不作为完成依据。判定一个 T 必须回到代码，按 生产实现 → 测试验证 → API/DTO/Schema → **生产调用链** → 持久化与工程接入 依次确认；类/接口/测试齐备但只被 dev-only 路由或测试调用时，只能记为「能力层闭环、产品层未接线」。文档写了完成而代码无生产调用链 → 「文档完成，代码未验证」；代码已实现而文档未更新 → **以代码事实为准**。审计前先固定 ref：`git fetch --all --prune` 后记录 `git branch --show-current` 与 `git rev-parse HEAD`，否则"以代码为准"会退化成"以手上那份过期代码为准"（参见下方「进度比较基准」）。
-- **任务勾选口径说明（T021/T022/T031）**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理，编号修正为 `V003`）；T027 **部分交付**（ownership / state / eligibility / amount 写前重校验、幂等、行锁、审计、状态读面已完成），**仍缺**权威 `approvalRequestId` 绑定（US4/T049）；T029 **已完整交付并完成 5173 live 验收**；T031 **能力层已交付**（T022 的 write-ahead intent / authority readback / same-key finite retry + T031 的 `verify_business_state.py` / typed-tool 写恢复 / CAS 全量 checkpoint / dev-only live harness），**仍缺生产调用方与 graph 接线（T032）**，因此 **不勾选**——依据不是"有没有类和测试"，而是"有没有生产调用链"。
+- **任务勾选口径说明（T021/T022/T031）**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理，编号修正为 `V003`）；T027 **部分交付**（ownership / state / eligibility / amount 写前重校验、幂等、行锁、审计、状态读面已完成），**仍缺**权威 `approvalRequestId` 绑定（US4/T049）；T029 **已完整交付并完成 5173 live 验收**；T031 **已勾选**（2026-09-29）：其 `tasks.md` 交付物文本就是 `execute_write.py` + `verify_business_state.py` 两个模块，二者已交付、有测试、且四条门禁全绿；graph 接线明确属 T032，所以「无生产调用方」记为 **T032 的前置事实**，而不是 T031 未完成的理由。**口径修订**：此前一度按「有没有生产调用链」判定 T031 不勾选，那是把 T032 的验收标准上移到了 T031，现已纠正。
 - **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace。**当前 Gate 的下一块砖就是 T032**：没有 graph 接线，T019–T031 的能力只被 dev harness 与测试调用，端到端不可能真的跑通。
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
 - **环境事实（重要）**：
@@ -87,17 +87,17 @@ main
 
 T025 已从**最新 dev**创建独立分支 `feat/us1-eligibility-http-api` 并于 2026-09-25 完成验收；该分支继续保留为 T025 checkpoint。旧 `feat/us1-eligibility-decision` 保留为历史 T020 checkpoint，不删除、不重写。T025 合入 `dev/002-commerce-after-sales-mvp` 后，T028 必须重新从最新 dev 创建独立分支 `feat/us1-refund-http-api`，禁止从 T025 feature 继续线性派生。
 
-当前分支线实况（2026-09-28，以 `origin/dev` 为基准）：
+当前分支线实况（2026-09-29，以 `origin/dev` 为基准）：
 
 ```text
-origin/dev/002-commerce-after-sales-mvp = 4daab66（T030 closeout）
+origin/dev/002-commerce-after-sales-mvp  ← T031 已从 feat/us1-write-verify-recovery fast-forward 合入
    ├─ feat/us1-refund-http-api        ← T028 checkpoint（已验收）
    ├─ feat/us1-typed-tools            ← T029 checkpoint（已验收）
-   ├─ feat/us1-agent-evidence-routing ← T030 checkpoint（已验收，tip == 4daab66）
-   └─ feat/us1-write-verify-recovery  ← T031 checkpoint（**12 commits 领先 dev，未合入、未验收**）
+   ├─ feat/us1-agent-evidence-routing ← T030 checkpoint（已验收）
+   └─ feat/us1-write-verify-recovery  ← T031 checkpoint（**已验收**：交付物齐备 + 四条 Python 门禁全绿）
 ```
 
-T031 分支（`ba5cd87`）尚未合入 dev：它仍缺 Python 四条门禁复跑与 `tasks.md` 勾选，且产品层未接线（T032）。下一个功能（T032）必须**从最新 dev 新建** `feat/us1-langgraph-assembly` 之类的分支，**禁止从这个 T031 feature 分支继续派生**——T031 的代码先验收并合入 dev，再成为 T032 的基线。
+T031 已收口：交付物（`execute_write.py` / `verify_business_state.py` / CAS `checkpoint_state` / dev-only live harness）齐备，收口时修掉 9 个远端提交带进来的 lint/format 债后，四条 Python 门禁全绿。**T032 必须从最新 dev 新建** `feat/us1-langgraph-assembly` 之类的分支，**禁止从这个 T031 feature 分支继续派生**。
 
 ## 阶段总览
 
@@ -106,7 +106,7 @@ T031 分支（`ba5cd87`）尚未合入 dev：它仍缺 Python 四条门禁复跑
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
 | 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ✅ Complete（T008–T018 ✅） |
-| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T031 **能力与测试**已交付；T027 approval binding 留 US4；**T031 无生产调用方**；**T032 graph 接线是当前缺口，E2E 尚未跑通**） |
+| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T031 已验收；T027 approval binding 留 US4；**T032 graph 接线是当前唯一缺口，E2E 尚未跑通**） |
 | 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
 | 6 | 安全降级 | T057–T063 | 依赖失败 / 规则冲突时 Safe Stop 或转人工 | ⬜ |
@@ -158,7 +158,7 @@ T031 分支（`ba5cd87`）尚未合入 dev：它仍缺 Python 四条门禁复跑
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
 10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
 11. ✅ T018：FastAPI 认证 / principal / run ownership / run 骨架接口（Python 四条门禁全绿 → 234 passed；Web build + lint 通过；**5173 端到端流转实测通过**）—— Phase 2 收口
-12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径；T020 ✅ 资格决策；T021 ✅ 退款写入与幂等/并发测试；T022 ✅ Agent 侧 unknown-write recovery；T023 ✅ Order HTTP；T024 ✅ Logistics HTTP；T025 ✅ Eligibility HTTP；T026 ✅ Refund persistence；T027 核心写路径已提前交付、approval binding 留 US4；T028 ✅ Refund / After-sales Status HTTP；T029 ✅ Typed Tools；T030 ✅ Agent 证据收集与受限 capability 决策；T031 **能力层已交付、无生产调用方**；**当前 T032 LangGraph 装配**）
+12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径；T020 ✅ 资格决策；T021 ✅ 退款写入与幂等/并发测试；T022 ✅ Agent 侧 unknown-write recovery；T023 ✅ Order HTTP；T024 ✅ Logistics HTTP；T025 ✅ Eligibility HTTP；T026 ✅ Refund persistence；T027 核心写路径已提前交付、approval binding 留 US4；T028 ✅ Refund / After-sales Status HTTP；T029 ✅ Typed Tools；T030 ✅ Agent 证据收集与受限 capability 决策；T031 ✅ 写执行 + 写后权威校验（四条 Python 门禁全绿）；**当前 T032 LangGraph 装配**）
 
 ### T008 验收证据
 
