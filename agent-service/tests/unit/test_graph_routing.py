@@ -54,6 +54,7 @@ def make_state(**overrides: Any) -> AgentState:
         "run_id": uuid4(),
         "principal": {"user_id": "customer-001", "role": "CUSTOMER"},
         "user_request": "我的包裹卡在路上了，我要退款",
+        "intent": "REFUND_REQUEST",
     }
     base.update(overrides)
     return AgentState.model_validate(base)
@@ -152,6 +153,13 @@ class TestBudget:
 class TestRouteAfterUnderstand:
     def test_running_state_goes_to_order_resolution(self) -> None:
         assert route_after_understand(make_state()) is Node.RESOLVE_ORDER
+
+    @pytest.mark.parametrize("intent", ["UNKNOWN", None])
+    def test_unrecognised_intent_asks_the_user_instead_of_guessing(
+        self, intent: str | None
+    ) -> None:
+        """With no goal, no capability is obviously the right one - so we ask, not act."""
+        assert route_after_understand(make_state(intent=intent)) is Node.WAITING_USER
 
     def test_terminal_state_goes_straight_to_finalize(self) -> None:
         state = make_state(status=RunStatus.SAFE_STOP)

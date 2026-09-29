@@ -111,11 +111,14 @@ Java      负责业务事实（什么是真的）
 
 1. 每个节点只做两件事：`state = advance(state, **changes)` 与 `return {"state": state}`。
    **禁止 `model_copy(update=...)`**：实测它跳过校验，会让 `extra="forbid"`、预算守卫、凭据扫描在图里静默失效。
-2. Graph 的 state schema 是 `GraphState = TypedDict{"state": AgentState, "decision": Decision}`：
-   `state` 是权威载荷（每次变更都经 `advance()` 重建校验）；`decision` 是**控制面**的瞬时数据
-   （当前节点的提议、guard 裁定、节点自述的 safe-stop 原因），**不进 `AgentState`、不持久化**——
-   它在 durable 层的对应物是 run 行的 `next_action` 与 tool trace。**把提议与事实分开存，
-   是防止提议被后来的人当成证据。**
+2. Graph 的 state schema 是 `GraphState = TypedDict`，分**载荷**与**控制面**两类通道：
+   - 载荷：`state: AgentState` —— 权威事实，每次变更都经 `advance()` 重建校验；
+   - 控制面：`decision: Decision`（当前节点提议 / guard 裁定 / 节点自述的 safe-stop 原因）、
+     `understood: UnderstoodRequest | None`、`resolution: OrderResolution | None`。
+   **控制面三通道一律不持久化**：它们是本次 invocation 的中间产物，`resume` 时重新推导。
+   这是 T030 harness 的既有数据流（它把 `understood` / `resolution` 放在请求内局部变量里串起来），
+   而把它们写进 `AgentState` 会让"模型的解释"和"Java 的事实"并排存放，后来的人就分不清了。
+   durable 层的对应物是 run 行的 `current_node` / `next_action` / `version` 与 tool trace。
 3. **Router 的输入是 `(AgentState, ToolRegistry risk metadata, stage guard)`**：LLM 生成候选动作，Router 决定合法下一节点。LLM 提议，Router 约束。
 4. 预算两层：条件边上的守卫主拦（超限 → `safe_stop`）；`advance()` 内的 `validate_budgets` 兜底（命中即 `SAFE_STOP`，不是 500、也不是 `FAILED`）。
 5. `verify = UNKNOWN` 时 finalize **不得**输出成功。

@@ -29,6 +29,7 @@ from typing import Final
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.agent.evidence_routing import EvidenceAction, EvidenceGuardStatus, EvidenceToolName
+from app.agent.request_understanding import RequestIntent
 from app.agent.state import AgentState, RunStatus, VerificationStatus, WriteStatus
 
 __all__ = [
@@ -177,11 +178,17 @@ def safe_stop_reason_for(
 
 
 def route_after_understand(state: AgentState, decision: Decision | None = None) -> Node:
-    """After request understanding: resolve the order, or refuse."""
+    """After request understanding: resolve the order, ask the user, or refuse.
+
+    An unrecognised intent asks rather than guesses: with no goal we cannot tell which capability
+    would even be appropriate, and inventing one is how an agent starts doing work nobody asked for.
+    """
     if state.is_terminal:
         return Node.FINALIZE
     if safe_stop_reason_for(state, decision) is not None:
         return Node.SAFE_STOP
+    if state.intent is None or state.intent == RequestIntent.UNKNOWN.value:
+        return Node.WAITING_USER
     return Node.RESOLVE_ORDER
 
 
