@@ -13,8 +13,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.agent.evidence_execution import EvidenceReadTools
-from app.agent.evidence_routing import EvidenceDecisionModel
+from app.agent.evidence_execution import EvidenceReadTools, execute_read_evidence
+from app.agent.evidence_routing import (
+    EvidenceDecisionModel,
+    build_evidence_routing_context,
+    decide_next_evidence,
+    guard_evidence_proposal,
+)
 from app.agent.graph import GraphNode, GraphState, GraphUpdate
 from app.agent.order_resolution import OrderReadTools, resolve_single_order
 from app.agent.request_understanding import RequestUnderstandingModel, understand_request
@@ -22,7 +27,7 @@ from app.agent.routing import Decision, Node, SafeStopReason
 from app.agent.state import AgentState, advance
 from app.tools.registry import ToolRegistry
 
-__all__ = ["GraphDeps", "build_read_nodes", "spend_one_step"]
+__all__ = ["GraphDeps", "build_evidence_nodes", "build_read_nodes", "spend_one_step"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,3 +111,84 @@ def build_read_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         )
 
     return {Node.UNDERSTAND: understand, Node.RESOLVE_ORDER: resolve_order}
+
+
+def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
+    """Build the evidence loop: propose one read, authorize it, execute it.
+
+    The two nodes are split on purpose. ``decide_evidence`` touches the model and no business
+    resource; ``execute_evidence`` touches Java and no model. Keeping them apart is what makes "what
+    the model proposed" and "what was actually read" separately observable in the trace - merged
+    into one node, a denied proposal and a failed read would look identical from outside.
+    """
+
+    async def decide_evidence(graph: GraphState) -> GraphUpdate:
+        """Ask the model what evidence would help, then let the deterministic guard decide."""
+        state = spend_one_step(graph["state"])
+        understood = graph.get("understood")
+        resolution = graph.get("resolution")
+        order = resolution.order if resolution is not None else None
+        if understood is None or order is None:
+            # Routing needs the interpretation and the authoritative order snapshot, and both are
+            # invocation control-plane facts. Rebuilding them here would mean calling a capability
+            # that belongs to another node, so the run refuses instead of inventing context.
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.EVIDENCE_CONTEXT_MISSING),
+            )
+
+        context = build_evidence_routing_context(understood, order=order, evidence=state.evidence)
+        proposal = await decide_next_evidence(context, model=deps.evidence_model)
+        guard = guard_evidence_proposal(
+            proposal,
+            resolved_order_id=state.resolved_order_id,
+            observed_evidence_types={item.evidence_type for item in state.evidence},
+            registry=deps.registry,
+        )
+        return GraphUpdate(state=state, decision=Decision(guard=guard))
+
+    async def execute_evidence(graph: GraphState) -> GraphUpdate:
+        """Execute the authorized read, then decide whether collecting more is still worthwhile.
+
+        The distinction that matters comes from the failing layer, not from us: a ``retryable``
+        failure is transient and is retried while the run's retry budget allows, while anything else
+        is Java's considered answer and no amount of retrying changes it. Both outcomes keep the
+        failed attempt in ``tool_history``, and neither fails the run - one missing piece of
+        evidence still leaves the eligibility decision to Java, which is the authority.
+        """
+        state = spend_one_step(graph["state"])
+        decision = graph.get("decision")
+        guard = decision.guard if decision is not None else None
+        if guard is None or state.resolved_order_id is None:
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.EVIDENCE_CONTEXT_MISSING),
+            )
+
+        result = await execute_read_evidence(
+            guard,
+            resolved_order_id=state.resolved_order_id,
+            step_index=state.step_count,
+            tools=deps.evidence,
+        )
+        history = [*state.tool_history, result.history]
+        if result.evidence is None:
+            if result.history.retryable and state.retry_count < state.max_retries:
+                # Consume the run's retry budget and let the loop ask again: the evidence slot is
+                # still empty, so the guard authorizes the same read a second time.
+                moved = advance(state, retry_count=state.retry_count + 1, tool_history=history)
+                return GraphUpdate(state=moved, decision=Decision(guard=guard))
+            moved = advance(state, tool_history=history)
+            return GraphUpdate(
+                state=moved,
+                decision=Decision(guard=guard, evidence_collection_closed=True),
+            )
+
+        moved = advance(
+            state,
+            tool_history=history,
+            evidence=[*state.evidence, result.evidence],
+        )
+        return GraphUpdate(state=moved, decision=Decision(guard=guard))
+
+    return {Node.DECIDE_EVIDENCE: decide_evidence, Node.EXECUTE_EVIDENCE: execute_evidence}

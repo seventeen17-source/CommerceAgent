@@ -17,7 +17,11 @@ import pytest
 from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
-from app.agent.evidence_routing import EvidenceAction, EvidenceGuardStatus
+from app.agent.evidence_routing import (
+    EvidenceAction,
+    EvidenceGuardDecision,
+    EvidenceGuardStatus,
+)
 from app.agent.routing import (
     Decision,
     Node,
@@ -192,26 +196,42 @@ class TestRouteAfterResolveOrder:
         assert safe_stop_reason_for(state) is None
 
 
+def _tool_guard(status: EvidenceGuardStatus) -> EvidenceGuardDecision:
+    """A guard decision about one evidence read, allowed or denied."""
+    return EvidenceGuardDecision(
+        status=status,
+        action=EvidenceAction.CALL_TOOL,
+        tool="get_logistics",
+        reason_code="SAFE_EVIDENCE_READ_ALLOWED",
+    )
+
+
 class TestRouteAfterDecision:
     def test_allowed_tool_call_executes_the_evidence_read(self) -> None:
-        decision = Decision(
-            action=EvidenceAction.CALL_TOOL,
-            tool="get_logistics",
-            guard_status=EvidenceGuardStatus.ALLOWED,
-        )
+        decision = Decision(guard=_tool_guard(EvidenceGuardStatus.ALLOWED))
         assert route_after_decision(make_state(), decision) is Node.EXECUTE_EVIDENCE
 
     def test_denied_proposal_ends_collection_but_not_the_run(self) -> None:
         """Java is the eligibility authority; less evidence is its call to make, not ours."""
-        decision = Decision(
-            action=EvidenceAction.CALL_TOOL,
-            tool="get_logistics",
-            guard_status=EvidenceGuardStatus.DENIED,
-        )
+        decision = Decision(guard=_tool_guard(EvidenceGuardStatus.DENIED))
         assert route_after_decision(make_state(), decision) is Node.CHECK_ELIGIBILITY
 
     def test_ready_for_eligibility_hands_off(self) -> None:
-        decision = Decision(action=EvidenceAction.READY_FOR_ELIGIBILITY)
+        decision = Decision(
+            guard=EvidenceGuardDecision(
+                status=EvidenceGuardStatus.ALLOWED,
+                action=EvidenceAction.READY_FOR_ELIGIBILITY,
+                reason_code="READY_FOR_DETERMINISTIC_ELIGIBILITY",
+            )
+        )
+        assert route_after_decision(make_state(), decision) is Node.CHECK_ELIGIBILITY
+
+    def test_a_read_that_retrying_cannot_fix_hands_off_instead_of_failing(self) -> None:
+        """One missing piece of evidence is not an outage: the run still reaches Java."""
+        decision = Decision(
+            guard=_tool_guard(EvidenceGuardStatus.ALLOWED),
+            evidence_collection_closed=True,
+        )
         assert route_after_decision(make_state(), decision) is Node.CHECK_ELIGIBILITY
 
     def test_missing_proposal_refuses_instead_of_inventing_a_step(self) -> None:

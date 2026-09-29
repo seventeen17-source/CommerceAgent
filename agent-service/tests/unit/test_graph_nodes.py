@@ -13,12 +13,18 @@ from uuid import uuid4
 
 import pytest
 
-from app.agent.evidence_routing import EvidenceAction, EvidenceGuardStatus
+from app.agent.evidence_routing import (
+    EvidenceAction,
+    EvidenceGuardDecision,
+    EvidenceGuardStatus,
+)
 from app.agent.graph import GraphNode, GraphState, GraphUpdate, build_graph
-from app.agent.nodes import GraphDeps, build_read_nodes
-from app.agent.routing import Decision, Node, SafeStopReason
+from app.agent.nodes import GraphDeps, build_evidence_nodes, build_read_nodes
+from app.agent.order_resolution import OrderResolution, OrderResolutionStatus
+from app.agent.request_understanding import UnderstoodRequest
+from app.agent.routing import Decision, Node, SafeStopReason, route_after_decision
 from app.agent.state import AgentState
-from app.clients.models import OrderSnapshot, OrderSummary
+from app.clients.models import LogisticsSnapshot, OrderSnapshot, OrderSummary
 from app.tools.models import ToolEnvelope
 from app.tools.registry import ToolRegistry
 
@@ -200,6 +206,92 @@ def assemble_read_graph(
     return build_graph(nodes), trail
 
 
+def allowed_tool_guard() -> EvidenceGuardDecision:
+    """An authorized single evidence read."""
+    return EvidenceGuardDecision(
+        status=EvidenceGuardStatus.ALLOWED,
+        action=EvidenceAction.CALL_TOOL,
+        tool="get_logistics",
+        reason_code="SAFE_EVIDENCE_READ_ALLOWED",
+    )
+
+
+def ready_guard() -> EvidenceGuardDecision:
+    """The model's "enough evidence" proposal, as the guard authorizes it."""
+    return EvidenceGuardDecision(
+        status=EvidenceGuardStatus.ALLOWED,
+        action=EvidenceAction.READY_FOR_ELIGIBILITY,
+        reason_code="READY_FOR_DETERMINISTIC_ELIGIBILITY",
+    )
+
+
+def make_understood(order_id: str | None = "order-001") -> UnderstoodRequest:
+    return UnderstoodRequest(
+        intent="REFUND_REQUEST",
+        mentions_logistics_problem=True,
+        mentioned_order_id=order_id,
+    )
+
+
+def make_resolution(order_id: str = "order-001") -> OrderResolution:
+    return OrderResolution(
+        status=OrderResolutionStatus.RESOLVED,
+        candidate_order_ids=[order_id],
+        resolved_order_id=order_id,
+        order=make_order(order_id),
+    )
+
+
+class FakeEvidenceModel:
+    """Returns one fixed proposal; the narrow schema still validates it."""
+
+    def __init__(self, proposal: dict[str, Any]) -> None:
+        self._proposal = proposal
+
+    async def decide_next_evidence(self, context: object) -> object:
+        return self._proposal
+
+
+class FakeEvidenceTools:
+    """One logistics read, succeeding or failing exactly as the test declares."""
+
+    def __init__(self, *, failure: str | None = None, retryable: bool = False) -> None:
+        self._failure = failure
+        self._retryable = retryable
+
+    async def get_logistics(self, order_id: str) -> ToolEnvelope[LogisticsSnapshot]:
+        if self._failure is not None:
+            return ToolEnvelope[LogisticsSnapshot](
+                success=False,
+                error_code=self._failure,
+                retryable=self._retryable,
+                latency_ms=2,
+                trace_id=TRACE,
+            )
+        return ToolEnvelope[LogisticsSnapshot](
+            success=True,
+            data=LogisticsSnapshot.model_validate(
+                {"status": "IN_TRANSIT", "signed": False, "stalledHours": 96}
+            ),
+            latency_ms=2,
+            trace_id=TRACE,
+        )
+
+
+def logistics_proposal() -> dict[str, Any]:
+    return {"action": "CALL_TOOL", "tool": "get_logistics", "reasonCode": "NEED_LOGISTICS_STATE"}
+
+
+def make_evidence_deps(*, model: Any, tools: Any) -> GraphDeps:
+    return GraphDeps(
+        understanding=FakeUnderstanding(),
+        orders=ConfirmedOrderTools("order-001"),
+        evidence_model=model,
+        evidence=tools,
+        registry=ToolRegistry(),
+    )
+
+
 class TestUnderstandNode:
     @pytest.mark.asyncio
     async def test_records_the_order_clue_as_a_candidate_not_as_a_resolution(self) -> None:
@@ -275,7 +367,7 @@ class TestAssembledTopology:
         graph, trail = assemble_read_graph(
             understanding=FakeUnderstanding(mentioned_order_id="order-001"),
             orders=ConfirmedOrderTools("order-001"),
-            decisions=[Decision(action=EvidenceAction.READY_FOR_ELIGIBILITY)],
+            decisions=[Decision(guard=ready_guard())],
         )
         final = await graph.ainvoke({"state": make_state()})
 
@@ -294,12 +386,8 @@ class TestAssembledTopology:
             understanding=FakeUnderstanding(mentioned_order_id="order-001"),
             orders=ConfirmedOrderTools("order-001"),
             decisions=[
-                Decision(
-                    action=EvidenceAction.CALL_TOOL,
-                    tool="get_logistics",
-                    guard_status=EvidenceGuardStatus.ALLOWED,
-                ),
-                Decision(action=EvidenceAction.READY_FOR_ELIGIBILITY),
+                Decision(guard=allowed_tool_guard()),
+                Decision(guard=ready_guard()),
             ],
         )
         await graph.ainvoke({"state": make_state()})
@@ -339,3 +427,120 @@ class TestAssembledTopology:
         """A missing node must be a startup error, not a run that dies mid-flow."""
         with pytest.raises(ValueError, match="missing nodes"):
             build_graph({Node.UNDERSTAND: _stand_in(Node.UNDERSTAND, [])})
+
+
+class TestEvidenceNodes:
+    """The evidence loop: one authorized read, and what a failed read is allowed to change."""
+
+    def _context(self, *, evidence: list[dict[str, Any]] | None = None) -> GraphState:
+        return {
+            "state": make_state(resolved_order_id="order-001", evidence=evidence or []),
+            "understood": make_understood(),
+            "resolution": make_resolution(),
+        }
+
+    @pytest.mark.asyncio
+    async def test_an_authorized_read_lands_evidence_and_a_trace_entry(self) -> None:
+        nodes = build_evidence_nodes(
+            make_evidence_deps(
+                model=FakeEvidenceModel(logistics_proposal()), tools=FakeEvidenceTools()
+            )
+        )
+        decided = await nodes[Node.DECIDE_EVIDENCE](self._context())
+        executed = await nodes[Node.EXECUTE_EVIDENCE](
+            {"state": decided["state"], "decision": decided["decision"]}
+        )
+
+        assert decided["decision"].guard is not None
+        assert decided["decision"].guard.status is EvidenceGuardStatus.ALLOWED
+        assert [item.evidence_type for item in executed["state"].evidence] == ["LOGISTICS"]
+        assert executed["state"].tool_history[0].success is True
+        assert executed["state"].retry_count == 0
+        assert executed["decision"].evidence_collection_closed is False
+
+    @pytest.mark.asyncio
+    async def test_a_transient_read_failure_retries_within_the_retry_budget(self) -> None:
+        """A 503 is not a conclusion: it is retried, and it is not mislabelled a budget problem."""
+        nodes = build_evidence_nodes(
+            make_evidence_deps(
+                model=FakeEvidenceModel(logistics_proposal()),
+                tools=FakeEvidenceTools(failure="LOGISTICS_UNAVAILABLE", retryable=True),
+            )
+        )
+        decided = await nodes[Node.DECIDE_EVIDENCE](self._context())
+        executed = await nodes[Node.EXECUTE_EVIDENCE](
+            {"state": decided["state"], "decision": decided["decision"]}
+        )
+
+        assert executed["state"].retry_count == 1
+        assert executed["decision"].evidence_collection_closed is False
+        assert executed["state"].evidence == []
+        assert executed["state"].tool_history[0].retryable is True
+
+    @pytest.mark.asyncio
+    async def test_a_transient_failure_with_no_retry_budget_left_stops_collecting(self) -> None:
+        nodes = build_evidence_nodes(
+            make_evidence_deps(
+                model=FakeEvidenceModel(logistics_proposal()),
+                tools=FakeEvidenceTools(failure="LOGISTICS_UNAVAILABLE", retryable=True),
+            )
+        )
+        context = self._context()
+        context["state"] = make_state(resolved_order_id="order-001", retry_count=2, max_retries=2)
+        decided = await nodes[Node.DECIDE_EVIDENCE](context)
+        executed = await nodes[Node.EXECUTE_EVIDENCE](
+            {"state": decided["state"], "decision": decided["decision"]}
+        )
+
+        assert executed["state"].retry_count == 2
+        assert executed["decision"].evidence_collection_closed is True
+        assert (
+            route_after_decision(executed["state"], executed["decision"]) is Node.CHECK_ELIGIBILITY
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_definitive_read_failure_does_not_spend_retry_budget(self) -> None:
+        """`retryable=False` is the failing layer's answer; retrying cannot change it."""
+        nodes = build_evidence_nodes(
+            make_evidence_deps(
+                model=FakeEvidenceModel(logistics_proposal()),
+                tools=FakeEvidenceTools(failure="ORDER_NOT_FOUND", retryable=False),
+            )
+        )
+        decided = await nodes[Node.DECIDE_EVIDENCE](self._context())
+        executed = await nodes[Node.EXECUTE_EVIDENCE](
+            {"state": decided["state"], "decision": decided["decision"]}
+        )
+
+        assert executed["state"].retry_count == 0
+        assert executed["decision"].evidence_collection_closed is True
+        assert executed["state"].tool_history[0].error_code == "ORDER_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_evidence_already_observed_is_denied_and_hands_off(self) -> None:
+        """The guard looks at evidence that exists, so a second logistics read is refused."""
+        nodes = build_evidence_nodes(
+            make_evidence_deps(
+                model=FakeEvidenceModel(logistics_proposal()), tools=FakeEvidenceTools()
+            )
+        )
+        context = self._context(
+            evidence=[{"evidence_type": "LOGISTICS", "source": "get_logistics"}]
+        )
+        decided = await nodes[Node.DECIDE_EVIDENCE](context)
+
+        assert decided["decision"].guard is not None
+        assert decided["decision"].guard.status is EvidenceGuardStatus.DENIED
+        assert route_after_decision(decided["state"], decided["decision"]) is Node.CHECK_ELIGIBILITY
+
+    @pytest.mark.asyncio
+    async def test_missing_control_plane_context_refuses_instead_of_inventing_it(self) -> None:
+        nodes = build_evidence_nodes(
+            make_evidence_deps(
+                model=FakeEvidenceModel(logistics_proposal()), tools=FakeEvidenceTools()
+            )
+        )
+        update = await nodes[Node.DECIDE_EVIDENCE]({"state": make_state()})
+
+        assert update["decision"].safe_stop_reason is SafeStopReason.EVIDENCE_CONTEXT_MISSING
+        assert route_after_decision(update["state"], update["decision"]) is Node.SAFE_STOP

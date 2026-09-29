@@ -28,7 +28,11 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from app.agent.evidence_routing import EvidenceAction, EvidenceGuardStatus, EvidenceToolName
+from app.agent.evidence_routing import (
+    EvidenceAction,
+    EvidenceGuardDecision,
+    EvidenceGuardStatus,
+)
 from app.agent.request_understanding import RequestIntent
 from app.agent.state import AgentState, RunStatus, VerificationStatus, WriteStatus
 
@@ -69,6 +73,7 @@ class SafeStopReason(StrEnum):
     """Why the Agent deliberately refused to continue, or could not establish reality."""
 
     ORDER_UNRESOLVED = "ORDER_UNRESOLVED"
+    EVIDENCE_CONTEXT_MISSING = "EVIDENCE_CONTEXT_MISSING"
     ELIGIBILITY_UNKNOWN_ACTION = "ELIGIBILITY_UNKNOWN_ACTION"
     ELIGIBILITY_INCONSISTENT = "ELIGIBILITY_INCONSISTENT"
     ELIGIBILITY_APPROVAL_REQUIRED = "ELIGIBILITY_APPROVAL_REQUIRED"
@@ -96,9 +101,16 @@ class Decision(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: EvidenceAction | None = None
-    tool: EvidenceToolName | None = None
-    guard_status: EvidenceGuardStatus | None = None
+    #: The authorization artifact itself, not a projection of it. Two nodes consume this: the router
+    #: reads it to pick the next edge, and the execution node hands it to the Tool layer, which
+    #: re-checks `status`. Copying its fields into a slimmer shape would mean rebuilding an
+    #: authorization from memory before executing it - the reconstruction can drift from what was
+    #: actually authorized, and nothing would notice.
+    guard: EvidenceGuardDecision | None = None
+    #: Set by the execution node when evidence collection must stop even though nothing was
+    #: authorized: a read failed in a way a retry cannot fix. The run continues to Java for the
+    #: eligibility decision rather than failing - one missing piece of evidence is not an outage.
+    evidence_collection_closed: bool = False
     #: Whether the node already asked Java to resolve an order. Without this flag "no order
     #: resolved" is indistinguishable from "resolution has not started yet", and the same
     #: state-derived rule would misfire at the understand edge.
@@ -212,20 +224,27 @@ def route_after_resolve_order(state: AgentState, decision: Decision | None = Non
 
 
 def route_after_decision(state: AgentState, decision: Decision | None = None) -> Node:
-    """After the evidence proposal and its guard: execute it, or end evidence collection.
+    """After the evidence proposal and its guard: execute it, hand off, or refuse.
 
     A denied proposal ends *that tool call*, not the run: with less evidence the deterministic Java
-    eligibility service still decides, and it is the authority. A missing proposal is different -
-    there is no legal next step to invent, so the run refuses.
+    eligibility service still decides, and it is the authority. A read that failed in a way a retry
+    cannot fix is the same shape of event - it closes the collection and hands off, because one
+    missing piece of evidence is not an outage. A missing proposal is different: there is no legal
+    next step to invent, so the run refuses.
     """
     if state.is_terminal:
         return Node.FINALIZE
     if safe_stop_reason_for(state, decision) is not None:
         return Node.SAFE_STOP
-    if decision is None or decision.action is None:
+    if decision is None:
         return Node.SAFE_STOP
-    if decision.action is EvidenceAction.CALL_TOOL:
-        if decision.guard_status is not EvidenceGuardStatus.ALLOWED:
+    if decision.evidence_collection_closed:
+        return Node.CHECK_ELIGIBILITY
+    guard = decision.guard
+    if guard is None:
+        return Node.SAFE_STOP
+    if guard.action is EvidenceAction.CALL_TOOL:
+        if guard.status is not EvidenceGuardStatus.ALLOWED:
             return Node.CHECK_ELIGIBILITY
         return Node.EXECUTE_EVIDENCE
     return Node.CHECK_ELIGIBILITY
