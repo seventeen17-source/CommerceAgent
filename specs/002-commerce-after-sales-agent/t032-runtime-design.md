@@ -109,6 +109,8 @@ Java      负责业务事实（什么是真的）
  finalize ── transition()（不是 checkpoint_state）──▶ COMPLETED / SAFE_STOP / FAILED
 ```
 
+0. `understand` 还有一条到 `WAITING_USER` 的边（图上未画出）：`intent` 缺失或为 `UNKNOWN` 时**不进入**
+   订单解析——没有目标就无从判断哪个 capability 合适，猜一个等于替用户决定他要什么。
 1. 每个节点只做两件事：`state = advance(state, **changes)` 与 `return {"state": state}`。
    **禁止 `model_copy(update=...)`**：实测它跳过校验，会让 `extra="forbid"`、预算守卫、凭据扫描在图里静默失效。
 2. Graph 的 state schema 是 `GraphState = TypedDict`，分**载荷**与**控制面**两类通道：
