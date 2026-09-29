@@ -131,6 +131,23 @@ Java      负责业务事实（什么是真的）
    也不选择下一步去哪，把"路径已关闭"映射成 `check_eligibility` 是 `route_after_decision` 的职责，
    所以拓扑要改时只改路由。三种结果（成功 / 瞬时失败重试 / 路径关闭）**都不终止整条 run**：
    少一条证据，资格结论仍归 Java。
+7. **重试只有一个机制**：节点报 `Decision.retry_current_stage`（事实），由 Router 决定"这意不意味着
+   重进本阶段"。`route_after_execute` 据此回到 `EXECUTE_EVIDENCE`（重试那次**已授权**的读取，而不是
+   再问一次模型），`route_after_eligibility` 据此自环回 `CHECK_ELIGIBILITY`（它没有循环边，
+   没有这个信号就会把"Java 答不出来"结束成 `COMPLETED`——那是个谎）。
+8. **交接令牌由路由层产出**：`check_eligibility` 要求 guard 决策是 `ALLOWED + READY_FOR_ELIGIBILITY`，
+   而通向它的三条路径里只有一条天然满足（模型说够了）。因此 `routing.eligibility_handoff(decision)`
+   负责产出令牌，`HandoffReason` 把来源（模型说够了 / guard 拒绝 / 路径关闭）写进 `reason_code`。
+   **判断与推导物的区别**：授权凭证（guard 对某次调用的裁定）不可重建——重建即伪造判断；
+   交接令牌可以重建——它由事实确定性推导，携带的是来源而非许可。
+9. **钱路径的顺序是硬约束**：`refund_write` 派生意图 → 交给 T031 的 `persist_intent` 回调**先落盘**
+   → 才允许发出唯一一次请求；`persist_intent` 失败则一个字节都不发，落 `SAFE_STOP`
+   （reason `WRITE_INTENT_NOT_DURABLE`：**"我们正确地没做"**）。写节点**不做任何重试**：
+   `RefundWriteOutcome` 报告 T031 已消耗的 `attempts` 且**没有** `retryable` 字段，因为写的重试
+   不是一次动作而是一套程序（未知 → 读权威 → 同 key → 预算耗尽落 UNKNOWN），这套程序只有一个所有者。
+10. **验证以"有持久 intent"为前提**：`verify` 按幂等 key 读权威，所以 `route_after_write` 只在
+    `write_intent is not None` 时才去 `VERIFY`——无 intent 意味着**从未发出**（T022），
+    既没有问题要问，也没有 key 可问。
 
 ---
 
@@ -322,3 +339,18 @@ Java      负责业务事实（什么是真的）
 2. **`langgraph-checkpoint-postgres` 当前声明但未使用**：保留（T049 可能用到），但必须在 `PROJECT_PROGRESS.md` 写明"当前未使用"，避免被误读为持久化路径。
 3. **`/input` 文本并入 `user_request` 的超限策略**：`user_request` 上限 4000 字符，追加澄清需要显式规则（拒绝并提示，或按策略重写），不允许静默截断。
 4. **`advance()` 的归属**：作为 `AgentState` 上的唯一变更入口；配套 meta-test 断言 `app/agent/` 下不出现 `model_copy(update=`。
+   **状态更新（已落地）**：`advance()` 已实现，meta-test 采用**显式白名单 + 双向断言**（新增一处失败、白名单过期也失败）；
+   白名单里剩下的两处是 `dev_t031.py`（dev harness）与 `checkpoint.py`（读路径把行上的 5 个共享列盖回 payload，
+   行是更新的事实）。**写路径那一处已修**：`store.transition()` 原先用 `model_copy` 重建 payload、只跑凭据守卫，
+   会让 `step_count` 绕过 `validate_budgets`；现在改用 `advance()` 重建，并有真库用例证明被拒的写没有留下任何东西。
+5. **`check_eligibility` 把"阶段令牌"当成了"授权凭证"**：它要求 `EvidenceGuardDecision` 为
+   `ALLOWED + READY_FOR_ELIGIBILITY`，而"证据阶段结束"其实有三个来源（模型说够了 / guard 拒绝取证 /
+   读取失败路径关闭）。本设计用路由层的 `eligibility_handoff()` 满足这个前置条件（决定 D），
+   **假耦合仍在**。真正的修法是让 `check_eligibility` 接受"阶段已结束"这个事实而不是一个授权凭证——
+   但它属于 T030 已验收代码，且作者刻意写了 3 个前置条件用例，因此留到将来真正需要时一并处理。
+6. **`Decision` 上的三个控制面事实**（`guard` 原对象、`evidence_path_closed`、`retry_current_stage`）都只活在
+   一次 invocation 内，`resume` 时重新推导；durable 的对应物仍是 run 行的 `next_action` / `version` 与 tool trace。
+7. **环境（非代码）**：本机工作区曾被 Windows 文件权限挡住（缺少"取得所有权"），已用 DSH 的文件权限诊断脚本
+   修复并验证；但 `.ruff_cache` / `.mypy_cache` / `.pytest_cache` 仍拒绝写入，因此门禁用等价命令：
+   `ruff check --no-cache`、`ruff format --check --no-cache`、`mypy app --cache-dir=<TEMP>`、
+   `pytest -q -p no:cacheprovider`。另外受限模式下 `git fetch` / `git commit` 写不进 `.git`，需要一次完全权限。
