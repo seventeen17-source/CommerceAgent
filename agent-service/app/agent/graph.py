@@ -26,6 +26,7 @@ from app.agent.routing import (
     Node,
     route_after_decision,
     route_after_eligibility,
+    route_after_execute,
     route_after_resolve_order,
     route_after_understand,
     route_after_write,
@@ -74,6 +75,7 @@ _ROUTERS: Final[dict[Node, Callable[[AgentState, Decision | None], Node]]] = {
     Node.UNDERSTAND: route_after_understand,
     Node.RESOLVE_ORDER: route_after_resolve_order,
     Node.DECIDE_EVIDENCE: route_after_decision,
+    Node.EXECUTE_EVIDENCE: route_after_execute,
     Node.CHECK_ELIGIBILITY: route_after_eligibility,
     Node.REFUND_WRITE: route_after_write,
 }
@@ -91,7 +93,10 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
     Node.DECIDE_EVIDENCE: frozenset(
         {Node.EXECUTE_EVIDENCE, Node.CHECK_ELIGIBILITY, Node.SAFE_STOP, Node.FINALIZE}
     ),
-    Node.CHECK_ELIGIBILITY: frozenset({Node.REFUND_WRITE, Node.FINALIZE, Node.SAFE_STOP}),
+    Node.EXECUTE_EVIDENCE: frozenset({Node.DECIDE_EVIDENCE, Node.EXECUTE_EVIDENCE, Node.SAFE_STOP}),
+    Node.CHECK_ELIGIBILITY: frozenset(
+        {Node.REFUND_WRITE, Node.CHECK_ELIGIBILITY, Node.FINALIZE, Node.SAFE_STOP}
+    ),
     Node.REFUND_WRITE: frozenset({Node.VERIFY, Node.FINALIZE, Node.SAFE_STOP}),
 }
 
@@ -133,8 +138,8 @@ def build_graph(nodes: Mapping[Node, GraphNode]) -> CompiledGraph:
             source, _edge(router), {target: target for target in _CONDITIONAL_TARGETS[source]}
         )
 
-    # The evidence loop is an ordinary edge: the decision node re-runs and re-decides.
-    graph.add_edge(Node.EXECUTE_EVIDENCE, Node.DECIDE_EVIDENCE)
+    # The evidence loop is a conditional edge too: after a read the run either deliberates again or
+    # retries the read it already authorized, and that choice belongs to a router, not to the node.
     # Verification never routes anywhere else: the terminal status is derived from the verified
     # facts by the finalize node, so success and failure leave through the same door.
     graph.add_edge(Node.VERIFY, Node.FINALIZE)

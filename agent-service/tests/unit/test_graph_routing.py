@@ -24,12 +24,16 @@ from app.agent.evidence_routing import (
 )
 from app.agent.routing import (
     Decision,
+    HandoffReason,
     Node,
     SafeStopReason,
     TerminalDecision,
     budget_exhausted,
+    eligibility_handoff,
+    handoff_reason_for,
     route_after_decision,
     route_after_eligibility,
+    route_after_execute,
     route_after_resolve_order,
     route_after_understand,
     route_after_write,
@@ -246,11 +250,70 @@ class TestRouteAfterDecision:
         )
 
 
+class TestRouteAfterExecute:
+    """One retry mechanism: a transient failure re-runs the read it already authorized."""
+
+    def test_a_settled_attempt_goes_back_to_deliberation(self) -> None:
+        decision = Decision(guard=_tool_guard(EvidenceGuardStatus.ALLOWED))
+        assert route_after_execute(make_state(), decision) is Node.DECIDE_EVIDENCE
+
+    def test_a_transient_failure_retries_the_same_authorized_read(self) -> None:
+        decision = Decision(
+            guard=_tool_guard(EvidenceGuardStatus.ALLOWED), retry_current_stage=True
+        )
+        assert route_after_execute(make_state(), decision) is Node.EXECUTE_EVIDENCE
+
+    def test_budget_exhaustion_wins_over_a_retry_request(self) -> None:
+        state = make_state(step_count=12, max_steps=12)
+        decision = Decision(retry_current_stage=True)
+        assert route_after_execute(state, decision) is Node.SAFE_STOP
+
+
+class TestEligibilityHandoffToken:
+    """The handoff token is produced by the layer that owns "where next", and by no other."""
+
+    def test_the_model_having_enough_is_recorded_as_its_own_reason(self) -> None:
+        decision = Decision(
+            guard=EvidenceGuardDecision(
+                status=EvidenceGuardStatus.ALLOWED,
+                action=EvidenceAction.READY_FOR_ELIGIBILITY,
+                reason_code="READY_FOR_DETERMINISTIC_ELIGIBILITY",
+            )
+        )
+        assert handoff_reason_for(decision) is HandoffReason.MODEL_SAID_ENOUGH
+
+    def test_a_denied_proposal_is_recorded_as_its_own_reason(self) -> None:
+        decision = Decision(guard=_tool_guard(EvidenceGuardStatus.DENIED))
+        assert handoff_reason_for(decision) is HandoffReason.EVIDENCE_PROPOSAL_DENIED
+
+    def test_a_closed_path_outranks_the_proposal_that_was_denied_earlier(self) -> None:
+        decision = Decision(
+            guard=_tool_guard(EvidenceGuardStatus.ALLOWED), evidence_path_closed=True
+        )
+        assert handoff_reason_for(decision) is HandoffReason.EVIDENCE_PATH_CLOSED
+
+    def test_the_token_satisfies_the_eligibility_precondition_and_carries_the_provenance(
+        self,
+    ) -> None:
+        """`check_eligibility` requires ALLOWED + READY_FOR_ELIGIBILITY + no tool name."""
+        token = eligibility_handoff(Decision(evidence_path_closed=True))
+        assert token.status is EvidenceGuardStatus.ALLOWED
+        assert token.action is EvidenceAction.READY_FOR_ELIGIBILITY
+        assert token.tool is None
+        assert token.reason_code == HandoffReason.EVIDENCE_PATH_CLOSED.value
+
+
 class TestRouteAfterEligibility:
     @pytest.mark.parametrize("action", ["REFUND_ONLY", "RETURN_REFUND"])
     def test_refund_permitting_actions_reach_the_write_node(self, action: str) -> None:
         state = make_state(eligibility=make_eligibility(allowed_action=action))
         assert route_after_eligibility(state) is Node.REFUND_WRITE
+
+    def test_a_retry_request_re_enters_eligibility_instead_of_finishing(self) -> None:
+        """Without this the run would finish as COMPLETED on "Java could not answer"."""
+        state = make_state()
+        decision = Decision(retry_current_stage=True)
+        assert route_after_eligibility(state, decision) is Node.CHECK_ELIGIBILITY
 
     @pytest.mark.parametrize("action", ["RETURN", "MANUAL_REVIEW", "DENY"])
     def test_non_refund_actions_finish_without_writing(self, action: str) -> None:

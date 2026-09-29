@@ -40,12 +40,16 @@ __all__ = [
     "NON_REFUND_ACTIONS",
     "REFUND_PERMITTING_ACTIONS",
     "Decision",
+    "HandoffReason",
     "Node",
     "SafeStopReason",
     "TerminalDecision",
     "budget_exhausted",
+    "eligibility_handoff",
+    "handoff_reason_for",
     "route_after_decision",
     "route_after_eligibility",
+    "route_after_execute",
     "route_after_resolve_order",
     "route_after_understand",
     "route_after_write",
@@ -74,6 +78,7 @@ class SafeStopReason(StrEnum):
 
     ORDER_UNRESOLVED = "ORDER_UNRESOLVED"
     EVIDENCE_CONTEXT_MISSING = "EVIDENCE_CONTEXT_MISSING"
+    ELIGIBILITY_UNAVAILABLE = "ELIGIBILITY_UNAVAILABLE"
     ELIGIBILITY_UNKNOWN_ACTION = "ELIGIBILITY_UNKNOWN_ACTION"
     ELIGIBILITY_INCONSISTENT = "ELIGIBILITY_INCONSISTENT"
     ELIGIBILITY_APPROVAL_REQUIRED = "ELIGIBILITY_APPROVAL_REQUIRED"
@@ -113,6 +118,10 @@ class Decision(BaseModel):
     #: eligibility handoff is ``route_after_decision``'s job, so changing where it leads is only a
     #: routing change.
     evidence_path_closed: bool = False
+    #: Set by a node that failed transiently and still has budget: another attempt at *the same
+    #: stage* is warranted. Also a fact, not a decision - and one mechanism for both stages, so
+    #: "retry" cannot mean one thing here and something else there.
+    retry_current_stage: bool = False
     #: Whether the node already asked Java to resolve an order. Without this flag "no order
     #: resolved" is indistinguishable from "resolution has not started yet", and the same
     #: state-derived rule would misfire at the understand edge.
@@ -138,6 +147,46 @@ class TerminalDecision(BaseModel):
         if self.status is not RunStatus.SAFE_STOP and self.reason is not None:
             raise ValueError("only SAFE_STOP carries a safety reason")
         return self
+
+
+class HandoffReason(StrEnum):
+    """Which of the three ways the evidence stage ended. Recorded on the handoff token."""
+
+    MODEL_SAID_ENOUGH = "MODEL_SAID_ENOUGH"
+    EVIDENCE_PROPOSAL_DENIED = "EVIDENCE_PROPOSAL_DENIED"
+    EVIDENCE_PATH_CLOSED = "EVIDENCE_PATH_CLOSED"
+
+
+def handoff_reason_for(decision: Decision | None) -> HandoffReason:
+    """Classify how evidence collection ended, from the control-plane facts alone."""
+    if decision is not None and decision.evidence_path_closed:
+        return HandoffReason.EVIDENCE_PATH_CLOSED
+    guard = decision.guard if decision is not None else None
+    if guard is not None and guard.action is EvidenceAction.READY_FOR_ELIGIBILITY:
+        return HandoffReason.MODEL_SAID_ENOUGH
+    return HandoffReason.EVIDENCE_PROPOSAL_DENIED
+
+
+def eligibility_handoff(decision: Decision | None) -> EvidenceGuardDecision:
+    """The routing layer's token for "evidence collection is over; ask Java".
+
+    This is **not an authorization of a tool call** - nothing is being permitted to run. It is the
+    token ``check_eligibility`` requires to prove the caller is at the eligibility stage, and it is
+    produced by the routing layer because "the evidence stage is over, go to eligibility" *is* a
+    routing decision. Producing it in the node would mean the node minting its own permission;
+    producing it in the guard would mean the guard authorizing something nobody proposed.
+
+    Rebuilding it from facts is safe, unlike rebuilding an authorization: the same facts always
+    yield the same token, and the reason it carries is the provenance of the handoff rather than a
+    permission - which is why the trace can tell "the model said it had enough" apart from "a read
+    failed and we handed off with less".
+    """
+    return EvidenceGuardDecision(
+        status=EvidenceGuardStatus.ALLOWED,
+        action=EvidenceAction.READY_FOR_ELIGIBILITY,
+        tool=None,
+        reason_code=handoff_reason_for(decision).value,
+    )
 
 
 def budget_exhausted(state: AgentState) -> bool:
@@ -252,18 +301,36 @@ def route_after_decision(state: AgentState, decision: Decision | None = None) ->
     return Node.CHECK_ELIGIBILITY
 
 
-def route_after_eligibility(state: AgentState, decision: Decision | None = None) -> Node:
-    """After Java's eligibility decision: write, or finish without writing."""
+def route_after_execute(state: AgentState, decision: Decision | None = None) -> Node:
+    """After one evidence read: deliberate again, or take another run at the authorized read.
+
+    A transient failure retries the action that was *already authorized* rather than asking the
+    model again. The decision was "read logistics"; a 503 does not change it, and re-deliberating
+    would spend a model call to possibly reach a different conclusion about the same missing fact.
+    """
     if state.is_terminal:
         return Node.FINALIZE
     if safe_stop_reason_for(state, decision) is not None:
         return Node.SAFE_STOP
+    if decision is not None and decision.retry_current_stage:
+        return Node.EXECUTE_EVIDENCE
+    return Node.DECIDE_EVIDENCE
+
+
+def route_after_eligibility(state: AgentState, decision: Decision | None = None) -> Node:
+    """After Java's eligibility decision: write, retry the question, or finish without writing."""
+    if state.is_terminal:
+        return Node.FINALIZE
+    if safe_stop_reason_for(state, decision) is not None:
+        return Node.SAFE_STOP
+    if decision is not None and decision.retry_current_stage:
+        return Node.CHECK_ELIGIBILITY
     snapshot = state.eligibility
-    if (
-        snapshot is not None
-        and snapshot.eligible
-        and snapshot.allowed_action in REFUND_PERMITTING_ACTIONS
-    ):
+    if snapshot is None:
+        # Only reachable if a node failed without declaring why; the safe_stop node will refuse to
+        # finish quietly, which is the intended outcome for an incomplete routing table.
+        return Node.SAFE_STOP
+    if snapshot.eligible and snapshot.allowed_action in REFUND_PERMITTING_ACTIONS:
         return Node.REFUND_WRITE
     return Node.FINALIZE
 

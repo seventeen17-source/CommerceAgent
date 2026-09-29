@@ -23,7 +23,7 @@ from app.agent.nodes import GraphDeps, build_evidence_nodes, build_read_nodes
 from app.agent.order_resolution import OrderResolution, OrderResolutionStatus
 from app.agent.request_understanding import UnderstoodRequest
 from app.agent.routing import Decision, Node, SafeStopReason, route_after_decision
-from app.agent.state import AgentState
+from app.agent.state import AgentState, advance
 from app.clients.models import LogisticsSnapshot, OrderSnapshot, OrderSummary
 from app.tools.models import ToolEnvelope
 from app.tools.registry import ToolRegistry
@@ -200,6 +200,23 @@ def assemble_read_graph(
         return GraphUpdate(state=graph["state"], decision=queued)
 
     nodes[Node.DECIDE_EVIDENCE] = decide_evidence
+
+    async def check_eligibility(graph: GraphState) -> GraphUpdate:
+        """A stand-in has to satisfy the contract of the node it replaces.
+
+        ``route_after_eligibility`` reads ``state.eligibility``, so a stub that left it unset would
+        be modelling a node that cannot exist - and it would hide exactly the routing bug this
+        stand-in is meant to expose. This one answers "not eligible", which ends the walk at
+        ``finalize``.
+        """
+        trail.append(Node.CHECK_ELIGIBILITY.value)
+        moved = advance(
+            graph["state"],
+            eligibility={"eligible": False, "allowed_action": "DENY", "approval_required": False},
+        )
+        return GraphUpdate(state=moved, decision=Decision())
+
+    nodes[Node.CHECK_ELIGIBILITY] = check_eligibility
     for name in Node:
         nodes.setdefault(name, _stand_in(name, trail))
 
@@ -473,7 +490,7 @@ class TestEvidenceNodes:
         )
 
         assert executed["state"].retry_count == 1
-        assert executed["decision"].evidence_path_closed is False
+        assert executed["decision"].retry_current_stage is True
         assert executed["state"].evidence == []
         assert executed["state"].tool_history[0].retryable is True
 

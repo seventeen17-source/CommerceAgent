@@ -180,10 +180,13 @@ def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         history = [*state.tool_history, result.history]
         if result.evidence is None:
             if result.history.retryable and state.retry_count < state.max_retries:
-                # Consume the run's retry budget. The evidence slot is still empty, so a second
-                # proposal for the same read will be authorized again.
+                # Consume the run's retry budget and report that another attempt is warranted. The
+                # router sends the run back to *this* node with the same authorized read, so a
+                # transient failure costs no model call to re-reach the same conclusion.
                 moved = advance(state, retry_count=state.retry_count + 1, tool_history=history)
-                return GraphUpdate(state=moved, decision=Decision(guard=guard))
+                return GraphUpdate(
+                    state=moved, decision=Decision(guard=guard, retry_current_stage=True)
+                )
             moved = advance(state, tool_history=history)
             return GraphUpdate(
                 state=moved,
