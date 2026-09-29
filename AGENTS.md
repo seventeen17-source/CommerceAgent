@@ -164,6 +164,27 @@ DTO、普通 CRUD wiring、fixture、样板配置、机械映射、样式性 UI 
 
 不要维护额外的重复甘特图、复杂 Excel 日报或人为“完成百分比”。
 
+### 文档纪律：哪份文件负责什么
+
+同一件事只能有一个"会过期的真相"。写文档前先确认它属于哪一类：
+
+| 文档 | 负责 | **不负责** |
+|---|---|---|
+| `PROJECT_PROGRESS.md` | **进度与下一步的唯一入口**：当前 Phase / 当前 Task / Gate / Blocker | 任务细节与验收证据（放 `tasks.md` 与该文件的「验收证据」小节） |
+| `specs/*/tasks.md` | 任务清单与每条任务的验收证据 | "现在做到哪"（那是 `PROJECT_PROGRESS.md`） |
+| `specs/*/plan.md`、`spec.md`、`contracts/` | 技术与产品**规格**、契约 | 实现状态（不写"已实现/未实现"） |
+| 设计文档（如 `t032-runtime-design.md`） | 设计**应该长什么样** | 实现进度（**不加"实现状态"列**） |
+| 模块 `README.md`（`agent-service/`、`web/`、`commerce-backend/`） | 模块职责、本机命令、指路 | 进度（只写"进度见 `PROJECT_PROGRESS.md`"） |
+| `docs/devlog/YYYY-MM-DD.md` | 当天**发生过的**事实与决策 | 回改历史（见下） |
+
+三条硬规则：
+
+1. **能指的不要断言**：需要引用现状时写"进度见 `PROJECT_PROGRESS.md`"，而不是把"当前是 T0xx"抄进架构文档、模块 README 或契约里。抄一份就等于多一份会过期的真相。
+2. **会过期的只留一个地方**：`PROJECT_PROGRESS.md` 是唯一允许出现"当前任务 / 当前 Phase / 下一步"的文件。`main` 上尤其禁止写"当前活跃分支 / 真实活跃任务 Txxx"这类路标（它已经误导过多个 Agent）。
+3. **历史记录不回改**：`docs/devlog/` 里旧日期的"下一步"在当天是真的，不要为了让文档"看起来一致"去改它。**过期路标要改，历史记录不改。**
+
+`docs/` 目录下每份文件的职责见 [`docs/README.md`](docs/README.md)。
+
 ### 持续验证页规则
 
 `web/` 中用于本地流转验证的页面是从 T016 开始持续升级的 **CommerceAgent Flow Playground**，不是当前任务的临时快照，也不是每个任务重新开一张页面。
