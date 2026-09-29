@@ -148,13 +148,19 @@ def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         return GraphUpdate(state=state, decision=Decision(guard=guard))
 
     async def execute_evidence(graph: GraphState) -> GraphUpdate:
-        """Execute the authorized read, then decide whether collecting more is still worthwhile.
+        """Execute the authorized read, then report the facts the router needs.
 
-        The distinction that matters comes from the failing layer, not from us: a ``retryable``
-        failure is transient and is retried while the run's retry budget allows, while anything else
-        is Java's considered answer and no amount of retrying changes it. Both outcomes keep the
-        failed attempt in ``tool_history``, and neither fails the run - one missing piece of
-        evidence still leaves the eligibility decision to Java, which is the authority.
+        A failed read **never enters ``evidence``** - that slot holds observed facts, and a failure
+        is not one. It is recorded in ``tool_history`` instead, so "we tried and it failed" stays
+        visible without ever being mistaken for evidence.
+
+        Which failures are worth another attempt comes from the failing layer, not from us: a
+        ``retryable`` failure is transient and is retried while the run's retry budget allows, while
+        anything else is Java's considered answer and no amount of retrying changes it.
+
+        This node makes **no routing decision**. It reports two facts - whether the attempt
+        succeeded, and whether this evidence path is now closed - and ``route_after_decision``
+        decides where that leads. Only the router has to change if the topology does.
         """
         state = spend_one_step(graph["state"])
         decision = graph.get("decision")
@@ -174,14 +180,14 @@ def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         history = [*state.tool_history, result.history]
         if result.evidence is None:
             if result.history.retryable and state.retry_count < state.max_retries:
-                # Consume the run's retry budget and let the loop ask again: the evidence slot is
-                # still empty, so the guard authorizes the same read a second time.
+                # Consume the run's retry budget. The evidence slot is still empty, so a second
+                # proposal for the same read will be authorized again.
                 moved = advance(state, retry_count=state.retry_count + 1, tool_history=history)
                 return GraphUpdate(state=moved, decision=Decision(guard=guard))
             moved = advance(state, tool_history=history)
             return GraphUpdate(
                 state=moved,
-                decision=Decision(guard=guard, evidence_collection_closed=True),
+                decision=Decision(guard=guard, evidence_path_closed=True),
             )
 
         moved = advance(

@@ -124,6 +124,13 @@ Java      负责业务事实（什么是真的）
 3. **Router 的输入是 `(AgentState, ToolRegistry risk metadata, stage guard)`**：LLM 生成候选动作，Router 决定合法下一节点。LLM 提议，Router 约束。
 4. 预算两层：条件边上的守卫主拦（超限 → `safe_stop`）；`advance()` 内的 `validate_budgets` 兜底（命中即 `SAFE_STOP`，不是 500、也不是 `FAILED`）。
 5. `verify = UNKNOWN` 时 finalize **不得**输出成功。
+6. **证据路径的失败分类（节点记录事实，Router 决定流程）**：`execute_evidence` **不把失败写入
+   `evidence[]`**（那里只装观察到的成功事实），失败只进 `tool_history`。它按
+   `ToolEnvelope.retryable` + run 级 retry 预算，决定**重试**还是**关闭当前证据路径**
+   （`Decision.evidence_path_closed`）——这是**关于这条路径的事实，不是路由决定**：节点既不知道
+   也不选择下一步去哪，把"路径已关闭"映射成 `check_eligibility` 是 `route_after_decision` 的职责，
+   所以拓扑要改时只改路由。三种结果（成功 / 瞬时失败重试 / 路径关闭）**都不终止整条 run**：
+   少一条证据，资格结论仍归 Java。
 
 ---
 

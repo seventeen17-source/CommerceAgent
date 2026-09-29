@@ -107,10 +107,12 @@ class Decision(BaseModel):
     #: authorization from memory before executing it - the reconstruction can drift from what was
     #: actually authorized, and nothing would notice.
     guard: EvidenceGuardDecision | None = None
-    #: Set by the execution node when evidence collection must stop even though nothing was
-    #: authorized: a read failed in a way a retry cannot fix. The run continues to Java for the
-    #: eligibility decision rather than failing - one missing piece of evidence is not an outage.
-    evidence_collection_closed: bool = False
+    #: Set by the execution node when the evidence path it was working on is closed, because a read
+    #: failed in a way a retry cannot fix. This is a **fact about that path**, not a routing
+    #: decision: the node neither knows nor chooses where the run goes next. Mapping it to the
+    #: eligibility handoff is ``route_after_decision``'s job, so changing where it leads is only a
+    #: routing change.
+    evidence_path_closed: bool = False
     #: Whether the node already asked Java to resolve an order. Without this flag "no order
     #: resolved" is indistinguishable from "resolution has not started yet", and the same
     #: state-derived rule would misfire at the understand edge.
@@ -228,9 +230,9 @@ def route_after_decision(state: AgentState, decision: Decision | None = None) ->
 
     A denied proposal ends *that tool call*, not the run: with less evidence the deterministic Java
     eligibility service still decides, and it is the authority. A read that failed in a way a retry
-    cannot fix is the same shape of event - it closes the collection and hands off, because one
-    missing piece of evidence is not an outage. A missing proposal is different: there is no legal
-    next step to invent, so the run refuses.
+    cannot fix arrives here as a closed path and is handed off the same way, because one missing
+    piece of evidence is not an outage. A missing proposal is different: there is no legal next step
+    to invent, so the run refuses.
     """
     if state.is_terminal:
         return Node.FINALIZE
@@ -238,7 +240,7 @@ def route_after_decision(state: AgentState, decision: Decision | None = None) ->
         return Node.SAFE_STOP
     if decision is None:
         return Node.SAFE_STOP
-    if decision.evidence_collection_closed:
+    if decision.evidence_path_closed:
         return Node.CHECK_ELIGIBILITY
     guard = decision.guard
     if guard is None:

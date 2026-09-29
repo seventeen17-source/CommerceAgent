@@ -456,7 +456,7 @@ class TestEvidenceNodes:
         assert [item.evidence_type for item in executed["state"].evidence] == ["LOGISTICS"]
         assert executed["state"].tool_history[0].success is True
         assert executed["state"].retry_count == 0
-        assert executed["decision"].evidence_collection_closed is False
+        assert executed["decision"].evidence_path_closed is False
 
     @pytest.mark.asyncio
     async def test_a_transient_read_failure_retries_within_the_retry_budget(self) -> None:
@@ -473,7 +473,7 @@ class TestEvidenceNodes:
         )
 
         assert executed["state"].retry_count == 1
-        assert executed["decision"].evidence_collection_closed is False
+        assert executed["decision"].evidence_path_closed is False
         assert executed["state"].evidence == []
         assert executed["state"].tool_history[0].retryable is True
 
@@ -493,7 +493,7 @@ class TestEvidenceNodes:
         )
 
         assert executed["state"].retry_count == 2
-        assert executed["decision"].evidence_collection_closed is True
+        assert executed["decision"].evidence_path_closed is True
         assert (
             route_after_decision(executed["state"], executed["decision"]) is Node.CHECK_ELIGIBILITY
         )
@@ -513,7 +513,7 @@ class TestEvidenceNodes:
         )
 
         assert executed["state"].retry_count == 0
-        assert executed["decision"].evidence_collection_closed is True
+        assert executed["decision"].evidence_path_closed is True
         assert executed["state"].tool_history[0].error_code == "ORDER_NOT_FOUND"
 
     @pytest.mark.asyncio

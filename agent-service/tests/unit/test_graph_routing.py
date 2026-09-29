@@ -230,7 +230,7 @@ class TestRouteAfterDecision:
         """One missing piece of evidence is not an outage: the run still reaches Java."""
         decision = Decision(
             guard=_tool_guard(EvidenceGuardStatus.ALLOWED),
-            evidence_collection_closed=True,
+            evidence_path_closed=True,
         )
         assert route_after_decision(make_state(), decision) is Node.CHECK_ELIGIBILITY
 
