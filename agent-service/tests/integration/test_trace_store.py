@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from pydantic import ValidationError
 
 from app.agent.state import (
     AgentState,
@@ -178,6 +179,44 @@ def test_checkpoint_payload_matches_the_row_it_was_written_with(
         assert transitioned.state.step_count == 2
         assert transitioned.state.intent == "LOGISTICS_REFUND"
         assert transitioned.current_node == "await_approval"
+    finally:
+        store.delete_run(state.run_id)
+
+
+def test_transition_refuses_a_step_count_that_breaks_the_budget(
+    connection_factory: ConnectionFactory,
+) -> None:
+    """The budget is fail-closed on the *write* path, not only inside the graph.
+
+    ``transition`` is the other way a state reaches the database, and it rebuilds the payload from
+    the row columns it is about to write. Building that copy with ``model_copy`` skipped every
+    validator, so a caller passing ``step_count`` could persist a state violating
+    ``validate_budgets`` - the invariant the model documents as failing closed for a "restored or
+    mutated" state. Java analogy: a CHECK constraint has to hold for every writer, not only for the
+    one that remembers to call the validating setter.
+    """
+    store = PostgresRunStore(connection_factory)
+    state = build_state()
+    try:
+        created = create_run(store, state)
+
+        with pytest.raises(ValidationError):
+            store.transition(
+                state.run_id,
+                Transition(
+                    expected_version=created.version,
+                    status=RunStatus.RUNNING,
+                    trigger="STEP",
+                    current_node="decide_next_evidence",
+                    step_count=state.max_steps + 1,
+                ),
+            )
+
+        # The rejected write left nothing behind: the transaction rolled back, so no version was
+        # spent and the persisted step count is still the one the run was created with.
+        unchanged = store.get_run(state.run_id)
+        assert unchanged.version == created.version
+        assert unchanged.step_count == 0
     finally:
         store.delete_run(state.run_id)
 

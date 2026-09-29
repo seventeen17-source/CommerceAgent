@@ -112,9 +112,9 @@ def test_agent_modules_never_bypass_validation_with_model_copy() -> None:
     """Guard the seam at the source, with an explicit allowlist rather than a zero-tolerance grep.
 
     `model_copy(update=...)` skips every validator, so in a *graph node* it would silently disable
-    the budget check, `extra="forbid"` and the credential scan. Three pre-existing sites are
-    legitimate and are listed with their reason; any **new** occurrence - in `graph.py`, in
-    `routing.py`, in a node module, or anywhere else under `app/` - fails this test.
+    the budget check, `extra="forbid"` and the credential scan. Every remaining site is listed here
+    with its reason; any **new** occurrence - in `graph.py`, in `routing.py`, in a node module, or
+    anywhere else under `app/` - fails this test, and so does an entry that is no longer needed.
 
     The pattern requires a leading dot so the counter-example quoted in `advance()`'s docstring is
     not matched.
@@ -125,9 +125,6 @@ def test_agent_modules_never_bypass_validation_with_model_copy() -> None:
         # Row columns are copied onto the payload on read - the row is the fresher fact, and this is
         # the single place that keeps the two from disagreeing.
         "checkpoint.py",
-        # The mirror image on write: payload and row columns come from one dict in one statement,
-        # then `validate_payload` runs on the result.
-        "store.py",
     }
     pattern = re.compile(r"\.model_copy\(")
     found = {

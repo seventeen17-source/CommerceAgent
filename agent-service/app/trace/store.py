@@ -40,7 +40,7 @@ from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
 
-from app.agent.state import AgentState, RunStatus
+from app.agent.state import AgentState, RunStatus, advance
 from app.security.secrets import SensitiveStateError
 from app.trace.checkpoint import (
     INTERRUPTED_STATUSES,
@@ -861,14 +861,19 @@ class PostgresRunStore(RunStore):
             # Row columns and payload are written in ONE statement from ONE dict, so the drift
             # data-model.md section 12 forbids ("row says COMPLETED, payload says RUNNING") is not
             # expressible here.
-            written_state = state.model_copy(
-                update={
-                    "status": status,
-                    "intent": intent,
-                    "resolved_order_id": resolved_order_id,
-                    "step_count": step_count,
-                    "retry_count": retry_count,
-                }
+            #
+            # Rebuilt through ``advance`` rather than ``model_copy(update=...)``: two of these
+            # columns are the safety budgets, and ``model_copy`` skips every validator, so a caller
+            # that passes ``step_count`` could persist a state whose ``step_count`` exceeds
+            # ``max_steps``. ``validate_budgets`` is documented as failing closed for a "restored or
+            # mutated" state, and this is the mutation path that reaches the database.
+            written_state = advance(
+                state,
+                status=status,
+                intent=intent,
+                resolved_order_id=resolved_order_id,
+                step_count=step_count,
+                retry_count=retry_count,
             )
             payload = written_state.model_dump(mode="json")
             validate_payload(payload, "run.state_json")
