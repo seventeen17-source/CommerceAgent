@@ -5,6 +5,8 @@
 
 任务按用户故事组织，每个增量都必须可独立验证。涉及高风险写入、Agent Value Gate、幂等、安全和离线 Eval 的测试不属于可选装饰。
 
+> ⚠️ **你正在读 `main` 上的这份清单**：`main` 只保留已合并的里程碑，因此这里的勾选框**只描述 `main` 自身历史，不代表项目当前进度**。例如下方 T015–T018 显示未完成，但 Phase 2 的实现早已在 `dev/002-commerce-after-sales-mvp` 上完成并验收。判断进度请读 `origin/dev/002-commerce-after-sales-mvp` 的 `PROJECT_PROGRESS.md`，并在之前用 `git fetch --all --prune` 固定 ref。
+
 格式：`[ID] [P?] [Story] 描述`
 
 - `[P]`：可与同阶段其他不冲突任务并行。
