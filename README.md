@@ -2,7 +2,7 @@
 
 企业电商售后执行与异常处置 Agent。
 
-> 当前状态：**Phase 3 — US1 MVP**。T029（Typed Tools）已完成并验收，当前进入 T030 Agent 证据收集与受限 capability 决策。
+> 当前状态：**Phase 3 — US1 MVP**。**T019–T031 已完成并验收**；当前是 **T032（LangGraph 装配）进行中、未验收** —— 节点与路由已实现 7/10，终态节点、持久化接缝与生产接线尚未完成。
 >
 > 仓库中的性能、安全、时延、成本和成功率等指标，在没有实际 Eval 运行产物之前都只视为目标，不视为已达成结果。
 
@@ -48,11 +48,15 @@ Verified Result + Structured Trace
 - **T027**：RefundService 的 ownership / current-state / eligibility / amount 写前重校验、幂等、行锁、审计和状态读面已落地；真正的 approval binding 留到 US4/T049；
 - **T028**：已暴露 `POST /api/v1/refunds` 与 `GET /api/v1/orders/{orderId}/after-sales`，后者支持可选 `idempotencyKey` 精确过滤，为 unknown-write recovery 提供权威读后验证。HTTP 集成测试 **8/8**，Maven **BUILD SUCCESS**。
 - **T029**：已新增 `app/tools/`，实现六个 US1 typed tools、统一 `ToolEnvelope`、显式 allowlist、risk metadata 与 name→bound implementation 映射；`create_refund_request` 为唯一 high-write Tool，写超时归一为 `WRITE_TIMEOUT_UNKNOWN` 且禁止盲重试。另新增 dev/test-only `/api/v1/agent/dev/tools/execute` 与 `T029 · LIVE TOOL` Flow Playground，用于观察安全只读/判定 Tool 的真实链路（不暴露 high-write Tool）。5173 已实测 `get_order`、`get_logistics`、`check_after_sales_eligibility`、`get_after_sales_status`，并验证 missing key → `refunds=[]`、cross-owner 与 missing order → 同样 `ORDER_NOT_FOUND`。最终 Python `ruff check` / `ruff format --check` / `mypy` 全绿，`pytest` **285 passed, 6 skipped, 6 warnings**；Web `npm.cmd run build` / `npm.cmd run lint` 全绿。
+- **T030**：真实 OpenAI-compatible 模型只做请求理解与受限 evidence capability 建议；`mentionedOrderId` 仅是线索，必须经 Java ownership-confirmed `get_order` 才能成为 `resolved_order_id`；确定性 guard 复核 registry risk、当前状态与重复证据；`stalledHours` / eligibility / 金额始终由 Java 计算。另加 dev/test-only `/api/v1/agent/dev/t030/run` 与 `T030 · LIVE AGENT`。
+- **T031**：Agent 侧写后权威校验与持久化接缝 —— `verify_business_state.py` 按**同一** idempotency key 读 Java 权威状态（读失败 → `UNKNOWN`；权威返回空 → `VERIFIED_FAILURE`；同 key 多条或 id 不符 → `UNKNOWN`，**自己不重试**）；`execute_write.py` 改写为经 T029 typed tools 执行与恢复；`PostgresRunStore.checkpoint_state()` 新增 CAS 全量状态快照；`app/api/dev_t031.py` 提供 dev-only live harness。**收口时修掉 9 个远端提交带进来的 lint/format 债**，四条 Python 门禁全绿（`pytest` **344 passed, 6 skipped**）。
+
+> **T032 进行中（未验收）**：`app/agent/` 下已新增 `graph.py`（`GraphState` + 显式条件边目标表 + 装配校验 + `compile(checkpointer=None)`）、`routing.py`（路由表 / 预算 / `SafeStopReason` / `HandoffReason` / `TerminalDecision`）与 `nodes.py`（**7 / 10 节点**：understand、resolve_order、decide_evidence、execute_evidence、check_eligibility、refund_write、verify），`state.py` 增 `advance()` 作为唯一校验变更入口。**未完成**：终态三节点、持久化接缝（`persist_intent` → `checkpoint_state`、终态走 `transition()`）、`runs.py` 的 `/input` 与 `/resume` 真正驱动图、真库 E2E 与 5173 live。**当前 `build_graph` 的生产调用方为 0**，节点只被测试调用，因此「能力层进行中、产品层未接线」。设计见 [`specs/002-commerce-after-sales-agent/t032-runtime-design.md`](specs/002-commerce-after-sales-agent/t032-runtime-design.md)。
 
 当前下一步：
 
-- **T030**：实现 `understand_request`、单候选订单解析、`decide_next_evidence`、read-tool execution、evidence validation、`check_eligibility`；
-- **T031–T032**：补独立 verify node，并把安全写入恢复与 LangGraph 主链正式接通。
+- **T032 剩余三块**：① 终态节点与持久化接缝；② `runs.py` 生产接线；③ 真库 E2E + 5173 live 验收 + 四条门禁，然后才能勾选；
+- 之后按 `tasks.md` 进入 **T033**（Run 序列化只返回已验证事实）与 **T034**（最小 Customer Console）。
 
 > 说明：Flow Playground 已有 `T028 · LIVE REFUND` 的 create + verify 控件；最近一次手工 5173 尝试命中了未重启的旧 8080 Java 进程，因此这里不把该次尝试写成成功验收证据。
 
