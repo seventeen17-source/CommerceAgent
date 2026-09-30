@@ -129,10 +129,20 @@ class Decision(BaseModel):
     #: Declared by the node that detected a boundary condition itself (for example a write whose
     #: intent could not be persisted). Routers surface it; they never invent a reason of their own.
     safe_stop_reason: SafeStopReason | None = None
+    #: The status this invocation leaves the run in, produced by the node that ends it. The node
+    #: stops there: writing a status belongs to the wrapper, so the nodes that end a run hold no
+    #: store and can be tested without a database. ``None`` means "this node is not ending the run",
+    #: which is also what an already-terminal run reports - re-deriving its status would mean
+    #: inventing the reason it stopped.
+    terminal: TerminalDecision | None = None
 
 
 class TerminalDecision(BaseModel):
-    """The lifecycle status a run ends on, plus the reason when it ends as ``SAFE_STOP``."""
+    """The status one invocation leaves the run in, plus the reason when it is ``SAFE_STOP``.
+
+    ``WAITING_USER`` ends the *invocation* while the run stays resumable, so "terminal" here means
+    "this invocation has nothing left to do", not "this run can never move again".
+    """
 
     model_config = ConfigDict(extra="forbid")
 

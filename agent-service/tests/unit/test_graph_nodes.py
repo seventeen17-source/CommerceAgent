@@ -20,7 +20,13 @@ from app.agent.evidence_routing import (
     EvidenceGuardStatus,
 )
 from app.agent.graph import GraphNode, GraphState, GraphUpdate, build_graph
-from app.agent.nodes import GraphDeps, build_evidence_nodes, build_read_nodes, build_write_nodes
+from app.agent.nodes import (
+    GraphDeps,
+    build_evidence_nodes,
+    build_lifecycle_nodes,
+    build_read_nodes,
+    build_write_nodes,
+)
 from app.agent.order_resolution import OrderResolution, OrderResolutionStatus
 from app.agent.request_understanding import UnderstoodRequest
 from app.agent.routing import (
@@ -32,6 +38,7 @@ from app.agent.routing import (
 )
 from app.agent.state import (
     AgentState,
+    RunStatus,
     VerificationStatus,
     WriteIntent,
     WriteOutcome,
@@ -891,3 +898,87 @@ class TestVerifyNode:
         update = await nodes[Node.VERIFY]({"state": eligible_state()})
 
         assert update["decision"].safe_stop_reason is SafeStopReason.WRITE_INTENT_NOT_DURABLE
+
+
+class TestLifecycleNodes:
+    """The nodes that end an invocation: no dependencies, so nothing here needs a store."""
+
+    @pytest.mark.asyncio
+    async def test_a_verified_result_ends_as_a_completion(self) -> None:
+        nodes = build_lifecycle_nodes()
+        state = make_state(verification={"status": VerificationStatus.VERIFIED_SUCCESS})
+        update = await nodes[Node.FINALIZE]({"state": state})
+
+        terminal = update["decision"].terminal
+        assert terminal is not None
+        assert terminal.status is RunStatus.COMPLETED
+        assert terminal.reason is None
+
+    @pytest.mark.asyncio
+    async def test_an_unproven_verification_refuses_to_claim_success(self) -> None:
+        """UNKNOWN means the fact was never established, so it must not read as a completion."""
+        nodes = build_lifecycle_nodes()
+        state = make_state(verification={"status": VerificationStatus.UNKNOWN})
+        update = await nodes[Node.FINALIZE]({"state": state})
+
+        terminal = update["decision"].terminal
+        assert terminal is not None
+        assert terminal.status is RunStatus.SAFE_STOP
+        assert terminal.reason is SafeStopReason.VERIFICATION_UNKNOWN
+
+    @pytest.mark.asyncio
+    async def test_an_already_terminal_run_reports_no_new_decision(self) -> None:
+        """Restating a status would mean inventing the reason it stopped."""
+        nodes = build_lifecycle_nodes()
+        state = make_state(status=RunStatus.COMPLETED)
+        update = await nodes[Node.FINALIZE]({"state": state})
+
+        assert update["decision"].terminal is None
+
+    @pytest.mark.asyncio
+    async def test_safe_stop_carries_the_reason_the_state_implies(self) -> None:
+        nodes = build_lifecycle_nodes()
+        state = eligible_state(
+            eligibility={
+                "eligible": True,
+                "allowed_action": "REFUND_ONLY",
+                "max_refund_amount": Decimal("199.00"),
+                "approval_required": True,
+            }
+        )
+        update = await nodes[Node.SAFE_STOP]({"state": state})
+
+        terminal = update["decision"].terminal
+        assert terminal is not None
+        assert terminal.status is RunStatus.SAFE_STOP
+        assert terminal.reason is SafeStopReason.ELIGIBILITY_APPROVAL_REQUIRED
+
+    @pytest.mark.asyncio
+    async def test_safe_stop_carries_the_reason_the_node_declared(self) -> None:
+        nodes = build_lifecycle_nodes()
+        decision = Decision(safe_stop_reason=SafeStopReason.WRITE_INTENT_NOT_DURABLE)
+        update = await nodes[Node.SAFE_STOP]({"state": eligible_state(), "decision": decision})
+
+        terminal = update["decision"].terminal
+        assert terminal is not None
+        assert terminal.reason is SafeStopReason.WRITE_INTENT_NOT_DURABLE
+
+    @pytest.mark.asyncio
+    async def test_reaching_safe_stop_without_a_reason_fails_loudly(self) -> None:
+        """An incomplete routing table must not turn into a plausible-looking reason code."""
+        nodes = build_lifecycle_nodes()
+
+        with pytest.raises(ValueError, match="without a declared safety reason"):
+            await nodes[Node.SAFE_STOP]({"state": make_state()})
+
+    @pytest.mark.asyncio
+    async def test_waiting_user_ends_the_invocation_but_not_the_run(self) -> None:
+        nodes = build_lifecycle_nodes()
+        update = await nodes[Node.WAITING_USER]({"state": make_state()})
+
+        terminal = update["decision"].terminal
+        assert terminal is not None
+        assert terminal.status is RunStatus.WAITING_USER
+        assert terminal.reason is None
+        # The run stays resumable, which is the whole point of not calling it terminal.
+        assert update["state"].is_terminal is False

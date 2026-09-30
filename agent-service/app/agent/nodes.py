@@ -38,8 +38,16 @@ from app.agent.execute_write import (
 from app.agent.graph import GraphNode, GraphState, GraphUpdate
 from app.agent.order_resolution import OrderReadTools, resolve_single_order
 from app.agent.request_understanding import RequestUnderstandingModel, understand_request
-from app.agent.routing import Decision, Node, SafeStopReason, eligibility_handoff
-from app.agent.state import AgentState, WriteIntent, WriteOutcome, advance
+from app.agent.routing import (
+    Decision,
+    Node,
+    SafeStopReason,
+    TerminalDecision,
+    eligibility_handoff,
+    safe_stop_reason_for,
+    terminal_decision_for,
+)
+from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, advance
 from app.agent.verify_business_state import AfterSalesReadTools, verify_refund_business_state
 from app.tools.registry import ToolRegistry
 
@@ -47,6 +55,7 @@ __all__ = [
     "GraphDeps",
     "PersistWriteIntent",
     "build_evidence_nodes",
+    "build_lifecycle_nodes",
     "build_read_nodes",
     "build_write_nodes",
     "spend_one_step",
@@ -362,4 +371,46 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         Node.CHECK_ELIGIBILITY: check_eligibility,
         Node.REFUND_WRITE: refund_write,
         Node.VERIFY: verify,
+    }
+
+
+def build_lifecycle_nodes() -> dict[Node, GraphNode]:
+    """Build the nodes that end one invocation.
+
+    These take no dependencies at all, and that is the design: deciding that a run is over is a pure
+    function of the facts already in ``AgentState`` plus the control-plane reason a router refused
+    to continue. Persisting the decision is the wrapper's job, so no node here holds a store - which
+    is also why they are testable without a database.
+    """
+
+    def terminate(state: AgentState, terminal: TerminalDecision) -> GraphUpdate:
+        return GraphUpdate(state=state, decision=Decision(terminal=terminal))
+
+    async def finalize(graph: GraphState) -> GraphUpdate:
+        """End a run that reached a conclusion, deriving its status from the verified facts."""
+        state = graph["state"]
+        if state.is_terminal:
+            # Already ended. Restating the status would mean inventing the reason it stopped, and
+            # the store refuses to move a run out of a terminal state anyway.
+            return GraphUpdate(state=state, decision=Decision())
+        return terminate(state, terminal_decision_for(state))
+
+    async def safe_stop(graph: GraphState) -> GraphUpdate:
+        """End a run that refused to continue, carrying the reason it refused."""
+        state = graph["state"]
+        reason = safe_stop_reason_for(state, graph.get("decision"))
+        if reason is None:
+            # A router sent the run here without a reason to give. That is an incomplete routing
+            # table, and inventing a reason would hide it - so fail loudly instead.
+            raise ValueError("safe_stop was reached without a declared safety reason")
+        return terminate(state, TerminalDecision(status=RunStatus.SAFE_STOP, reason=reason))
+
+    async def waiting_user(graph: GraphState) -> GraphUpdate:
+        """End this invocation waiting for the user. The run stays resumable."""
+        return terminate(graph["state"], TerminalDecision(status=RunStatus.WAITING_USER))
+
+    return {
+        Node.FINALIZE: finalize,
+        Node.SAFE_STOP: safe_stop,
+        Node.WAITING_USER: waiting_user,
     }
