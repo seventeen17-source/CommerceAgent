@@ -39,6 +39,7 @@ from fastapi import FastAPI, Request
 from app.api.dev_t030 import router as dev_t030_router
 from app.api.dev_t031 import router as dev_t031_router
 from app.api.dev_tools import router as dev_tools_router
+from app.api.runs import GraphRunDriver, RunDriver
 from app.api.runs import router as runs_router
 from app.clients.commerce_client import CommerceClient
 from app.config.settings import Settings, get_settings
@@ -76,10 +77,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     run_store = getattr(app.state, "run_store", None)
     if run_store is None:
         run_store = PostgresRunStore(connection_factory_from_url(settings.agent_database_url))
+    run_driver = getattr(app.state, "run_driver", None)
+    if run_driver is None:
+        run_driver = GraphRunDriver()
 
     app.state.settings = settings
     app.state.commerce_client = commerce_client
     app.state.run_store = run_store
+    app.state.run_driver = run_driver
     logger.info(
         "agent-service started: commerce_api=%s jwt_issuer=%s real_secret_configured=%s",
         settings.commerce_api_base_url,
@@ -98,6 +103,7 @@ def create_app(
     *,
     commerce_client: CommerceClient | None = None,
     run_store: PostgresRunStore | None = None,
+    run_driver: RunDriver | None = None,
 ) -> FastAPI:
     """Build the ASGI application.
 
@@ -114,8 +120,9 @@ def create_app(
     gets them, including through the router-level dependency, with no shadow copy of the security
     logic.
 
-    An injected ``commerce_client`` / ``run_store`` is used as-is rather than rebuilt, so a test can
-    supply a stub authority or a store pointed at its own database.
+    An injected ``commerce_client`` / ``run_store`` / ``run_driver`` is used as-is rather than
+    rebuilt, so a test can supply a stub authority, a store pointed at its own database, or a driver
+    that does not need a model.
     """
     app = FastAPI(
         title="CommerceAgent Agent Service",
@@ -128,6 +135,8 @@ def create_app(
         app.state.commerce_client = commerce_client
     if run_store is not None:
         app.state.run_store = run_store
+    if run_driver is not None:
+        app.state.run_driver = run_driver
 
     app.include_router(runs_router, prefix="/api/v1")
     app.include_router(dev_tools_router, prefix="/api/v1")

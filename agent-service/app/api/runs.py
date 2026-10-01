@@ -35,11 +35,11 @@ not a server fault.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.agent.runtime import RunSession, drive_graph
 from app.agent.state import AgentState, RunStatus, advance
@@ -240,11 +240,12 @@ def _http_error_for(exc: Exception, run_id: str) -> HTTPException:
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_run(
     body: CreateRunRequest,
+    request: Request,
     call: AuthenticatedDep,
     store: StoreDep,
     settings: AppSettings,
 ) -> AgentRunView:
-    """Create a run owned by the authenticated principal.
+    """Create a run owned by the authenticated principal, then advance it.
 
     Three things are worth noticing, because each one is a boundary rather than a detail:
 
@@ -256,7 +257,16 @@ async def create_run(
       persisted with it. T015 required this explicitly: a restored checkpoint must keep the budgets
       it was created with, so reading today's config on resume cannot silently widen a run's
       allowance.
+
+    The driver is asked whether it can run **before** anything is written. Creating a run that
+    nobody can advance would leave a ``RUNNING`` row that is not resumable by design -
+    indistinguishable from work in progress - so a misconfigured deployment refuses the request
+    instead. This is also the only entry point for a run's first step: the contract publishes no
+    "execute" endpoint, so a run that is never advanced here never moves at all.
     """
+    driver = _driver(request)
+    driver.check(settings)
+
     run_id = new_run_id()
     state = AgentState(
         run_id=run_id,
@@ -271,9 +281,9 @@ async def create_run(
         prompt_version=_prompt_version(),
         model_temperature=settings.model_temperature,
         current_node="created",
-        next_action="understand_request",
+        next_action=_UNDERSTAND,
     )
-    return _view(record)
+    return _view(await driver.run(request, call, RunSession(store, record), settings))
 
 
 @router.get("/{run_id}")
@@ -361,6 +371,8 @@ async def submit_input(
     resumable" would be two answers, and the one in SQL is the one that holds under concurrency.
     """
     record = _owned_run(store, run_id, call)
+    driver = _driver(request)
+    driver.check(settings)
     merged = _merge_user_input(_payload_of(record), body.message)
     resumed = _resume(store, record, current_node="user_input_received", next_action=_UNDERSTAND)
     session = RunSession(store, resumed)
@@ -369,7 +381,7 @@ async def submit_input(
         current_node="user_input_received",
         next_action=_UNDERSTAND,
     )
-    return _view(await _drive(request, call, session, settings))
+    return _view(await driver.run(request, call, session, settings))
 
 
 @router.post("/{run_id}/resume")
@@ -389,8 +401,10 @@ async def resume_run(
     warns about, and the field's presence makes that temptation visible.
     """
     record = _owned_run(store, run_id, call)
+    driver = _driver(request)
+    driver.check(settings)
     resumed = _resume(store, record, current_node="resumed", next_action=_UNDERSTAND)
-    return _view(await _drive(request, call, RunSession(store, resumed), settings))
+    return _view(await driver.run(request, call, RunSession(store, resumed), settings))
 
 
 def _owned_run(store: RunStore, raw_run_id: str, call: AuthenticatedCall) -> RunRecord:
@@ -485,51 +499,101 @@ def _client(request: Request) -> CommerceClient:
     return cast(CommerceClient, client)
 
 
-async def _drive(
-    request: Request,
-    call: AuthenticatedCall,
-    session: RunSession,
-    settings: Settings,
-) -> RunRecord:
-    """Assemble this request's graph and advance the run to its next stop.
+def _model_api_key(settings: Settings) -> SecretStr:
+    """The model credential, or the status that says why this request cannot be served.
+
+    Called in two places on purpose. The driver's ``check`` needs it *before* a run exists, so a
+    misconfigured deployment refuses the request instead of leaving a ``RUNNING`` row nobody will
+    advance - and ``RUNNING`` is deliberately not resumable. ``run`` asks again rather than trusting
+    that ``check`` was called first: a driver should not be correct only in the order someone else
+    happens to use it.
+    """
+    if not settings.is_model_api_key_configured or settings.model_api_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MODEL_API_KEY_NOT_CONFIGURED",
+        )
+    return settings.model_api_key
+
+
+class RunDriver(Protocol):
+    """How a run is advanced, as a seam rather than an inline call.
+
+    Two methods rather than one, because the precondition has to be answerable in the one window
+    where nothing has been written yet: between accepting a request and creating or claiming a run.
+    Keeping the check on the driver also keeps it honest - only the real driver needs a model, so a
+    test double has nothing to stub out and no configuration to pretend to have.
+    """
+
+    def check(self, settings: Settings) -> None:
+        """Raise the HTTP status that explains why this driver cannot run right now."""
+        ...
+
+    async def run(
+        self,
+        request: Request,
+        call: AuthenticatedCall,
+        session: RunSession,
+        settings: Settings,
+    ) -> RunRecord:
+        """Advance the run this session holds, and return the record it stopped on."""
+        ...
+
+
+class GraphRunDriver:
+    """The production driver: assemble this request's graph and walk the run to its next stop.
 
     The walk is synchronous on purpose, and moving it to a worker later would change *where* this
     runs rather than what it guarantees: the caller already holds the version it claimed, so it is
     the only process allowed to write, and every write goes through the same compare-and-swap. What
-    a synchronous walk buys today is that a failure is reported to the caller instead of vanishing
-    into a queue.
+    a synchronous walk buys today is that a failure reaches the caller instead of vanishing into a
+    queue.
 
     The graph is assembled per request because the credential is per request. A shared graph would
     have to hold one caller's credential, which is the same mistake as sharing a database session
     that carries a user's permissions.
     """
-    if not settings.is_model_api_key_configured or settings.model_api_key is None:
-        # Checked before any work: without a model there is no understanding, no evidence proposal
-        # and no reason to claim the run.
+
+    def check(self, settings: Settings) -> None:
+        _model_api_key(settings)
+
+    async def run(
+        self,
+        request: Request,
+        call: AuthenticatedCall,
+        session: RunSession,
+        settings: Settings,
+    ) -> RunRecord:
+        tools = CommerceTools(client=_client(request), auth=call.auth)
+        try:
+            async with OpenAICompatibleJsonClient(
+                base_url=settings.model_base_url,
+                api_key=_model_api_key(settings),
+                model_name=settings.model_name,
+                temperature=settings.model_temperature,
+                timeout_seconds=settings.model_timeout_seconds,
+            ) as model_client:
+                graph = build_agent_graph(
+                    tools=tools,
+                    model_client=model_client,
+                    persist_intent=session.persist_intent,
+                )
+                return await drive_graph(graph, session)
+        except RunStoreError as exc:
+            # A store refusal is a statement about this run's state - a stale version, someone else
+            # holding it, a terminal status - so it maps to 409 rather than to a server fault.
+            raise _http_error_for(exc, str(session.record.run_id)) from exc
+
+
+def _driver(request: Request) -> RunDriver:
+    """This app's run driver. Installed by ``create_app``, so its absence is a wiring fault."""
+    driver = getattr(request.app.state, "run_driver", None)
+    if driver is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MODEL_API_KEY_NOT_CONFIGURED",
+            detail="RUN_DRIVER_UNAVAILABLE",
         )
-
-    tools = CommerceTools(client=_client(request), auth=call.auth)
-    try:
-        async with OpenAICompatibleJsonClient(
-            base_url=settings.model_base_url,
-            api_key=settings.model_api_key,
-            model_name=settings.model_name,
-            temperature=settings.model_temperature,
-            timeout_seconds=settings.model_timeout_seconds,
-        ) as model_client:
-            graph = build_agent_graph(
-                tools=tools,
-                model_client=model_client,
-                persist_intent=session.persist_intent,
-            )
-            return await drive_graph(graph, session)
-    except RunStoreError as exc:
-        # A store refusal is a statement about this run's state - a stale version, someone else
-        # holding it, a terminal status - so it maps to 409 rather than to a server fault.
-        raise _http_error_for(exc, str(session.record.run_id)) from exc
+    return cast(RunDriver, driver)
 
 
 def _prompt_version() -> str:

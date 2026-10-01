@@ -17,7 +17,8 @@ from fastapi import HTTPException
 from app.agent.routing import Node
 from app.agent.state import AgentState, WriteIntent, WriteOutcome
 from app.agent.wiring import build_agent_graph
-from app.api.runs import _USER_REQUEST_MAX, _merge_user_input
+from app.api.runs import _USER_REQUEST_MAX, GraphRunDriver, _merge_user_input
+from app.config.settings import Settings
 from app.tools import CommerceTools
 
 
@@ -76,3 +77,28 @@ def test_a_follow_up_that_does_not_fit_is_refused_rather_than_cut() -> None:
 
     assert refused.value.status_code == 422
     assert refused.value.detail == "USER_REQUEST_TOO_LONG"
+
+
+_PLACEHOLDER_SECRET = "test-placeholder-not-a-real-secret"
+
+_PLACEHOLDER_ISSUER = "test-issuer"
+
+
+def test_the_real_driver_refuses_before_a_run_exists() -> None:
+    """A run nobody can advance would be a RUNNING row that is not resumable by design."""
+    driver = GraphRunDriver()
+
+    with pytest.raises(HTTPException) as refused:
+        driver.check(
+            Settings(
+                environment="test",
+                commerce_jwt_issuer=_PLACEHOLDER_ISSUER,
+                commerce_jwt_secret=_PLACEHOLDER_SECRET,
+                # Named explicitly because Settings is a BaseSettings: without this the answer would
+                # depend on whatever the environment happens to carry.
+                model_api_key=None,
+            )
+        )
+
+    assert refused.value.status_code == 503
+    assert refused.value.detail == "MODEL_API_KEY_NOT_CONFIGURED"

@@ -76,6 +76,9 @@ known-first-party = ["app"]
 # 不同，否则测试通过只能证明“默认值恰好匹配”，而不能证明验签真的在工作。只放行这几个测试文件。
 "tests/integration/test_run_api.py" = ["S105", "S106"]
 "tests/unit/test_credential_verification.py" = ["S105", "S106"]
+# 这个文件需要构造一个**没有模型凭据**的 Settings，来证明真实 driver 会在创建 run 之前拒绝
+# （否则会留下一个没人能推进的 RUNNING run）。占位值同样必须存在，否则测不出“缺凭据”这条路。
+"tests/unit/test_runs_wiring.py" = ["S105", "S106"]
 
 [tool.mypy]
 python_version = "3.13"

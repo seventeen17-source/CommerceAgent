@@ -142,6 +142,30 @@ def db_factory() -> ConnectionFactory:
     return connection_factory_from_url(url)
 
 
+class RecordingDriver:
+    """A driver that advances nothing, so these tests stay about plumbing.
+
+    It records what it was asked to advance, which is how "creating a run advances it" is asserted
+    without a model, an LLM endpoint or a Java backend. The walk itself is covered elsewhere:
+    against a real database in ``test_runtime_seam.py`` and against the real compiled graph in
+    ``test_runtime.py``.
+
+    ``check`` succeeds unconditionally, and that is the point of putting the precondition on the
+    driver: only the real one needs a model credential, so a double has nothing to pretend.
+    """
+
+    def __init__(self) -> None:
+        self.checks = 0
+        self.advanced: list[Any] = []
+
+    def check(self, settings: Settings) -> None:
+        self.checks += 1
+
+    async def run(self, request: Any, call: Any, session: Any, settings: Settings) -> Any:
+        self.advanced.append(session.record)
+        return session.record
+
+
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
@@ -176,15 +200,18 @@ def client(settings: Settings, db_factory: ConnectionFactory) -> Iterator[TestCl
     from app.clients.commerce_client import CommerceClient
 
     commerce_client = CommerceClient.from_settings(settings, transport=stub_commerce_transport())
+    driver = RecordingDriver()
     app = create_app(
         settings,
         commerce_client=commerce_client,
         run_store=PostgresRunStore(db_factory),
+        run_driver=driver,
     )
 
     created: list[UUID] = []
     with TestClient(app) as test_client:
         test_client.created_run_ids = created  # type: ignore[attr-defined]
+        test_client.run_driver = driver  # type: ignore[attr-defined]
         yield test_client
 
     store = PostgresRunStore(db_factory)
@@ -224,9 +251,18 @@ def auth_header(token: str) -> dict[str, str]:
 # --------------------------------------------------------------------------------------------
 
 
+def test_creating_a_run_advances_it_immediately(client: TestClient) -> None:
+    """The contract publishes no "execute" endpoint, so this call is a run's only way to start."""
+    body = create_run_via_api(client)
+
+    driver = client.run_driver  # type: ignore[attr-defined]
+    assert driver.checks == 1
+    assert len(driver.advanced) == 1
+    assert str(driver.advanced[0].run_id) == body["runId"]
+
+
 def test_create_run_requires_a_credential(client: TestClient) -> None:
     response = client.post("/api/v1/agent/runs", json={"message": "refund please"})
-
     assert response.status_code == 401
     assert response.headers.get("WWW-Authenticate") == "Bearer"
     assert response.json()["detail"] == "AUTH_REQUIRED"
