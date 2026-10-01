@@ -35,19 +35,25 @@ not a server fault.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agent.state import AgentState, RunStatus
+from app.agent.runtime import RunSession, drive_graph
+from app.agent.state import AgentState, RunStatus, advance
+from app.agent.wiring import build_agent_graph
+from app.clients.commerce_client import CommerceClient
+from app.config.settings import Settings
+from app.llm.openai_compatible import OpenAICompatibleJsonClient
 from app.security.dependencies import (
     AppSettings,
     AuthenticatedCall,
     authenticate,
     get_run_store,
 )
+from app.tools import CommerceTools
 from app.trace.checkpoint import ResumeRequest, RunRecord
 from app.trace.errors import (
     IllegalRunTransitionError,
@@ -335,27 +341,47 @@ async def get_trace(run_id: str, call: AuthenticatedDep, store: StoreDep) -> lis
 
 @router.post("/{run_id}/input")
 async def submit_input(
-    run_id: str, body: RunInputRequest, call: AuthenticatedDep, store: StoreDep
+    run_id: str,
+    body: RunInputRequest,
+    request: Request,
+    call: AuthenticatedDep,
+    store: StoreDep,
+    settings: AppSettings,
 ) -> AgentRunView:
-    """Supply clarification text to a ``WAITING_USER`` run.
+    """Supply clarification text to a ``WAITING_USER`` run, then advance it.
 
-    Today this resumes the run and records the input in the checkpoint; it does not yet *interpret*
-    the text, because understanding belongs to T030's graph. What is real is the gate: only the
-    owner may call it, and only a waiting run may be resumed.
+    The order of the first three steps is the design. The follow-up is merged and validated while
+    the run is **still waiting**, because refusing afterwards would leave a claimed run with nothing
+    to drive it - exactly the state the failure path exists to avoid. Only then is the run claimed,
+    and the merged request is checkpointed before the graph reads it: the walk interprets the
+    payload, so a clarification that lived only in this process would be invisible to the next
+    resume.
 
-    The status check is the store's, not this handler's. Two places deciding "is this run resumable"
-    would be two answers, and the one in SQL is the one that holds under concurrency.
+    The status check is still the store's, not this handler's. Two places deciding "is this run
+    resumable" would be two answers, and the one in SQL is the one that holds under concurrency.
     """
     record = _owned_run(store, run_id, call)
-    resumed = _resume(store, record, current_node="user_input_received", next_action=None)
-    return _view(resumed)
+    merged = _merge_user_input(_payload_of(record), body.message)
+    resumed = _resume(store, record, current_node="user_input_received", next_action=_UNDERSTAND)
+    session = RunSession(store, resumed)
+    session.checkpoint(
+        state=advance(session.state, user_request=merged),
+        current_node="user_input_received",
+        next_action=_UNDERSTAND,
+    )
+    return _view(await _drive(request, call, session, settings))
 
 
 @router.post("/{run_id}/resume")
 async def resume_run(
-    run_id: str, call: AuthenticatedDep, store: StoreDep, body: ResumeRunRequest | None = None
+    run_id: str,
+    request: Request,
+    call: AuthenticatedDep,
+    store: StoreDep,
+    settings: AppSettings,
+    body: ResumeRunRequest | None = None,
 ) -> AgentRunView:
-    """Resume a checkpointed run after an external decision.
+    """Resume a checkpointed run after an external decision, then advance it.
 
     ``body.approval_request_id`` is recorded as the caller's *claim* about what it is resuming. It
     is not authority: T049+ must re-read the authoritative approval record from Java before any
@@ -363,8 +389,8 @@ async def resume_run(
     warns about, and the field's presence makes that temptation visible.
     """
     record = _owned_run(store, run_id, call)
-    resumed = _resume(store, record, current_node="resumed", next_action=None)
-    return _view(resumed)
+    resumed = _resume(store, record, current_node="resumed", next_action=_UNDERSTAND)
+    return _view(await _drive(request, call, RunSession(store, resumed), settings))
 
 
 def _owned_run(store: RunStore, raw_run_id: str, call: AuthenticatedCall) -> RunRecord:
@@ -406,6 +432,104 @@ def _resume(
         RunNotFoundError,
     ) as exc:
         raise _http_error_for(exc, str(record.run_id)) from exc
+
+
+#: The node the walk starts at. Spelled the way ``create_run`` already spells it, so the two entry
+#: points cannot disagree about what a freshly woken run is about to do.
+_UNDERSTAND = "understand_request"
+
+#: How a follow-up is appended to the original request. A visible marker rather than a bare
+#: concatenation, so a reviewer reading the payload can tell what the user typed when.
+_USER_INPUT_SEPARATOR = "\n\n[follow-up] "
+
+#: The same cap ``AgentState.user_request`` declares. Duplicated deliberately: refusing with a clear
+#: 422 needs the number *before* anything is constructed, and a behavioural test asserts that 4000
+#: characters are accepted while 4001 are not, so the copy cannot drift unnoticed.
+_USER_REQUEST_MAX = 4000
+
+
+def _merge_user_input(state: AgentState, text: str) -> str:
+    """Append clarification text to the request, or refuse when it would not fit.
+
+    Truncating is not an option. A request cut in half is still a well-formed request to everything
+    downstream, which is how a silent cut becomes a wrong answer that nobody can trace back.
+    """
+    merged = f"{state.user_request}{_USER_INPUT_SEPARATOR}{text}"
+    if len(merged) > _USER_REQUEST_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="USER_REQUEST_TOO_LONG",
+        )
+    return merged
+
+
+def _payload_of(record: RunRecord) -> AgentState:
+    """The run's payload, or the status that says why there is none."""
+    state = record.to_state()
+    if state is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="RUN_CHECKPOINT_COMPACTED",
+        )
+    return state
+
+
+def _client(request: Request) -> CommerceClient:
+    """The shared Commerce HTTP client, or a 503 if this app was built without one."""
+    client = getattr(request.app.state, "commerce_client", None)
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="COMMERCE_CLIENT_UNAVAILABLE",
+        )
+    return cast(CommerceClient, client)
+
+
+async def _drive(
+    request: Request,
+    call: AuthenticatedCall,
+    session: RunSession,
+    settings: Settings,
+) -> RunRecord:
+    """Assemble this request's graph and advance the run to its next stop.
+
+    The walk is synchronous on purpose, and moving it to a worker later would change *where* this
+    runs rather than what it guarantees: the caller already holds the version it claimed, so it is
+    the only process allowed to write, and every write goes through the same compare-and-swap. What
+    a synchronous walk buys today is that a failure is reported to the caller instead of vanishing
+    into a queue.
+
+    The graph is assembled per request because the credential is per request. A shared graph would
+    have to hold one caller's credential, which is the same mistake as sharing a database session
+    that carries a user's permissions.
+    """
+    if not settings.is_model_api_key_configured or settings.model_api_key is None:
+        # Checked before any work: without a model there is no understanding, no evidence proposal
+        # and no reason to claim the run.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MODEL_API_KEY_NOT_CONFIGURED",
+        )
+
+    tools = CommerceTools(client=_client(request), auth=call.auth)
+    try:
+        async with OpenAICompatibleJsonClient(
+            base_url=settings.model_base_url,
+            api_key=settings.model_api_key,
+            model_name=settings.model_name,
+            temperature=settings.model_temperature,
+            timeout_seconds=settings.model_timeout_seconds,
+        ) as model_client:
+            graph = build_agent_graph(
+                tools=tools,
+                model_client=model_client,
+                persist_intent=session.persist_intent,
+            )
+            return await drive_graph(graph, session)
+    except RunStoreError as exc:
+        # A store refusal is a statement about this run's state - a stale version, someone else
+        # holding it, a terminal status - so it maps to 409 rather than to a server fault.
+        raise _http_error_for(exc, str(session.record.run_id)) from exc
 
 
 def _prompt_version() -> str:
