@@ -15,14 +15,23 @@ precisely what stops two executors from overwriting each other's work.
 
 from __future__ import annotations
 
+import logging
+
 from app.agent.graph import CompiledGraph, GraphState
 from app.agent.routing import Decision, Node, TerminalDecision
-from app.agent.state import AgentState, WriteIntent, WriteOutcome, advance
+from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, advance
 from app.trace.checkpoint import RunRecord, Transition
-from app.trace.errors import RunStoreError
+from app.trace.errors import RunStoreError, RunVersionConflictError, TerminalRunError
 from app.trace.store import RunStore
 
-__all__ = ["RunSession", "drive_graph"]
+__all__ = ["FAILED_RUN_ERROR_CODE", "RunSession", "drive_graph"]
+
+logger = logging.getLogger(__name__)
+
+#: What a run is marked with when the invocation itself failed. It is the same code T031 uses for an
+#: intent that could not be persisted, because both say the same thing: our side broke, so the run's
+#: outcome is unknown rather than negative - and neither may be reported as a business answer.
+FAILED_RUN_ERROR_CODE = "INTERNAL_ERROR"
 
 
 class RunSession:
@@ -86,15 +95,26 @@ class RunSession:
         moved = advance(state, write_intent=intent, write=outcome)
         return self.checkpoint(state=moved, current_node=Node.REFUND_WRITE.value)
 
-    def finish(self, terminal: TerminalDecision, *, current_node: str) -> None:
+    def finish(
+        self,
+        terminal: TerminalDecision,
+        *,
+        current_node: str,
+        error_code: str | None = None,
+    ) -> None:
         """Write the lifecycle change that ends this invocation.
 
         The counters and the payload are deliberately not repeated here: the last boundary
         checkpoint already wrote them, and ``transition`` updates only what it is given.
         ``final_action`` names the protected action the run actually attempted - ``None`` means it
-        never reached one, which is a fact rather than a blank.
+        never reached one, which is a fact rather than a blank. The payload is read defensively
+        because this same method records a failed invocation, and a failed invocation is exactly the
+        case where retention may already have reclaimed it.
         """
-        state = self.state
+        payload = self._record.to_state()
+        attempted: str | None = None
+        if payload is not None and payload.write_intent is not None:
+            attempted = payload.write_intent.action
         self._record = self._store.transition(
             self._record.run_id,
             Transition(
@@ -102,10 +122,33 @@ class RunSession:
                 status=terminal.status,
                 trigger="TERMINAL",
                 current_node=current_node,
-                final_action=state.write_intent.action if state.write_intent is not None else None,
+                final_action=attempted,
+                error_code=error_code,
                 reason_code=terminal.reason.value if terminal.reason is not None else None,
             ),
         )
+
+
+def _mark_failed(session: RunSession) -> None:
+    """Record that this invocation failed, without replacing the error that caused it.
+
+    Two refusals are expected and quiet, because in both cases writing FAILED would mean a stale
+    executor overwriting a live run: a version conflict says someone else advanced this run, and a
+    terminal run says someone else already finished it. Anything else - including the store being
+    unreachable, which is often the very thing that raised - is logged, because then the run is left
+    ``RUNNING`` with no executor at all, and an operator has to be able to find it. ``RUNNING`` is
+    deliberately not resumable, so such a run would otherwise be indistinguishable from live work.
+    """
+    try:
+        session.finish(
+            TerminalDecision(status=RunStatus.FAILED),
+            current_node=session.record.current_node or "unknown",
+            error_code=FAILED_RUN_ERROR_CODE,
+        )
+    except (RunVersionConflictError, TerminalRunError):
+        return
+    except RunStoreError:
+        logger.warning("could not mark run %s as failed", session.record.run_id, exc_info=True)
 
 
 async def drive_graph(graph: CompiledGraph, session: RunSession) -> RunRecord:
@@ -116,46 +159,52 @@ async def drive_graph(graph: CompiledGraph, session: RunSession) -> RunRecord:
     real ``next_action`` instead of a guess. The routers stay the only thing that decides where a
     run goes - there is no second copy of that decision here to drift away from theirs.
 
-    An exception propagates untouched and the run stays ``RUNNING``. Deciding how a crashed run gets
-    marked is a policy question for the caller, not a mechanism for this function to guess at.
+    Every way out of this function that is not a terminal transition marks the run ``FAILED`` first,
+    then re-raises. The re-raise matters as much as the marking: the failure is recorded *in
+    addition to* being surfaced, never instead of it, so a bug in this codebase cannot be filed away
+    as just another failed run. Leaving the run ``RUNNING`` instead is not an option - that status
+    belongs to a live executor, and nothing would ever collect it.
     """
-
     if session.record.is_terminal:
-        # Driving a run that already ended would walk a graph whose first router sends it straight
-        # to finalize, and finalize reports no decision - so refuse here, where the reason is clear.
+        # A precondition, not an invocation failure: the run is not ours to drive, so nothing is
+        # written and the caller learns why.
         raise RunStoreError("this run is already terminal; there is nothing to drive")
 
-    pending: tuple[AgentState, str] | None = None
-    invocation: GraphState = {
-        "state": session.state,
-        "decision": Decision(),
-        "understood": None,
-        "resolution": None,
-    }
+    try:
+        pending: tuple[AgentState, str] | None = None
+        invocation: GraphState = {
+            "state": session.state,
+            "decision": Decision(),
+            "understood": None,
+            "resolution": None,
+        }
 
-    async for chunk in graph.astream(invocation, stream_mode="updates"):
-        for raw_name, update in chunk.items():
-            node_name = str(raw_name)
-            state: AgentState = update["state"]
-            decision: Decision | None = update.get("decision")
+        async for chunk in graph.astream(invocation, stream_mode="updates"):
+            for raw_name, update in chunk.items():
+                node_name = str(raw_name)
+                state: AgentState = update["state"]
+                decision: Decision | None = update.get("decision")
 
-            if pending is not None:
-                previous_state, previous_node = pending
-                session.checkpoint(
-                    state=previous_state,
-                    current_node=previous_node,
-                    next_action=node_name,
-                )
+                if pending is not None:
+                    previous_state, previous_node = pending
+                    session.checkpoint(
+                        state=previous_state,
+                        current_node=previous_node,
+                        next_action=node_name,
+                    )
 
-            if decision is not None and decision.terminal is not None:
-                # The run ends here. The boundary checkpoint above already holds this node's
-                # payload, and a lifecycle change must go through transition() rather than a
-                # checkpoint.
-                session.finish(decision.terminal, current_node=node_name)
-                return session.record
+                if decision is not None and decision.terminal is not None:
+                    # The run ends here. The boundary checkpoint above already holds this node's
+                    # payload, and a lifecycle change must go through transition(), not a
+                    # checkpoint.
+                    session.finish(decision.terminal, current_node=node_name)
+                    return session.record
 
-            pending = (state, node_name)
+                pending = (state, node_name)
 
-    raise RunStoreError(
-        "the graph stopped without a terminal decision; the routing table is incomplete"
-    )
+        raise RunStoreError(
+            "the graph stopped without a terminal decision; the routing table is incomplete"
+        )
+    except Exception:
+        _mark_failed(session)
+        raise

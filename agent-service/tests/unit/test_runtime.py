@@ -18,10 +18,10 @@ import pytest
 from app.agent.graph import CompiledGraph, GraphNode, GraphUpdate, build_graph
 from app.agent.nodes import build_lifecycle_nodes
 from app.agent.routing import Decision, Node, SafeStopReason, TerminalDecision
-from app.agent.runtime import RunSession, drive_graph
+from app.agent.runtime import FAILED_RUN_ERROR_CODE, RunSession, drive_graph
 from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, WriteStatus, advance
 from app.trace.checkpoint import RunRecord, Transition
-from app.trace.errors import RunStoreError
+from app.trace.errors import RunStoreError, RunVersionConflictError
 from app.trace.store import RunStore
 
 
@@ -54,11 +54,12 @@ def make_record(state: AgentState) -> RunRecord:
 class StrictRunStore(RunStore):
     """A store that refuses a write computed from a version that is no longer current."""
 
-    def __init__(self, record: RunRecord) -> None:
+    def __init__(self, record: RunRecord, *, refuse_transition: Exception | None = None) -> None:
         self.record = record
         self.checkpoints: list[tuple[str, str | None]] = []
         self.transitions: list[Transition] = []
         self.versions: list[int] = []
+        self._refuse_transition = refuse_transition
 
     def _accept(self, expected_version: int) -> None:
         if expected_version != self.record.version:
@@ -93,6 +94,8 @@ class StrictRunStore(RunStore):
         return self.record
 
     def transition(self, run_id: UUID, transition: Transition) -> RunRecord:
+        if self._refuse_transition is not None:
+            raise self._refuse_transition
         self._accept(transition.expected_version)
         self.transitions.append(transition)
         self.record = self.record.model_copy(
@@ -144,6 +147,17 @@ class ScriptedGraph:
     async def astream(self, value: Any, *, stream_mode: str) -> AsyncIterator[dict[str, Any]]:
         for chunk in self._chunks:
             yield chunk
+
+
+class FailingGraph:
+    """A graph that blows up mid-invocation, which is the case the failure path exists for."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def astream(self, value: Any, *, stream_mode: str) -> AsyncIterator[dict[str, Any]]:
+        raise self._error
+        yield {}  # unreachable, but this is what makes the method an async generator
 
 
 @pytest.mark.asyncio
@@ -245,6 +259,61 @@ async def test_driving_an_already_terminal_run_is_refused() -> None:
         await drive_graph(two_step_graph(), session)
 
     assert store.checkpoints == []
+
+
+@pytest.mark.asyncio
+async def test_a_failing_invocation_marks_the_run_failed_and_still_raises() -> None:
+    """The run must not be left RUNNING - that status belongs to a live executor."""
+    state = make_state()
+    store = StrictRunStore(make_record(state))
+    session = RunSession(store, store.record)
+
+    with pytest.raises(RuntimeError, match="the tool layer exploded"):
+        await drive_graph(FailingGraph(RuntimeError("the tool layer exploded")), session)  # type: ignore[arg-type]
+
+    assert len(store.transitions) == 1
+    assert store.transitions[0].status is RunStatus.FAILED
+    assert store.transitions[0].error_code == FAILED_RUN_ERROR_CODE
+    assert store.transitions[0].trigger == "TERMINAL"
+    assert store.record.status is RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_a_refused_tombstone_does_not_replace_the_original_error() -> None:
+    """A version conflict means another executor owns this run, so FAILED would stomp a live run."""
+    state = make_state()
+    store = StrictRunStore(
+        make_record(state),
+        refuse_transition=RunVersionConflictError(
+            run_id=str(state.run_id), expected_version=1, actual_version=2
+        ),
+    )
+    session = RunSession(store, store.record)
+
+    with pytest.raises(RuntimeError, match="the real cause"):
+        await drive_graph(FailingGraph(RuntimeError("the real cause")), session)  # type: ignore[arg-type]
+
+    assert store.transitions == []
+    assert store.record.status is RunStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_cannot_write_the_tombstone_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A run left RUNNING with no executor is invisible; the log is how an operator finds it."""
+    state = make_state()
+    store = StrictRunStore(
+        make_record(state), refuse_transition=RunStoreError("the database is unreachable")
+    )
+    session = RunSession(store, store.record)
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(RuntimeError, match="the real cause"):
+            await drive_graph(FailingGraph(RuntimeError("the real cause")), session)  # type: ignore[arg-type]
+
+    assert any("could not mark run" in record.message for record in caplog.records)
+    assert store.record.status is RunStatus.RUNNING
 
 
 def test_finishing_names_the_protected_action_the_run_attempted() -> None:
