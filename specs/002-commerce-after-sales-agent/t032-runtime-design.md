@@ -399,6 +399,12 @@ Java      负责业务事实（什么是真的）
    而 `ToolHistoryEntry.trace_id` 可空（Tool 未返回 trace id 时）——硬写就得**编造一个 trace id**，
    那是伪造跨服务证据；另外 `risk_level` 不在 history entry 上（它在 registry 的 risk metadata 里）。
    接线前必须先定两件事：**缺 trace id 的调用怎么记**、**risk 从哪里取**。
-9. **端到端行为尚未在真实数据库上验证**：本机 `pytest` 的 6 个 skipped 就是需要 `DATABASE_URL` 的那一批。
-   `/input` 与 `/resume` 现在会真的驱动图，但这条路径目前只有单元测试覆盖
-   （组装完整性 + 文本合并规则），**没有**"认领 → checkpoint → 驱动 → 终态"的真库用例。
+9. **端点级（HTTP）驱动用例尚缺**：`/input` 与 `/resume` 现在会真的驱动图，但这条路径目前只有单元测试覆盖
+   （组装完整性 + 文本合并规则），**没有**走 HTTP 的 happy-path 用例。真库层面的接缝已由
+   `tests/integration/test_runtime_seam.py` 覆盖（6 个用例，真实 PostgreSQL：版本递增与行同步、
+   payload 快照不得改 status、过期版本被拒且败者无改、intent 回调后可读回、驱动收终态、失败留 FAILED 行）；
+   要做到 HTTP 级确定性，还需要向端点注入一个脚本化模型客户端（否则用例会打真实 LLM）。
+10. **本机 `pytest` 的 6 个 skip 与数据库无关**（曾被误判为"需要 `DATABASE_URL`"）：它们全部来自
+   `tests/unit/test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化。**本机 PostgreSQL 是可达的**，
+   集成用例（`test_trace_store` / `test_run_api` / `test_runtime_seam`）都在这里真实运行。
+   教训与 §1「缺席断言必须附证据」同源：**别从 skip 的个数推断 skip 的原因**，要看 `-rs`。
