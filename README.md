@@ -51,11 +51,11 @@ Verified Result + Structured Trace
 - **T030**：真实 OpenAI-compatible 模型只做请求理解与受限 evidence capability 建议；`mentionedOrderId` 仅是线索，必须经 Java ownership-confirmed `get_order` 才能成为 `resolved_order_id`；确定性 guard 复核 registry risk、当前状态与重复证据；`stalledHours` / eligibility / 金额始终由 Java 计算。另加 dev/test-only `/api/v1/agent/dev/t030/run` 与 `T030 · LIVE AGENT`。
 - **T031**：Agent 侧写后权威校验与持久化接缝 —— `verify_business_state.py` 按**同一** idempotency key 读 Java 权威状态（读失败 → `UNKNOWN`；权威返回空 → `VERIFIED_FAILURE`；同 key 多条或 id 不符 → `UNKNOWN`，**自己不重试**）；`execute_write.py` 改写为经 T029 typed tools 执行与恢复；`PostgresRunStore.checkpoint_state()` 新增 CAS 全量状态快照；`app/api/dev_t031.py` 提供 dev-only live harness。**收口时修掉 9 个远端提交带进来的 lint/format 债**，四条 Python 门禁全绿（`pytest` **344 passed, 6 skipped**）。
 
-> **T032 进行中（未验收）**：`app/agent/` 下已新增 `graph.py`（`GraphState` + 显式条件边目标表 + 装配校验 + `compile(checkpointer=None)`）、`routing.py`（路由表 / 预算 / `SafeStopReason` / `HandoffReason` / `TerminalDecision`）与 `nodes.py`（**7 / 10 节点**：understand、resolve_order、decide_evidence、execute_evidence、check_eligibility、refund_write、verify），`state.py` 增 `advance()` 作为唯一校验变更入口。**未完成**：终态三节点、持久化接缝（`persist_intent` → `checkpoint_state`、终态走 `transition()`）、`runs.py` 的 `/input` 与 `/resume` 真正驱动图、真库 E2E 与 5173 live。**当前 `build_graph` 的生产调用方为 0**，节点只被测试调用，因此「能力层进行中、产品层未接线」。设计见 [`specs/002-commerce-after-sales-agent/t032-runtime-design.md`](specs/002-commerce-after-sales-agent/t032-runtime-design.md)。
+> **T032 进行中（未验收）**：`app/agent/` 下已新增 `graph.py`（`GraphState` + 显式条件边目标表 + 装配校验 + `compile(checkpointer=None)`）、`routing.py`（路由表 / 预算 / `SafeStopReason` / `HandoffReason` / `TerminalDecision`）、`nodes.py`（**10 / 10 节点**，含终态 `finalize` / `safe_stop` / `waiting_user`）、`runtime.py`（`RunSession` 的三个写 seam + `drive_graph`：版本跟踪、边界写延迟一步、失败收尸）、`wiring.py`（10 节点 + 9 依赖的唯一组装点），`state.py` 增 `advance()` 作为唯一校验变更入口；`runs.py` 的 `/input` 与 `/resume` **现在真的组装图并驱动 run**。**未完成**：真库 E2E（本机 `pytest` 的 `6 skipped` 即需要 `DATABASE_URL` 的一批，端到端行为尚未在真实数据库上验证）、5173 live 验收、`agent.tool_executions` 工具 trace 接线（障碍见设计文档 §10）。**所以"节点与接线齐备"不等于"端到端已验证"**，T032 仍**不得勾选**。设计见 [`specs/002-commerce-after-sales-agent/t032-runtime-design.md`](specs/002-commerce-after-sales-agent/t032-runtime-design.md)。
 
 当前下一步：
 
-- **T032 剩余三块**：① 终态节点与持久化接缝；② `runs.py` 生产接线；③ 真库 E2E + 5173 live 验收 + 四条门禁，然后才能勾选；
+- **T032 剩余三件**：① 真库 E2E（认领 → checkpoint → 驱动 → 终态）；② 5173 live 验收；③ 工具 trace 接线（先定"缺 trace id 怎么记、risk 从哪取"）；
 - 之后按 `tasks.md` 进入 **T033**（Run 序列化只返回已验证事实）与 **T034**（最小 Customer Console）。
 
 > 说明：Flow Playground 已有 `T028 · LIVE REFUND` 的 create + verify 控件；最近一次手工 5173 尝试命中了未重启的旧 8080 Java 进程，因此这里不把该次尝试写成成功验收证据。

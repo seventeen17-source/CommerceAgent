@@ -270,6 +270,23 @@ Java      负责业务事实（什么是真的）
 2. **反向约束**：T032 不得自行判断"这笔退款成功了没有"（verify 的职责）；T031 不得决定"这个 run 该不该结束"（Router / `transition()` 的职责）。
 3. RunStore 不属于任何一方，它是三方共用的仲裁层——"run 现在是什么状态"永远只有一个答案。
 4. 这个边界就是选"自管持久化、`compile(checkpointer=None)`"的原因：引入框架自带 checkpointer 会产生第二份状态真相。
+5. **谁真的写库**：`app/agent/runtime.py` 是 T032 里**唯一**会写持久化状态的地方，而且只有两种写——
+   `checkpoint_state`（同状态的 payload 快照，装 `write_intent` / `write` / `verification` 这些非行投影字段）
+   与 `transition`（生命周期变更，带守卫）。`RunSession` 每次写完就替换手里的 record，所以下一次用的
+   `expected_version` 永远是 store 刚产出的那一版；**过期版本根本到不了 store**（到了也会被 CAS 拒）。
+6. **节点边界写延迟一步**：边界不是在"某节点结束时"写的，而是在"下一个节点开始时"写的——
+   只有到那时"下一步去了哪里"才是**事实**。于是 `next_action` 记的是路由的**结果**，而不是 T032 对路由表的
+   **第二次抄写**（抄一份就一定会漂移，而漂移的表现是"单子写着去 C、实际去了 B"）。
+7. **失败收尸**：`drive_graph` 里**每一条不是终态迁移的出口**都先落 `FAILED`（error code `INTERNAL_ERROR`），
+   再把原异常**原样抛出**。抛出与落盘同等重要：失败是**附加**在错误之上的，不是**替代**它——
+   所以本仓库的 bug 不会被归档成"又一个失败的 run"。两种拒绝是预期的、静默的：版本冲突（别人已接管这个 run）
+   与已终态（别人已结束它），此时写 FAILED 等于**过期执行者覆盖活着的执行者**。墓碑本身写不进去
+   （store 不可达，而这常常正是异常的原因）必须 `logger.warning`：否则 run 留在 `RUNNING` 且没有执行者，
+   而 `RUNNING` 刻意**不可** resume——它和"正在干活"长得一模一样。
+8. **组装点唯一**：`app/agent/wiring.py` 是 10 个节点 + 9 个依赖的唯一组装处，**每请求组装一次**
+   （凭据是每请求的；共享图对象必然持有某一个调用者的凭据——等同于共享一个带用户权限的数据库会话）。
+   `CommerceTools` 一个对象同时满足 orders / evidence / eligibility / writes / after_sales 五个协议，
+   **所以凭据只绑在一处**；这一点由 mypy 检查，而不是由注释保证。
 
 ---
 
@@ -377,3 +394,11 @@ Java      负责业务事实（什么是真的）
    修复并验证；但 `.ruff_cache` / `.mypy_cache` / `.pytest_cache` 仍拒绝写入，因此门禁用等价命令：
    `ruff check --no-cache`、`ruff format --check --no-cache`、`mypy app --cache-dir=<TEMP>`、
    `pytest -q -p no:cacheprovider`。另外受限模式下 `git fetch` / `git commit` 写不进 `.git`，需要一次完全权限。
+8. **`agent.tool_executions` 尚未接线（T032 的已知缺口）**：节点把每次尝试记进 `state.tool_history`，
+   但 T017 的 trace 表还没有写入。**这不是一行代码**：`ToolTraceRecord.trace_id` 是必填且带格式校验的，
+   而 `ToolHistoryEntry.trace_id` 可空（Tool 未返回 trace id 时）——硬写就得**编造一个 trace id**，
+   那是伪造跨服务证据；另外 `risk_level` 不在 history entry 上（它在 registry 的 risk metadata 里）。
+   接线前必须先定两件事：**缺 trace id 的调用怎么记**、**risk 从哪里取**。
+9. **端到端行为尚未在真实数据库上验证**：本机 `pytest` 的 6 个 skipped 就是需要 `DATABASE_URL` 的那一批。
+   `/input` 与 `/resume` 现在会真的驱动图，但这条路径目前只有单元测试覆盖
+   （组装完整性 + 文本合并规则），**没有**"认领 → checkpoint → 驱动 → 终态"的真库用例。

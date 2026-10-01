@@ -5,7 +5,11 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 3 — US1 MVP
-- **当前 Tasks**：T032 — LangGraph 装配（`graph.py` / `routing.py`），**进行中、未验收**。已完成：`state.advance()` 唯一变更入口、全部条件边的路由规则与 step/retry 预算、图的装配与拓扑校验、**7 / 10 个节点**（understand / resolve_order / decide_evidence / execute_evidence / check_eligibility / refund_write / verify）。未完成：**终态三节点**（finalize / safe_stop / waiting_user）与**持久化接缝**（`persist_intent` 回调 → `checkpoint_state`；终态必须走 `transition()`），以及**生产接线**（`runs.py` 的 `/input`、`/resume` 真正把执行送回图）+ 真库 E2E + 5173 live 验收。**关键事实：`build_graph` 目前的生产调用方是 0**，节点只被测试调用 —— 所以 T032 现在处于「能力层进行中、产品层未接线」，**不得勾选**。分支：`feat/us1-langgraph-assembly`（从最新 dev 派生，12 个提交已推送）。
+- **当前 Tasks**：T032 — LangGraph 装配（`graph.py` / `routing.py` / `nodes.py` / `runtime.py` / `wiring.py`），**进行中、未验收**。
+  - **已完成**：`state.advance()` 作为唯一校验变更入口；全部条件边的路由规则与 step/retry 预算；图的装配与拓扑校验（去向显式声明、缺节点启动即报错）；**10 / 10 个节点**；**持久化接缝**（`runtime.py` 的 `RunSession`：`checkpoint_state` / `persist_intent` / `transition` 三个 seam + 版本跟踪，边界写延迟一步使 `next_action` 是事实而非猜测）；**失败收尸**（非终态出口一律先落 `FAILED` 再原样抛出；版本冲突与已终态两种预期拒绝静默）；**生产接线**（`runs.py` 的 `/input`、`/resume` 现在真的组装图并驱动，`wiring.py` 是 10 节点 + 9 依赖的唯一组装点）。
+  - **未完成**：**真库 E2E**（本机 `pytest` 的 `6 skipped` 就是需要 `DATABASE_URL` 的那一批，端到端行为尚未在真实数据库上验证）、**5173 live 验收**、**工具 trace 表接线**（`agent.tool_executions`；障碍见设计文档 §10）、文档收口。
+  - **门禁（2026-09-29 最后一次全绿）**：`ruff check --no-cache` All checks passed / `ruff format --check` **82 files** / `mypy app` **Success: 47 source files** / `pytest -q` **443 passed, 6 skipped**。
+  - 分支：`feat/us1-langgraph-assembly`（从最新 dev 派生，**21 个提交已推送**，与 origin 0/0）。
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
