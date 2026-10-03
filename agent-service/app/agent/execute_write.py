@@ -48,6 +48,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from app.agent.state import AgentState, ToolHistoryEntry, WriteIntent, WriteOutcome, WriteStatus
+from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.clients.auth import AuthContext
 from app.clients.commerce_client import CommerceClient
 from app.clients.models import AfterSalesStatus, RefundResult
@@ -305,6 +306,7 @@ async def execute_refund_write(
     tools: RefundWriteTools,
     intent: RefundWriteIntent,
     persist_intent: Callable[[WriteIntent, WriteOutcome], Awaitable[None]],
+    record_trace: TraceSink | None = None,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     may_already_have_committed: bool = False,
     start_step_index: int = 1,
@@ -315,6 +317,10 @@ async def execute_refund_write(
     licenses a blind retry: the executor first calls get_after_sales_status with the same
     idempotency key. Only an authoritative empty result may lead to another attempt, and every
     attempt reuses the original key.
+
+    ``record_trace`` receives each finished call, which is why it is a parameter rather than
+    something the caller reconstructs later: the envelope stops existing when this function returns,
+    and the evidence row needs the latency and correlation id that only exist inside it.
     """
     if not 1 <= max_attempts <= MAX_ATTEMPTS_LIMIT:
         raise ValueError(f"max_attempts must be between 1 and {MAX_ATTEMPTS_LIMIT}")
@@ -379,6 +385,13 @@ async def execute_refund_write(
                 result=result,
             )
         )
+        report_tool_call(
+            record_trace,
+            step_index=next_step_index,
+            tool_name="create_refund_request",
+            envelope=result,
+            input_summary={"orderId": intent.order_id, "reasonCode": intent.reason_code},
+        )
         next_step_index += 1
 
         if result.trace_id is not None:
@@ -405,6 +418,7 @@ async def execute_refund_write(
                 order_id=intent.order_id,
                 idempotency_key=intent.idempotency_key,
                 step_index=next_step_index,
+                record_trace=record_trace,
             )
             history.append(entry)
             next_step_index += 1
@@ -456,6 +470,7 @@ async def _tool_confirmed_refunds(
     order_id: str,
     idempotency_key: str,
     step_index: int,
+    record_trace: TraceSink | None = None,
 ) -> tuple[list[RefundResult] | None, ToolHistoryEntry]:
     """Return key-scoped refunds, preserving failed-read versus authoritative-empty semantics."""
     result = await tools.get_after_sales_status(
@@ -466,6 +481,13 @@ async def _tool_confirmed_refunds(
         step_index=step_index,
         tool_name="get_after_sales_status",
         result=result,
+    )
+    report_tool_call(
+        record_trace,
+        step_index=step_index,
+        tool_name="get_after_sales_status",
+        envelope=result,
+        input_summary={"orderId": order_id},
     )
     if not result.success:
         return None, history

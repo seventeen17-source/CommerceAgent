@@ -48,6 +48,7 @@ from app.agent.routing import (
     terminal_decision_for,
 )
 from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, advance
+from app.agent.tool_tracing import TraceSink
 from app.agent.verify_business_state import AfterSalesReadTools, verify_refund_business_state
 from app.tools.registry import ToolRegistry
 
@@ -84,6 +85,10 @@ class GraphDeps:
     writes: RefundWriteTools
     after_sales: AfterSalesReadTools
     persist_intent: PersistWriteIntent
+    #: Where a finished Tool call is reported. Optional so the dev harnesses and unit tests can
+    #: build these nodes without a store; production always wires one, because ``build_agent_graph``
+    #: will not build without it.
+    record_trace: TraceSink | None = None
 
 
 def spend_one_step(state: AgentState) -> AgentState:
@@ -324,6 +329,7 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             tools=deps.writes,
             intent=intent,
             persist_intent=persist,
+            record_trace=deps.record_trace,
             may_already_have_committed=write_may_already_have_committed(state),
             start_step_index=state.step_count,
         )

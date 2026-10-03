@@ -577,6 +577,7 @@ class GraphRunDriver:
                     tools=tools,
                     model_client=model_client,
                     persist_intent=session.persist_intent,
+                    record_trace=session.record_trace,
                 )
                 return await drive_graph(graph, session)
         except RunStoreError as exc:

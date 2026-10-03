@@ -19,9 +19,19 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.tools.models import ToolEnvelope, ToolRisk
+from app.tools.registry import ToolRegistry
 from app.trace.checkpoint import RiskLevel, ToolTraceRecord, ToolTraceStatus
 
-__all__ = ["ToolCallFacts", "TraceSink", "build_trace_record", "risk_level_for", "status_for"]
+__all__ = [
+    "ToolCallFacts",
+    "TraceSink",
+    "TraceWriter",
+    "bind_risk",
+    "build_trace_record",
+    "report_tool_call",
+    "risk_level_for",
+    "status_for",
+]
 
 #: Java's normalized "we do not know whether it happened" code (T029). It is a TIMEOUT rather than
 #: an ERROR because the request may still be in flight on the other side.
@@ -57,7 +67,58 @@ class ToolCallFacts:
 
 #: How a call site reports one finished Tool call. Synchronous because the store's writer is, and a
 #: sink that cannot block is one fewer thing to reason about on the money path.
+#:
+#: Call sites do **not** classify risk: the registry owns that, so a signature asking them for it
+#: would be asking for knowledge they do not have.
 type TraceSink = Callable[[ToolCallFacts], None]
+
+#: The session-side counterpart: facts plus the classification the registry supplied.
+type TraceWriter = Callable[[ToolCallFacts, ToolRisk | None], None]
+
+
+def report_tool_call(
+    sink: TraceSink | None,
+    *,
+    step_index: int,
+    tool_name: str,
+    envelope: ToolEnvelope[Any],
+    input_summary: dict[str, Any] | None = None,
+) -> None:
+    """Report one finished call, or do nothing when no sink is wired.
+
+    Optional on purpose: the modules that call Tools are also used by the dev harnesses and by unit
+    tests, and "no sink" must mean "no trace row" rather than "crash". Production always wires one -
+    ``build_agent_graph`` will not build without it.
+    """
+    if sink is None:
+        return
+    sink(
+        ToolCallFacts(
+            step_index=step_index,
+            tool_name=tool_name,
+            envelope=envelope,
+            input_summary=input_summary or {},
+        )
+    )
+
+
+def bind_risk(writer: TraceWriter, registry: ToolRegistry) -> TraceSink:
+    """Turn a session-side writer into the sink a call site needs.
+
+    An unregistered tool name classifies as ``None``, which the risk mapper already turns into HIGH.
+    It deliberately does not propagate the registry's refusal: refusing to *classify* a call must
+    not turn into refusing to *record* it, because the record is what a reviewer would use to find
+    out that something unregistered was called at all.
+    """
+
+    def sink(facts: ToolCallFacts) -> None:
+        try:
+            risk: ToolRisk | None = registry.get(facts.tool_name).risk
+        except ValueError:
+            risk = None
+        writer(facts, risk)
+
+    return sink
 
 
 def risk_level_for(risk: ToolRisk | None) -> RiskLevel:

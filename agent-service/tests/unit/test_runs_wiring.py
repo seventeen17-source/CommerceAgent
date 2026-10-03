@@ -28,6 +28,10 @@ async def unused_persist(
     raise AssertionError("assembling the graph must not persist anything")
 
 
+def unused_trace(facts: Any, risk: Any) -> None:
+    raise AssertionError("assembling the graph must not record anything")
+
+
 def make_state(**overrides: Any) -> AgentState:
     base: dict[str, Any] = {
         "run_id": uuid4(),
@@ -46,6 +50,7 @@ def test_the_production_graph_contains_every_node() -> None:
         tools=CommerceTools(client=MagicMock(), auth=MagicMock()),
         model_client=MagicMock(),
         persist_intent=unused_persist,
+        record_trace=unused_trace,
     )
 
     assembled = {str(name) for name in graph.get_graph().nodes}

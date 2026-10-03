@@ -20,6 +20,8 @@ import logging
 from app.agent.graph import CompiledGraph, GraphState
 from app.agent.routing import Decision, Node, TerminalDecision
 from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, advance
+from app.agent.tool_tracing import ToolCallFacts, build_trace_record
+from app.tools.models import ToolRisk
 from app.trace.checkpoint import RunRecord, Transition
 from app.trace.errors import RunStoreError, RunVersionConflictError, TerminalRunError
 from app.trace.store import RunStore
@@ -94,6 +96,17 @@ class RunSession:
         """
         moved = advance(state, write_intent=intent, write=outcome)
         return self.checkpoint(state=moved, current_node=Node.REFUND_WRITE.value)
+
+    def record_trace(self, facts: ToolCallFacts, risk: ToolRisk | None) -> None:
+        """Write one Tool call to the cross-service evidence table.
+
+        Here rather than at the call site because two of the three inputs are this session's: the
+        run id, and the store. Risk arrives as a parameter because the registry owns it - a call
+        site that had to classify its own call would be guessing at something it never sees.
+        """
+        self._store.record_tool_trace(
+            build_trace_record(run_id=self._record.run_id, facts=facts, risk=risk)
+        )
 
     def finish(
         self,

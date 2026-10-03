@@ -27,7 +27,9 @@ from app.agent.state import (
     WriteStatus,
     advance,
 )
-from app.trace.checkpoint import RunRecord
+from app.agent.tool_tracing import ToolCallFacts
+from app.tools.models import ToolEnvelope, ToolRisk
+from app.trace.checkpoint import RiskLevel, RunRecord, ToolTraceStatus
 from app.trace.db import ConnectionFactory
 from app.trace.errors import RunStoreError, RunVersionConflictError
 from app.trace.store import PostgresRunStore
@@ -232,3 +234,63 @@ async def test_a_failing_walk_leaves_a_failed_row_and_not_a_running_one(
     stored = store.get_run(record.run_id)
     assert stored.status is RunStatus.FAILED
     assert stored.error_code == FAILED_RUN_ERROR_CODE
+
+
+@pytest.mark.asyncio
+async def test_a_finished_call_becomes_a_queryable_trace_row(
+    store_and_run: tuple[PostgresRunStore, RunRecord],
+) -> None:
+    """The evidence row keeps the Tool's own latency and the backend's correlation id."""
+    store, record = store_and_run
+    session = RunSession(store, record)
+    envelope = ToolEnvelope[Any].model_validate(
+        {
+            "success": True,
+            "data": {"orderId": "order-001"},
+            "latencyMs": 42,
+            "traceId": "java-trace-0009",
+        }
+    )
+
+    session.record_trace(
+        ToolCallFacts(
+            step_index=4,
+            tool_name="create_refund_request",
+            envelope=envelope,
+            input_summary={"orderId": "order-001"},
+        ),
+        ToolRisk.HIGH_WRITE,
+    )
+
+    traces = store.list_tool_traces(record.run_id)
+    assert len(traces) == 1
+    stored = traces[0]
+    assert stored.latency_ms == 42
+    assert stored.trace_id == "java-trace-0009"
+    assert stored.risk_level is RiskLevel.HIGH
+    assert stored.status is ToolTraceStatus.SUCCESS
+    assert stored.step_index == 4
+    assert stored.input_summary == {"orderId": "order-001"}
+    assert stored.output_summary == {}
+
+
+@pytest.mark.asyncio
+async def test_a_call_whose_backend_sent_no_id_is_still_findable(
+    store_and_run: tuple[PostgresRunStore, RunRecord],
+) -> None:
+    """A local id has to be written, because an empty column cannot be told from a lost row."""
+    store, record = store_and_run
+    session = RunSession(store, record)
+    envelope = ToolEnvelope[Any].model_validate(
+        {"success": True, "data": {"orderId": "order-001"}, "latencyMs": 7}
+    )
+
+    session.record_trace(
+        ToolCallFacts(step_index=1, tool_name="get_logistics", envelope=envelope),
+        ToolRisk.READ_PRIVACY_MEDIUM,
+    )
+
+    stored = store.list_tool_traces(record.run_id)[0]
+    assert stored.trace_id.startswith("local-")
+    assert stored.output_summary == {"traceIdSource": "LOCAL"}
+    assert stored.risk_level is RiskLevel.MEDIUM

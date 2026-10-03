@@ -27,6 +27,7 @@ from app.agent.nodes import (
 )
 from app.agent.openai_evidence_routing import OpenAICompatibleEvidenceDecisionModel
 from app.agent.openai_request_understanding import OpenAICompatibleRequestUnderstandingModel
+from app.agent.tool_tracing import TraceWriter, bind_risk
 from app.llm.openai_compatible import OpenAICompatibleJsonClient
 from app.tools import CommerceTools, ToolRegistry
 
@@ -38,23 +39,28 @@ def build_agent_graph(
     tools: CommerceTools,
     model_client: OpenAICompatibleJsonClient,
     persist_intent: PersistWriteIntent,
+    record_trace: TraceWriter,
 ) -> CompiledGraph:
     """Build the production graph: every dependency bound, every node present.
 
-    ``persist_intent`` is the one dependency that comes from the run rather than from the request:
-    it is the seam that makes a write intent durable before the request that spends money is sent,
-    so it has to be bound to the session that owns this run's version.
+    Two dependencies come from the run rather than from the request, and both are required here so a
+    production assembly cannot quietly go without them: ``persist_intent`` makes a write intent
+    durable before the request that spends money is sent, and ``record_trace`` records every Tool
+    call while its envelope still exists. Risk classification is bound below rather than asked of
+    the call sites, because the registry is what knows it.
     """
+    registry = ToolRegistry(tools=tools)
     deps = GraphDeps(
         understanding=OpenAICompatibleRequestUnderstandingModel(model_client),
         orders=tools,
         evidence_model=OpenAICompatibleEvidenceDecisionModel(model_client),
         evidence=tools,
-        registry=ToolRegistry(tools=tools),
+        registry=registry,
         eligibility=tools,
         writes=tools,
         after_sales=tools,
         persist_intent=persist_intent,
+        record_trace=bind_risk(record_trace, registry),
     )
     return build_graph(
         {
