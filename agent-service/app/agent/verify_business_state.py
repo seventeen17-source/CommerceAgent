@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from app.agent.state import VerificationOutcome, VerificationStatus
+from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.clients.models import AfterSalesStatus
 from app.tools.models import ToolEnvelope
 
@@ -35,17 +36,30 @@ async def verify_refund_business_state(
     tools: AfterSalesReadTools,
     order_id: str,
     idempotency_key: str,
+    step_index: int = 0,
     expected_refund_request_id: str | None = None,
+    record_trace: TraceSink | None = None,
 ) -> VerificationOutcome:
     """Verify one logical refund by reading authority, never by trusting the write response alone.
 
     The read is scoped by the same durable idempotency key used for the write. An empty refund list
     is a known negative fact. A failed read is UNKNOWN because the Agent cannot establish reality.
     If a direct write response supplied a refund id, the authoritative row must match it.
+
+    The read is reported to ``record_trace`` but deliberately adds no state history: it is
+    cross-service evidence, and a `ToolHistoryEntry` for it would grow every payload for a reader
+    the graph does not have.
     """
     result = await tools.get_after_sales_status(
         order_id,
         idempotency_key=idempotency_key,
+    )
+    report_tool_call(
+        record_trace,
+        step_index=step_index,
+        tool_name="get_after_sales_status",
+        envelope=result,
+        input_summary={"orderId": order_id},
     )
     if not result.success:
         return VerificationOutcome(

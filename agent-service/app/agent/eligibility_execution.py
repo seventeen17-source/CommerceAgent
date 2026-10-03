@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.agent.evidence_routing import EvidenceAction, EvidenceGuardDecision, EvidenceGuardStatus
 from app.agent.state import EligibilitySnapshot, ToolHistoryEntry
+from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.clients.models import EligibilityDecision
 from app.tools.models import ToolEnvelope
 
@@ -53,6 +54,7 @@ async def check_eligibility(
     resolved_order_id: str,
     step_index: int,
     tools: EligibilityTools,
+    record_trace: TraceSink | None = None,
 ) -> EligibilityExecutionResult:
     """Call Java only after the evidence stage explicitly hands off to eligibility."""
     if decision.status is not EvidenceGuardStatus.ALLOWED:
@@ -73,6 +75,13 @@ async def check_eligibility(
         error_code=result.error_code,
         retryable=result.retryable,
         trace_id=result.trace_id,
+    )
+    report_tool_call(
+        record_trace,
+        step_index=step_index,
+        tool_name="check_after_sales_eligibility",
+        envelope=result,
+        input_summary={"orderId": resolved_order_id, "reasonCode": US1_ELIGIBILITY_REASON_CODE},
     )
 
     if not result.success:

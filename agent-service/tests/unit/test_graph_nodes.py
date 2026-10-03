@@ -738,6 +738,7 @@ def make_write_deps(
     writes: Any = None,
     after_sales: Any = None,
     persist: Any = None,
+    record_trace: Any = None,
 ) -> GraphDeps:
     unused = UnusedDependency()
     return GraphDeps(
@@ -750,6 +751,7 @@ def make_write_deps(
         writes=writes or unused,
         after_sales=after_sales or unused,
         persist_intent=persist or unused_persist,
+        record_trace=record_trace,
     )
 
 
@@ -812,6 +814,33 @@ class TestEligibilityNode:
 
         assert update["decision"].safe_stop_reason is SafeStopReason.ELIGIBILITY_UNAVAILABLE
         assert route_after_eligibility(update["state"], update["decision"]) is Node.SAFE_STOP
+
+    @pytest.mark.asyncio
+    async def test_a_finished_read_is_reported_to_the_trace_sink(self) -> None:
+        """The seam has to reach the call site, or it is a parameter nobody uses."""
+        reported: list[Any] = []
+        nodes = build_write_nodes(
+            make_write_deps(eligibility=FakeEligibilityTools(), record_trace=reported.append)
+        )
+
+        await nodes[Node.CHECK_ELIGIBILITY]({"state": make_state(resolved_order_id="order-001")})
+
+        assert [facts.tool_name for facts in reported] == ["check_after_sales_eligibility"]
+        expected_summary = {"orderId": "order-001", "reasonCode": "LOGISTICS_DELAY"}
+        assert reported[0].input_summary == expected_summary
+        assert reported[0].envelope.latency_ms == 1
+        assert reported[0].step_index == 1
+
+    @pytest.mark.asyncio
+    async def test_no_sink_means_no_report_rather_than_a_crash(self) -> None:
+        """The dev harnesses and these tests build the same nodes without a store."""
+        nodes = build_write_nodes(make_write_deps(eligibility=FakeEligibilityTools()))
+
+        update = await nodes[Node.CHECK_ELIGIBILITY](
+            {"state": make_state(resolved_order_id="order-001")}
+        )
+
+        assert update["state"].eligibility is not None
 
 
 class TestRefundWriteNode:

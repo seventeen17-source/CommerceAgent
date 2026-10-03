@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.agent.evidence_routing import EvidenceGuardDecision, EvidenceGuardStatus
 from app.agent.state import EvidenceItem, ToolHistoryEntry
+from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.clients.models import LogisticsSnapshot
 from app.tools.models import ToolEnvelope
 
@@ -37,6 +38,7 @@ async def execute_read_evidence(
     resolved_order_id: str,
     step_index: int,
     tools: EvidenceReadTools,
+    record_trace: TraceSink | None = None,
 ) -> EvidenceExecutionResult:
     """Execute exactly one guard-approved read and preserve success/failure trace facts."""
     if decision.status is not EvidenceGuardStatus.ALLOWED:
@@ -52,6 +54,13 @@ async def execute_read_evidence(
         error_code=result.error_code,
         retryable=result.retryable,
         trace_id=result.trace_id,
+    )
+    report_tool_call(
+        record_trace,
+        step_index=step_index,
+        tool_name="get_logistics",
+        envelope=result,
+        input_summary={"orderId": resolved_order_id},
     )
 
     if not result.success:

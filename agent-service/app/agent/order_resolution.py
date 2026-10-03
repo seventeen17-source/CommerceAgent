@@ -8,12 +8,13 @@ later user story (T043+).
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agent.request_understanding import UnderstoodRequest
-from app.agent.state import Identifier
+from app.agent.state import Identifier, ToolHistoryEntry
+from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.clients.models import OrderSnapshot, OrderSummary
 from app.tools.models import ToolEnvelope
 
@@ -45,6 +46,9 @@ class OrderResolution(BaseModel):
     error_code: str | None = Field(default=None, max_length=100)
     retryable: bool = False
     trace_id: str | None = Field(default=None, max_length=128)
+    #: What was read, in order. Control-plane only - this model is never persisted - so it costs no
+    #: payload bytes, and it is what lets the node put these reads into the run's own history.
+    history: list[ToolHistoryEntry] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_resolution_shape(self) -> OrderResolution:
@@ -79,18 +83,40 @@ async def resolve_single_order(
     understood: UnderstoodRequest,
     *,
     tools: OrderReadTools,
+    step_index: int = 0,
+    record_trace: TraceSink | None = None,
 ) -> OrderResolution:
-    """Resolve one order without trusting a model-provided id as authority."""
+    """Resolve one order without trusting a model-provided id as authority.
+
+    Both reads are recorded, because both are Java requests a reviewer may need to correlate: a
+    compact entry for the run's own history, and the envelope handed to ``record_trace`` while it
+    still exists. Nothing here decides what a failure *means* - the caller routes; this reports.
+    """
     if understood.mentioned_order_id is not None:
-        return await _confirm_candidate(understood.mentioned_order_id, tools=tools)
+        return await _confirm_candidate(
+            understood.mentioned_order_id,
+            tools=tools,
+            step_index=step_index,
+            record_trace=record_trace,
+        )
 
     listed = await tools.list_user_orders()
+    listed_entry = _history_entry(
+        step_index=step_index, tool_name="list_user_orders", result=listed
+    )
+    report_tool_call(
+        record_trace,
+        step_index=step_index,
+        tool_name="list_user_orders",
+        envelope=listed,
+    )
     if not listed.success:
         return OrderResolution(
             status=OrderResolutionStatus.UNRESOLVED,
             error_code=listed.error_code,
             retryable=listed.retryable,
             trace_id=listed.trace_id,
+            history=[listed_entry],
         )
 
     listed_orders = listed.data
@@ -98,18 +124,40 @@ async def resolve_single_order(
         raise ValueError("successful list_user_orders Tool result is missing data")
     candidate_ids = [order.order_id for order in listed_orders]
     if not candidate_ids:
-        return OrderResolution(status=OrderResolutionStatus.UNRESOLVED)
+        return OrderResolution(status=OrderResolutionStatus.UNRESOLVED, history=[listed_entry])
     if len(candidate_ids) > 1:
         return OrderResolution(
             status=OrderResolutionStatus.AMBIGUOUS,
             candidate_order_ids=candidate_ids,
+            history=[listed_entry],
         )
 
-    return await _confirm_candidate(candidate_ids[0], tools=tools)
+    return await _confirm_candidate(
+        candidate_ids[0],
+        tools=tools,
+        step_index=step_index + 1,
+        record_trace=record_trace,
+        prior_history=[listed_entry],
+    )
 
 
-async def _confirm_candidate(order_id: str, *, tools: OrderReadTools) -> OrderResolution:
+async def _confirm_candidate(
+    order_id: str,
+    *,
+    tools: OrderReadTools,
+    step_index: int = 0,
+    record_trace: TraceSink | None = None,
+    prior_history: list[ToolHistoryEntry] | None = None,
+) -> OrderResolution:
+    leading = list(prior_history or [])
     confirmed = await tools.get_order(order_id)
+    confirmed_entry = _history_entry(step_index=step_index, tool_name="get_order", result=confirmed)
+    report_tool_call(
+        record_trace,
+        step_index=step_index,
+        tool_name="get_order",
+        envelope=confirmed,
+    )
     if not confirmed.success:
         return OrderResolution(
             status=OrderResolutionStatus.UNRESOLVED,
@@ -117,6 +165,7 @@ async def _confirm_candidate(order_id: str, *, tools: OrderReadTools) -> OrderRe
             error_code=confirmed.error_code,
             retryable=confirmed.retryable,
             trace_id=confirmed.trace_id,
+            history=[*leading, confirmed_entry],
         )
 
     confirmed_order = confirmed.data
@@ -128,4 +177,22 @@ async def _confirm_candidate(order_id: str, *, tools: OrderReadTools) -> OrderRe
         resolved_order_id=confirmed_order.order_id,
         order=confirmed_order,
         trace_id=confirmed.trace_id,
+        history=[*leading, confirmed_entry],
+    )
+
+
+def _history_entry(
+    *,
+    step_index: int,
+    tool_name: str,
+    result: ToolEnvelope[Any],
+) -> ToolHistoryEntry:
+    """The state-side sibling of a trace row: compact, and never a substitute for the row."""
+    return ToolHistoryEntry(
+        step_index=step_index,
+        tool_name=tool_name,
+        success=result.success,
+        error_code=result.error_code,
+        retryable=result.retryable,
+        trace_id=result.trace_id,
     )

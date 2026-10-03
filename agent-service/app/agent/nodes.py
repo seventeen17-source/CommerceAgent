@@ -141,14 +141,25 @@ def build_read_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
                 resolution=None,
             )
 
-        resolution = await resolve_single_order(understood, tools=deps.orders)
+        resolution = await resolve_single_order(
+            understood,
+            tools=deps.orders,
+            step_index=state.step_count,
+            record_trace=deps.record_trace,
+        )
+        history = [*state.tool_history, *resolution.history]
         if resolution.resolved_order_id is None:
-            moved = advance(state, candidate_order_ids=list(resolution.candidate_order_ids))
+            moved = advance(
+                state,
+                candidate_order_ids=list(resolution.candidate_order_ids),
+                tool_history=history,
+            )
         else:
             moved = advance(
                 state,
                 candidate_order_ids=list(resolution.candidate_order_ids),
                 resolved_order_id=resolution.resolved_order_id,
+                tool_history=history,
             )
         return GraphUpdate(
             state=moved,
@@ -222,6 +233,7 @@ def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             resolved_order_id=state.resolved_order_id,
             step_index=state.step_count,
             tools=deps.evidence,
+            record_trace=deps.record_trace,
         )
         history = [*state.tool_history, result.history]
         if result.evidence is None:
@@ -271,6 +283,7 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             resolved_order_id=state.resolved_order_id,
             step_index=state.step_count,
             tools=deps.eligibility,
+            record_trace=deps.record_trace,
         )
         history = [*state.tool_history, result.history]
         if result.eligibility is None:
@@ -368,7 +381,9 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             tools=deps.after_sales,
             order_id=state.resolved_order_id,
             idempotency_key=intent.idempotency_key,
+            step_index=state.step_count,
             expected_refund_request_id=state.write.resource_id,
+            record_trace=deps.record_trace,
         )
         moved = advance(state, verification=verification)
         return GraphUpdate(state=moved, decision=Decision())
