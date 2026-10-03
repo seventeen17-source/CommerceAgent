@@ -287,6 +287,15 @@ Java      负责业务事实（什么是真的）
    （凭据是每请求的；共享图对象必然持有某一个调用者的凭据——等同于共享一个带用户权限的数据库会话）。
    `CommerceTools` 一个对象同时满足 orders / evidence / eligibility / writes / after_sales 五个协议，
    **所以凭据只绑在一处**；这一点由 mypy 检查，而不是由注释保证。
+9. **第一次 invocation 的唯一入口是 `POST /runs`**：契约里没有 execute 端点，而 `/input` 与 `/resume`
+   都要求 run 处于 `WAITING_*`——所以"创建时不驱动"等于这个 run **永远不动**。驱动因此做成可注入的
+   `RunDriver` 接缝（`check` + `run` 两个方法）：**`check` 在写任何东西之前**回答"现在能不能跑"，
+   没配模型就 503 且库里不留任何东西。否则会留下一个没人能推进的 `RUNNING` run，而 `RUNNING`
+   刻意不可 resume——它和"正在干活"长得一模一样。拆成两个方法也让测试替身**不必假装有凭据**。
+10. **写终态之前必须先写最后一个边界**（顺序，不是风格）：`checkpoint_state` 拒绝**已终态**的 run
+   （`TerminalRunError`），所以若先 `transition` 再 `checkpoint`，最后一批**只存在于 payload 的事实**
+   （例如 `verification`）会永远落不了盘——run 说 COMPLETED，payload 里却什么都没有，正是本设计一直在
+   消除的"两个真相"。**这条顺序在表达一条不变量：在关门之前把最后一批事实写进去。**
 
 ---
 
@@ -399,11 +408,10 @@ Java      负责业务事实（什么是真的）
    而 `ToolHistoryEntry.trace_id` 可空（Tool 未返回 trace id 时）——硬写就得**编造一个 trace id**，
    那是伪造跨服务证据；另外 `risk_level` 不在 history entry 上（它在 registry 的 risk metadata 里）。
    接线前必须先定两件事：**缺 trace id 的调用怎么记**、**risk 从哪里取**。
-9. **端点级（HTTP）驱动用例尚缺**：`/input` 与 `/resume` 现在会真的驱动图，但这条路径目前只有单元测试覆盖
-   （组装完整性 + 文本合并规则），**没有**走 HTTP 的 happy-path 用例。真库层面的接缝已由
-   `tests/integration/test_runtime_seam.py` 覆盖（6 个用例，真实 PostgreSQL：版本递增与行同步、
-   payload 快照不得改 status、过期版本被拒且败者无改、intent 回调后可读回、驱动收终态、失败留 FAILED 行）；
-   要做到 HTTP 级确定性，还需要向端点注入一个脚本化模型客户端（否则用例会打真实 LLM）。
+9. **`/input` 与 `/resume` 的 HTTP happy-path 用例尚缺**：`POST /runs` 已有（断言它确实调用了 driver，
+   而不需要模型），但这两个入口目前只有单元测试覆盖文本合并规则与组装。它们要走到"认领 → 驱动"，
+   同样需要注入一个脚本化 driver 或脚本化模型客户端，否则用例会打真实 LLM。
+   真库层面的接缝已由 `tests/integration/test_runtime_seam.py` 覆盖（6 个用例，真实 PostgreSQL）。
 10. **本机 `pytest` 的 6 个 skip 与数据库无关**（曾被误判为"需要 `DATABASE_URL`"）：它们全部来自
    `tests/unit/test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化。**本机 PostgreSQL 是可达的**，
    集成用例（`test_trace_store` / `test_run_api` / `test_runtime_seam`）都在这里真实运行。

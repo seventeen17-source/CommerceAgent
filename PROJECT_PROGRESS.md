@@ -6,11 +6,13 @@
 
 - **当前 Phase**：Phase 3 — US1 MVP
 - **当前 Tasks**：T032 — LangGraph 装配（`graph.py` / `routing.py` / `nodes.py` / `runtime.py` / `wiring.py`），**进行中、未验收**。
-  - **已完成**：`state.advance()` 作为唯一校验变更入口；全部条件边的路由规则与 step/retry 预算；图的装配与拓扑校验（去向显式声明、缺节点启动即报错）；**10 / 10 个节点**；**持久化接缝**（`runtime.py` 的 `RunSession`：`checkpoint_state` / `persist_intent` / `transition` 三个 seam + 版本跟踪，边界写延迟一步使 `next_action` 是事实而非猜测）；**失败收尸**（非终态出口一律先落 `FAILED` 再原样抛出；版本冲突与已终态两种预期拒绝静默）；**生产接线**（`runs.py` 的 `/input`、`/resume` 现在真的组装图并驱动，`wiring.py` 是 10 节点 + 9 依赖的唯一组装点）。
-  - **未完成**：**5173 live 验收**、**工具 trace 表接线**（`agent.tool_executions`；障碍见设计文档 §10）、**端点级（HTTP）驱动用例**（`/input` 目前只有单元测试覆盖组装与文本规则，没有走 HTTP 的 happy-path 用例）。
-  - **真库 E2E 已在本机跑通**：`tests/integration/test_runtime_seam.py` 6 个用例打在**真实 PostgreSQL** 上（版本递增与行同步、payload 快照不得改 status、过期版本被拒且败者什么都没改、intent 回调后可从行读回、驱动走完由 `transition` 落终态、失败走路留下 FAILED 行）。本机默认连接串见 `tests/conftest.py`。
-  - **门禁（2026-09-29 最后一次全绿）**：`ruff check --no-cache` All checks passed / `ruff format --check` **83 files** / `mypy app` **Success: 47 source files** / `pytest -q` **449 passed, 6 skipped**。那 6 个 skip **全部**来自 `test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化，**与数据库无关**（曾误判为"需要 DATABASE_URL"，见 devlog 的更正）。
-  - 分支：`feat/us1-langgraph-assembly`（从最新 dev 派生，**21 个提交已推送**，与 origin 0/0）。
+  - **已完成**：`state.advance()` 作为唯一校验变更入口；全部条件边的路由规则与 step/retry 预算；图的装配与拓扑校验（去向显式声明、缺节点启动即报错）；**10 / 10 个节点**；**持久化接缝**（`runtime.py` 的 `RunSession`：`checkpoint_state` / `persist_intent` / `transition` 三个 seam + 版本跟踪，边界写延迟一步使 `next_action` 是事实而非猜测）；**失败收尸**（非终态出口一律先落 `FAILED` 再原样抛出；版本冲突与已终态两种预期拒绝静默）；**生产接线**（`wiring.py` 是 10 节点 + 9 依赖的唯一组装点；`POST /runs`、`/input`、`/resume` 三个入口都会组装图并驱动 run）。
+  - **`POST /runs` 是第一次 invocation 的唯一入口**：契约没有 execute 端点，而 `/input` 与 `/resume` 都要求 run 处于 `WAITING_*`，所以创建时不驱动就等于"永远不动"。驱动做成了可注入的 `RunDriver` 接缝（`check` + `run` 两个方法）：**`check` 在写任何东西之前**回答"现在能不能跑"，没配模型 → 503 且库中不留任何东西——否则会留下一个没人能推进的 `RUNNING` run，而 `RUNNING` 刻意不可 resume。
+  - **未完成**：**5173 live 验收**、**工具 trace 表接线**（`agent.tool_executions`；障碍见设计文档 §10）、**`/input` 与 `/resume` 的 HTTP happy-path 用例**（`POST /runs` 已有：断言它确实调用了 driver；这两个入口目前只有单元测试覆盖文本规则与组装）。
+  - **真库 E2E 已在本机跑通**：`tests/integration/test_runtime_seam.py` 6 个用例打在**真实 PostgreSQL** 上（版本递增与行同步、payload 快照不得改 status、过期版本被拒且败者什么都没改、intent 回调后可从行读回、驱动走完由 `transition` 落终态、失败走路留下 FAILED 行）。**集成套件共 65 passed**（含 T017/T018 既有用例）。
+  - **门禁（2026-09-29 最后一次全绿，Docker 运行时）**：`ruff check --no-cache` All checks passed / `ruff format --check` **83 files** / `mypy app` **Success: 47 source files** / `pytest -q` **451 passed, 6 skipped**（6 个 skip 全部来自 `test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化，与数据库无关 —— 曾误判为"需要 DATABASE_URL"，见 devlog 的更正）。
+  - **环境事实（会改变上面的测试数字，不是代码问题）**：PostgreSQL 跑在 `infra/docker-compose.yml` 的 `postgres` 容器里。**Docker Desktop 没启动时，集成用例按设计 skip（约 49 个），而不是 fail**——`tests/conftest.py` 的既定取舍："缺本地数据库是环境事实，为它变红的套件会训练人忽略红"。此时 `pytest -q` 约为 **402 passed, 55 skipped**。要跑真库验收：`cd infra; docker compose up -d postgres`。
+  - 分支：`feat/us1-langgraph-assembly`（从最新 dev 派生，**25 个提交已推送**，与 origin 0/0）。
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS
