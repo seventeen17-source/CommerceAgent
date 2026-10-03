@@ -536,6 +536,7 @@ export function T016FlowPlayground() {
       step !== 'tool-check-eligibility' &&
       step !== 'tool-after-sales' &&
       step !== 't030-live-agent' &&
+      step !== 't032-live-run' &&
       !runId.trim()
     ) {
       setResult({
