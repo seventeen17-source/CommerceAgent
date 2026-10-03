@@ -427,7 +427,7 @@ class PostgresRunStore(RunStore):
             cursor.execute(
                 """
                 SELECT run_id, step_index, tool_name, risk_level, status, trace_id, error_code,
-                       retryable, latency_ms
+                       retryable, latency_ms, input_summary, output_summary
                 FROM agent.tool_executions
                 WHERE run_id = %s
                 ORDER BY step_index
@@ -443,6 +443,8 @@ class PostgresRunStore(RunStore):
                 risk_level=row["risk_level"],
                 status=row["status"],
                 trace_id=row["trace_id"],
+                input_summary=row["input_summary"] or {},
+                output_summary=row["output_summary"] or {},
                 error_code=row["error_code"],
                 retryable=row["retryable"],
                 latency_ms=row["latency_ms"],
