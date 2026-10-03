@@ -261,6 +261,19 @@ def test_creating_a_run_advances_it_immediately(client: TestClient) -> None:
     assert str(driver.advanced[0].run_id) == body["runId"]
 
 
+def test_the_run_view_publishes_the_facts_and_not_a_success_claim(client: TestClient) -> None:
+    """T033: a run that has not been verified must not look like one that has."""
+    body = create_run_via_api(client)
+
+    assert isinstance(body["version"], int)
+    assert body["checkpointCompactedAt"] is None
+    # This driver advances nothing, so nothing has been verified and no refund id may appear.
+    assert body["verificationStatus"] == "NOT_RUN"
+    assert body["verifiedRefundRequestId"] is None
+    assert body["finalMessage"] is None
+    assert body["approvalRequestId"] is None
+
+
 def test_create_run_requires_a_credential(client: TestClient) -> None:
     response = client.post("/api/v1/agent/runs", json={"message": "refund please"})
     assert response.status_code == 401

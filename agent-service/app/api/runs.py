@@ -42,7 +42,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.agent.runtime import RunSession, drive_graph
-from app.agent.state import AgentState, RunStatus, advance
+from app.agent.state import AgentState, RunStatus, VerificationStatus, advance
 from app.agent.wiring import build_agent_graph
 from app.clients.commerce_client import CommerceClient
 from app.config.settings import Settings
@@ -139,6 +139,15 @@ class AgentRunView(BaseModel):
     ``state_json``: the raw payload contains the untrusted user request and the collected evidence,
     which no UI needs in order to render a run. What it exposes is the queryable projection --
     exactly the columns that exist on the row for this purpose.
+
+    Three fields come from the payload rather than the row, and they are the ones T033 exists for:
+    ``verificationStatus`` and ``verifiedRefundRequestId`` say what authority *confirmed*, and
+    ``finalMessage`` says it in words. The rule they share: **success is signed by
+    ``VERIFIED_SUCCESS``**, never by a write response and never by a model claiming it.
+
+    ``checkpointCompactedAt`` is published for the one ambiguity those payload fields would
+    otherwise hide: ``null`` verification means either "nothing was verified" or "the payload was
+    retired by retention", and only this timestamp tells the two apart.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -151,8 +160,19 @@ class AgentRunView(BaseModel):
     next_action: str | None = Field(default=None, serialization_alias="nextAction")
     step_count: int = Field(serialization_alias="stepCount")
     final_action: str | None = Field(default=None, serialization_alias="finalAction")
+    final_message: str | None = Field(default=None, serialization_alias="finalMessage")
+    approval_request_id: str | None = Field(default=None, serialization_alias="approvalRequestId")
+    verification_status: VerificationStatus | None = Field(
+        default=None, serialization_alias="verificationStatus"
+    )
+    verified_refund_request_id: str | None = Field(
+        default=None, serialization_alias="verifiedRefundRequestId"
+    )
     error_code: str | None = Field(default=None, serialization_alias="errorCode")
     version: int
+    checkpoint_compacted_at: datetime | None = Field(
+        default=None, serialization_alias="checkpointCompactedAt"
+    )
 
 
 class RunEvent(BaseModel):
@@ -187,6 +207,7 @@ class RunEvent(BaseModel):
 
 
 def _view(record: RunRecord) -> AgentRunView:
+    state = record.to_state()
     return AgentRunView(
         run_id=str(record.run_id),
         status=record.status,
@@ -196,9 +217,75 @@ def _view(record: RunRecord) -> AgentRunView:
         next_action=record.next_action,
         step_count=record.step_count,
         final_action=record.final_action,
+        final_message=_final_message(record.status, state),
+        approval_request_id=_approval_request_id(state),
+        verification_status=state.verification.status if state is not None else None,
+        verified_refund_request_id=_verified_refund_request_id(state),
         error_code=record.error_code,
         version=record.version,
+        checkpoint_compacted_at=record.checkpoint_compacted_at,
     )
+
+
+def _approval_request_id(state: AgentState | None) -> str | None:
+    """The authoritative approval reference, when this run ever had one (US4+)."""
+    if state is None or state.approval is None:
+        return None
+    return state.approval.approval_request_id
+
+
+def _verified_refund_request_id(state: AgentState | None) -> str | None:
+    """The refund id authority confirmed -- and only then.
+
+    A write response that named a refund id is not enough: the whole point of verify-after-write is
+    that the response may be lost or may not describe what actually exists. So this field is null
+    unless the verification outcome says the authority was read and agreed.
+    """
+    if state is None or state.verification.status is not VerificationStatus.VERIFIED_SUCCESS:
+        return None
+    return state.verification.resource_id
+
+
+def _final_message(status: RunStatus, state: AgentState | None) -> str | None:
+    """What happened, said only in terms the run can support.
+
+    Every branch is derived from a terminal status or a verification outcome. No branch repeats a
+    model's claim, because "the model said it worked" is not a fact this service may pass on -- and
+    for a run whose payload retention has reclaimed, the honest answer is that the detail is gone
+    rather than that nothing happened.
+    """
+    if status is RunStatus.RUNNING:
+        return None
+    if status is RunStatus.WAITING_USER:
+        return "等待用户补充信息后继续。"
+    if status is RunStatus.WAITING_APPROVAL:
+        return "等待权威审批后继续。"
+    if status is RunStatus.ESCALATED:
+        return "已转人工处理。"
+    if status is RunStatus.SAFE_STOP:
+        # The stop reason is recorded on the checkpoint, not on the run row, so it is not repeated
+        # here. Saying "safely stopped" without a reason is still true; inventing one would not be.
+        return "已在安全边界内停止，未执行资金动作。"
+    if status is RunStatus.FAILED:
+        return "执行失败，未完成。"
+    return _completed_message(state)
+
+
+def _completed_message(state: AgentState | None) -> str:
+    if state is None:
+        return "已完成（该 run 的 payload 已按保留策略回收，结果明细不再可得）。"
+    if state.verification.status is VerificationStatus.VERIFIED_SUCCESS:
+        refund_id = state.verification.resource_id
+        if refund_id is None:
+            return "退款已创建并通过权威校验。"
+        return f"退款已创建并通过权威校验（{refund_id}）。"
+    if state.verification.status is VerificationStatus.VERIFIED_FAILURE:
+        return "权威状态确认没有这笔退款，未产生资金动作。"
+    if state.verification.status in (VerificationStatus.UNKNOWN, VerificationStatus.PENDING):
+        # PENDING is not "nothing happened" - a write may be in flight - so it belongs with UNKNOWN:
+        # both mean the outcome is not established, and the message must not invent either answer.
+        return "退款结果无法确认。"
+    return "已完成，本次没有产生退款写入。"
 
 
 def _parse_run_id(raw: str) -> UUID:

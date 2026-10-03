@@ -153,6 +153,23 @@ components:
         finalAction: { type: [string, 'null'] }
         finalMessage: { type: [string, 'null'] }
         approvalRequestId: { type: [string, 'null'] }
+        verificationStatus:
+          description: >-
+            What authority confirmed, not what a write response said. Null means either that nothing
+            was verified or that retention reclaimed the payload; checkpointCompactedAt tells the two
+            apart.
+          type: [string, 'null']
+          enum: [NOT_RUN, PENDING, VERIFIED_SUCCESS, VERIFIED_FAILURE, UNKNOWN, null]
+        verifiedRefundRequestId:
+          description: The refund id authority confirmed. Null unless verificationStatus is VERIFIED_SUCCESS.
+          type: [string, 'null']
+        version:
+          description: The compare-and-swap token a client passes back when retrying a write.
+          type: integer
+        checkpointCompactedAt:
+          description: When retention reclaimed this run's payload, or null while it is still held.
+          type: [string, 'null']
+          format: date-time
         errorCode: { type: [string, 'null'] }
     RunEvent:
       type: object
