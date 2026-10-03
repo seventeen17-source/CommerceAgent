@@ -403,16 +403,31 @@ Java      负责业务事实（什么是真的）
    修复并验证；但 `.ruff_cache` / `.mypy_cache` / `.pytest_cache` 仍拒绝写入，因此门禁用等价命令：
    `ruff check --no-cache`、`ruff format --check --no-cache`、`mypy app --cache-dir=<TEMP>`、
    `pytest -q -p no:cacheprovider`。另外受限模式下 `git fetch` / `git commit` 写不进 `.git`，需要一次完全权限。
-8. **`agent.tool_executions` 尚未接线（T032 的已知缺口）**：节点把每次尝试记进 `state.tool_history`，
-   但 T017 的 trace 表还没有写入。**这不是一行代码**：`ToolTraceRecord.trace_id` 是必填且带格式校验的，
-   而 `ToolHistoryEntry.trace_id` 可空（Tool 未返回 trace id 时）——硬写就得**编造一个 trace id**，
-   那是伪造跨服务证据；另外 `risk_level` 不在 history entry 上（它在 registry 的 risk metadata 里）。
-   接线前必须先定两件事：**缺 trace id 的调用怎么记**、**risk 从哪里取**。
-9. **`/input` 与 `/resume` 的 HTTP happy-path 用例尚缺**：`POST /runs` 已有（断言它确实调用了 driver，
-   而不需要模型），但这两个入口目前只有单元测试覆盖文本合并规则与组装。它们要走到"认领 → 驱动"，
-   同样需要注入一个脚本化 driver 或脚本化模型客户端，否则用例会打真实 LLM。
-   真库层面的接缝已由 `tests/integration/test_runtime_seam.py` 覆盖（6 个用例，真实 PostgreSQL）。
-10. **本机 `pytest` 的 6 个 skip 与数据库无关**（曾被误判为"需要 `DATABASE_URL`"）：它们全部来自
-   `tests/unit/test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化。**本机 PostgreSQL 是可达的**，
-   集成用例（`test_trace_store` / `test_run_api` / `test_runtime_seam`）都在这里真实运行。
-   教训与 §1「缺席断言必须附证据」同源：**别从 skip 的个数推断 skip 的原因**，要看 `-rs`。
+8. **`agent.tool_executions` 已接线（T032 完成）**：主链上**五条会碰 Java 的路径**全部上报——
+   `create_refund_request` / `get_after_sales_status`（写路径含恢复那次读）/ `get_logistics` /
+   `check_after_sales_eligibility` / `list_user_orders` / `get_order`（订单解析两次读）/
+   `get_after_sales_status`（写后校验那次读）。三条已落地的决定：
+   - **证据在产生点生成**：由调用点把 envelope 交给注入的 `record_trace` 接缝，**不在事后从 state 反推**。
+     state 只存摘要，反推必然要写 `latency_ms=0` 并**编造** `trace_id`——**编出来的证据可以被对账，因此比缺失更坏**。
+   - **`trace_id` 缺失时**用本服务生成的 `local-<hex>` 并标 `traceIdSource: LOCAL`：
+     "没有关联"与"没记录"是两件不同的事，trace 表正是这个区别必须存活的地方。
+   - **risk 在 registry 处绑定**，调用点不被问它没有的知识；未注册的工具名归 **HIGH 但照样记录**
+     ——记录本身就是"发现有人调了未注册工具"的手段。`status` 映射：成功→SUCCESS、
+     `WRITE_TIMEOUT_UNKNOWN`→TIMEOUT（请求可能还在飞）、其余→ERROR；`DENIED` 不由这里产生
+     （被拒的调用没有 envelope，那是拒绝方自己的报告）。
+   - **history 的取舍**：`order_resolution` 补了 state history（`OrderResolution` 是控制面模型、不落盘，
+     零成本，且它补上了"决定这是哪一单"的两次读此前在 state 里完全没有记录的缺口）；
+     `verify` **只报 trace、不补 history**（`VerificationOutcome` 会落盘，往里塞执行细节等于让每个 payload
+     为一个不存在的读者变大）。
+9. **顺带修掉一个读路径缺陷**：`record_tool_trace` 写入 `input_summary` / `output_summary`，
+   而 `list_tool_traces` 既没 SELECT 这两列、构造记录时也不传——**行在表里是完整的，读回来永远是 `{}`**。
+   而 trace 表的唯一消费者就是事后复盘的人：他看到的 `{}` 与"当时没记录摘要"无法区分。
+   接线时由真库用例抓到并修复（写路径与读路径不对称，是"同一个不变量两条路径只维护一条"的第 N 次出现）。
+10. **`/input` 与 `/resume` 的 HTTP happy-path 用例尚缺**：`POST /runs` 已有（断言它确实调用了 driver，
+    而不需要模型），但这两个入口目前只有单元测试覆盖文本合并规则与组装。它们要走到"认领 → 驱动"，
+    同样需要注入一个脚本化 driver 或脚本化模型客户端，否则用例会打真实 LLM。
+    真库层面的接缝已由 `tests/integration/test_runtime_seam.py` 覆盖（8 个用例，真实 PostgreSQL）。
+11. **本机 `pytest` 的 6 个 skip 与数据库无关**（曾被误判为"需要 `DATABASE_URL`"）：它们全部来自
+    `tests/unit/test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化。**本机 PostgreSQL 是可达的**，
+    集成用例（`test_trace_store` / `test_run_api` / `test_runtime_seam`）都在这里真实运行。
+    教训与 §1「缺席断言必须附证据」同源：**别从 skip 的个数推断 skip 的原因**，要看 `-rs`。
