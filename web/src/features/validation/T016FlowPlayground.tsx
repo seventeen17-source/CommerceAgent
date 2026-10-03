@@ -21,6 +21,7 @@ type LiveStepId =
   | 'tool-after-sales'
   | 't030-live-agent'
   | 't031-live-write'
+  | 't032-live-run'
   | 'read-run'
   | 'read-events'
 
@@ -404,6 +405,18 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
       note: '这是 T031 的 dev/live 验收 harness。浏览器不能提交 requestedAmount，也不能选择任意 Tool 或 idempotency key；正式 LangGraph 装配仍由 T032 完成。',
     },
     {
+      id: 't032-live-run',
+      live: 't032-live-run',
+      title: 'T032 Agent：LangGraph 自动主链（创建即驱动）',
+      file: 'app/agent/{graph,routing,nodes,runtime,wiring}.py + app/api/runs.py',
+      action: 'POST /api/v1/agent/runs',
+      input: 'Bearer token + 用户自然语言（不需要手填 orderId / reasonCode / idempotency key）',
+      work: '这是 T032 的正式装配，不再是 dev harness：创建 run 之后由 LangGraph 显式主链一路驱动——understand → resolve_order → evidence 循环 → Java eligibility → 受保护退款写入 → 权威写后校验 → 终态。每个节点边界都由 RunSession 落盘（同状态快照 + 版本 CAS），终态走带守卫的 transition；节点只上报事实，下一步由 Router 决定。',
+      output: 'status / currentNode / nextAction / stepCount / version / resolvedOrderId / finalAction',
+      status: statusFor('t032-live-run'),
+      note: 'PASS 判据：status 不再是 RUNNING；stepCount > 0；currentNode 是真实节点（finalize / safe_stop / waiting_user）；version 随边界递增。返回 503 MODEL_API_KEY_NOT_CONFIGURED 也是设计的一部分——driver 在写任何东西之前就拒绝，所以库里不会留下一个没人能推进的 RUNNING run。跑完用下面「读取持久化 Run」「读取 Checkpoint 与 Trace」两步看这次驱动的落盘证据。',
+    },
+    {
       id: 'read-run',
       live: 'read-run',
       title: '读取持久化 Run',
@@ -452,6 +465,7 @@ export function T016FlowPlayground() {
     'tool-after-sales': false,
     't030-live-agent': false,
     't031-live-write': false,
+    't032-live-run': false,
     'read-run': false,
     'read-events': false,
   })
@@ -505,7 +519,10 @@ export function T016FlowPlayground() {
       setResult({ kind: 'error', step, status: null, detail: '请先填写 Idempotency-Key。' })
       return
     }
-    if ((step === 'create-run' || step === 't030-live-agent') && !message.trim()) {
+    if (
+      (step === 'create-run' || step === 't030-live-agent' || step === 't032-live-run') &&
+      !message.trim()
+    ) {
       setResult({ kind: 'error', step, status: null, detail: '请先填写用户请求。' })
       return
     }
@@ -535,7 +552,7 @@ export function T016FlowPlayground() {
         ? `${COMMERCE_API}/${encodeURIComponent(orderId.trim())}/logistics`
         : step === 'check-eligibility'
           ? ELIGIBILITY_API
-          : step === 'create-run'
+          : step === 'create-run' || step === 't032-live-run'
             ? AGENT_API
             : step === 'create-refund'
               ? REFUND_API
@@ -562,7 +579,7 @@ export function T016FlowPlayground() {
               reasonCode: reasonCode.trim(),
             }),
           }
-        : step === 'create-run'
+        : step === 'create-run' || step === 't032-live-run'
           ? { method: 'POST', body: JSON.stringify({ message: message.trim() }) }
           : step === 'tool-get-order'
             ? {
@@ -722,6 +739,16 @@ export function T016FlowPlayground() {
           >
             T031 · LIVE WRITE + VERIFY
           </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('t032-live-run')
+            }}
+          >
+            T032 · LIVE GRAPH RUN
+          </button>
         </div>
       </header>
 
@@ -813,6 +840,8 @@ export function T016FlowPlayground() {
                             ? 'LIVE STEP · T030 AGENT EVIDENCE ROUTING'
                           : step.live === 't031-live-write'
                             ? 'LIVE STEP · T031 SAFE WRITE + VERIFY'
+                          : step.live === 't032-live-run'
+                            ? 'LIVE STEP · T032 GRAPH-DRIVEN MAIN CHAIN'
                           : 'LIVE STEP · T017 PERSISTENCE VIA T018 API'}
                       </span>
                       <h2>{step.title}</h2>
@@ -921,7 +950,9 @@ export function T016FlowPlayground() {
                             onChange={(event) => setIdempotencyKey(event.target.value)}
                           />
                         </>
-                      ) : step.live === 'create-run' || step.live === 't030-live-agent' ? (
+                      ) : step.live === 'create-run' ||
+                        step.live === 't030-live-agent' ||
+                        step.live === 't032-live-run' ? (
                         <>
                           <label htmlFor={`live-user-request-${step.live}`}>User request</label>
                           <textarea
@@ -1102,7 +1133,8 @@ export function T016FlowPlayground() {
         <p>
           T024/T025/T028 可从页面直连 Java 验证业务权威；T029 现在新增 Web → Python Agent Service →
           ToolRegistry / CommerceTools → CommerceClient → Java 的真实 Tool 调试链。T018 提供 Agent Run 入口，
-          T017 保存可恢复状态和 Trace；T030/T032 再把 Tool 选择与 LangGraph 自动主链接起来。
+          T017 保存可恢复状态和 Trace；<b>T032 已把 LangGraph 显式主链接起来</b>——创建 run 即驱动整条链，
+          上面的 T030/T031 步骤保留为 dev harness（页面不能提交金额或选 key，正式链路不接受这些输入）。
         </p>
       </section>
     </main>
