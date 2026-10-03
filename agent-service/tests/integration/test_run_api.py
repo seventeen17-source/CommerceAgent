@@ -31,8 +31,10 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agent.state import RunStatus
 from app.config.settings import Settings
 from app.main import create_app
+from app.trace.checkpoint import Transition
 from app.trace.db import ConnectionFactory, connection_factory_from_url
 from app.trace.store import PostgresRunStore
 
@@ -272,6 +274,91 @@ def test_the_run_view_publishes_the_facts_and_not_a_success_claim(client: TestCl
     assert body["verifiedRefundRequestId"] is None
     assert body["finalMessage"] is None
     assert body["approvalRequestId"] is None
+
+
+def waiting_run(client: TestClient, db_factory: ConnectionFactory) -> dict[str, Any]:
+    """A run parked in ``WAITING_USER``, as the graph leaves it when a human has to answer.
+
+    Created through the API and then interrupted through the store, because both entry points under
+    test accept *only* an interrupted run - that restriction is the state's, not this test's.
+    """
+    body = create_run_via_api(client)
+    store = PostgresRunStore(db_factory)
+    record = store.get_run(UUID(body["runId"]))
+    store.transition(
+        record.run_id,
+        Transition(
+            expected_version=record.version,
+            status=RunStatus.WAITING_USER,
+            trigger="INTERRUPT",
+            current_node="resolve_order",
+            next_action="await_clarification",
+        ),
+    )
+    return body
+
+
+def test_supplying_clarification_advances_the_waiting_run(
+    client: TestClient, db_factory: ConnectionFactory
+) -> None:
+    """``/input`` claims the run, merges the follow-up, then drives it."""
+    body = waiting_run(client, db_factory)
+    driver = client.run_driver  # type: ignore[attr-defined]
+    before = len(driver.advanced)
+
+    response = client.post(
+        f"/api/v1/agent/runs/{body['runId']}/input",
+        json={"message": "订单 order-001"},
+        headers=auth_header(mint_token("customer-001")),
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(driver.advanced) == before + 1
+    payload = PostgresRunStore(db_factory).get_run(UUID(body["runId"])).to_state()
+    assert payload is not None
+    # The merged request is durable *before* the graph reads it: a clarification that lived only in
+    # this request's memory would be invisible to the next resume.
+    assert payload.user_request.endswith("订单 order-001")
+    assert "follow-up" in payload.user_request
+
+
+def test_resuming_a_waiting_run_advances_it(
+    client: TestClient, db_factory: ConnectionFactory
+) -> None:
+    body = waiting_run(client, db_factory)
+    driver = client.run_driver  # type: ignore[attr-defined]
+    before = len(driver.advanced)
+
+    response = client.post(
+        f"/api/v1/agent/runs/{body['runId']}/resume",
+        json={},
+        headers=auth_header(mint_token("customer-001")),
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(driver.advanced) == before + 1
+
+
+def test_a_follow_up_that_cannot_fit_leaves_the_run_waiting(
+    client: TestClient, db_factory: ConnectionFactory
+) -> None:
+    """Refusing *after* claiming would leave a claimed run with nothing to drive it."""
+    body = waiting_run(client, db_factory)
+    driver = client.run_driver  # type: ignore[attr-defined]
+    before = len(driver.advanced)
+
+    response = client.post(
+        f"/api/v1/agent/runs/{body['runId']}/input",
+        json={"message": "x" * 4000},
+        headers=auth_header(mint_token("customer-001")),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "USER_REQUEST_TOO_LONG"
+    assert (
+        PostgresRunStore(db_factory).get_run(UUID(body["runId"])).status is RunStatus.WAITING_USER
+    )
+    assert len(driver.advanced) == before
 
 
 def test_create_run_requires_a_credential(client: TestClient) -> None:
