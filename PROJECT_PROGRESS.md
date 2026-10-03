@@ -12,7 +12,10 @@
   - **真库 E2E 已在本机跑通**：`tests/integration/test_runtime_seam.py` 6 个用例打在**真实 PostgreSQL** 上（版本递增与行同步、payload 快照不得改 status、过期版本被拒且败者什么都没改、intent 回调后可从行读回、驱动走完由 `transition` 落终态、失败走路留下 FAILED 行）。**集成套件共 65 passed**（含 T017/T018 既有用例）。
   - **门禁（2026-09-29 最后一次全绿，Docker 运行时）**：`ruff check --no-cache` All checks passed / `ruff format --check` **83 files** / `mypy app` **Success: 47 source files** / `pytest -q` **451 passed, 6 skipped**（6 个 skip 全部来自 `test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化，与数据库无关 —— 曾误判为"需要 DATABASE_URL"，见 devlog 的更正）。
   - **环境事实（会改变上面的测试数字，不是代码问题）**：PostgreSQL 跑在 `infra/docker-compose.yml` 的 `postgres` 容器里。**Docker Desktop 没启动时，集成用例按设计 skip（约 49 个），而不是 fail**——`tests/conftest.py` 的既定取舍："缺本地数据库是环境事实，为它变红的套件会训练人忽略红"。此时 `pytest -q` 约为 **402 passed, 55 skipped**。要跑真库验收：`cd infra; docker compose up -d postgres`。
-  - 分支：`feat/us1-langgraph-assembly`（从最新 dev 派生，**25 个提交已推送**，与 origin 0/0）。
+  - 分支：`feat/us1-langgraph-assembly`（从最新 dev 派生；**8 个提交待推送**，其余已在 origin）。
+- **T033 — Agent Run Response Serialization（已完成并验收，2026-09-29）**：`api/runs.py` 的 `AgentRunView` 现在**只报告权威确认过的事实**——补齐契约已发布但服务从未返回的 `finalMessage` / `approvalRequestId`，新增 `verificationStatus`（权威确认了什么）、`verifiedRefundRequestId`（**只在 `VERIFIED_SUCCESS` 时非空**）、`version`（CAS 重试要传回的值）与 `checkpointCompactedAt`（区分"没有校验过"与"payload 已被保留策略回收"），并把后三项补进 `contracts/agent-api.openapi.yaml`。`finalMessage` 由**终态 + 校验结果确定性推导**，没有任何分支复述模型的话。测试：`tests/unit/test_run_view.py` 11 条 + `test_run_api.py` 响应形状用例；真库集成 **68 passed**；四条门禁 `ruff` / `format` **86 files** / `mypy` **48 files** / `pytest` **475 passed, 6 skipped**。
+  - **边界**：Create / Execute 的接线属 T032（`POST /runs` 创建即驱动），T033 只负责序列化。
+  - **有意不做**：`/events` 与 `/trace` 不加"已验证事实"字段——`RunEvent` 已符合契约，权威出处也已存在（response 的 `verificationStatus` + `agent.tool_executions` 的行），在 event 里再抄一份就是第二份真相。
 - **已完成**：
   - T001 — 根项目入口与当前需要的目录已建立；`eval/`、`knowledge/policies/` 不为空建目录，改由首次产生真实内容的对应任务创建
   - T002 — Spring Initializr 生成 `commerce-backend/`（Java 21 / Spring Boot 4.1.1），`mvnw.cmd test` BUILD SUCCESS

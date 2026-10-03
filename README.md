@@ -53,6 +53,8 @@ Verified Result + Structured Trace
 
 > **T032 进行中（未验收）**：`app/agent/` 下已新增 `graph.py`（`GraphState` + 显式条件边目标表 + 装配校验 + `compile(checkpointer=None)`）、`routing.py`（路由表 / 预算 / `SafeStopReason` / `HandoffReason` / `TerminalDecision`）、`nodes.py`（**10 / 10 节点**，含终态 `finalize` / `safe_stop` / `waiting_user`）、`runtime.py`（`RunSession` 的三个写 seam + `drive_graph`：版本跟踪、边界写延迟一步、失败收尸）、`wiring.py`（10 节点 + 9 依赖的唯一组装点），`state.py` 增 `advance()` 作为唯一校验变更入口；`runs.py` 的 `/input` 与 `/resume` **现在真的组装图并驱动 run**。**未完成**：5173 live 验收、`/input` 与 `/resume` 的 HTTP happy-path 用例。**三个入口都会驱动 run**：`POST /runs` 是第一次 invocation 的**唯一入口**（契约没有 execute 端点，`/input` 与 `/resume` 又都要求 run 处于 `WAITING_*`），驱动做成可注入的 `RunDriver` 接缝，`check` 在写任何东西之前拒绝——避免留下一个没人能推进的 `RUNNING` run。**真库 E2E 已在真实 PostgreSQL 上跑通**（`tests/integration/` 共 65 passed，含新接缝 6 个用例）。**所以"节点与接线齐备"不等于"live 已验证"**，T032 仍**不得勾选**。设计见 [`specs/002-commerce-after-sales-agent/t032-runtime-design.md`](specs/002-commerce-after-sales-agent/t032-runtime-design.md)。
 
+- **T033 已完成**：`AgentRunView` 只报告**权威确认过的事实**——新增 `verificationStatus` / `verifiedRefundRequestId`（**只在 `VERIFIED_SUCCESS` 时非空**）/ `finalMessage`（由终态 + 校验结果确定性推导，不复述模型的话），补齐契约已发布但从未返回的 `finalMessage` / `approvalRequestId`，并把 `version` 与 `checkpointCompactedAt` 补进契约。
+
 当前下一步：
 
 - **T032 剩余两件**：① 5173 live 验收（点页面上的 `T032 · LIVE GRAPH RUN` 步骤）；② `/input` 与 `/resume` 的 HTTP happy-path 用例；
