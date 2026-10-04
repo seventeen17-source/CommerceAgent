@@ -35,7 +35,15 @@ type RunView = {
 
 type Turn =
   | { role: 'customer'; text: string }
-  | { role: 'agent'; text: string; orders?: string[]; needsClarification?: boolean }
+  | {
+      role: 'agent'
+      text: string
+      orders?: string[]
+      needsClarification?: boolean
+      /** Kept per turn on purpose: one conversation can ask twice, and the second question's
+       *  candidates must not appear on the first question's card. */
+      candidates?: string[]
+    }
 
 const AGENT = '/agent'
 
@@ -78,11 +86,9 @@ export function CustomerConsole() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
-  const [candidates, setCandidates] = useState<string[]>([])
 
   function appendAgent(view: RunView) {
     const needsClarification = Boolean(view.clarification)
-    setCandidates(view.clarification?.candidateOrderIds ?? [])
     setActiveRunId(needsClarification ? view.runId : null)
     setTurns((prev) => [
       ...prev,
@@ -95,6 +101,7 @@ export function CustomerConsole() {
           : (view.finalMessage ?? headlineFor(view)),
         orders: view.resolvedOrderId ? [view.resolvedOrderId] : undefined,
         needsClarification,
+        candidates: view.clarification?.candidateOrderIds ?? [],
       },
     ])
   }
@@ -179,9 +186,9 @@ export function CustomerConsole() {
                   订单：{orderId}
                 </div>
               ))}
-              {turn.needsClarification && candidates.length > 0 ? (
+              {turn.needsClarification && (turn.candidates?.length ?? 0) > 0 ? (
                 <div style={{ marginTop: 8 }}>
-                  {candidates.map((orderId) => (
+                  {turn.candidates?.map((orderId) => (
                     <button
                       key={orderId}
                       onClick={() => choose(orderId)}
