@@ -41,11 +41,18 @@ const AGENT = '/agent'
 
 /** Status is a state, not a label: map it to words a customer would use, never print the enum. */
 function headlineFor(view: RunView): string {
-  if (view.status === 'WAITING_USER' || view.status === 'WAITING_APPROVAL') {
+  if (view.status === 'WAITING_USER') {
     return '需要你补充一点信息'
   }
+  if (view.status === 'WAITING_APPROVAL') {
+    // Waiting on an approver is not something the customer can act on, so it must not read like a
+    // request for more information -- that would send them looking for something to supply.
+    return '已提交人工审核，请等待结果'
+  }
   if (view.status === 'RUNNING') {
-    return '正在处理…'
+    // The create call drives the graph, so this should not happen; saying so honestly beats a
+    // spinner that never resolves.
+    return '还在处理中，请稍后刷新页面查看结果'
   }
   if (view.status === 'SAFE_STOP' || view.status === 'ESCALATED') {
     return '已转人工处理'
