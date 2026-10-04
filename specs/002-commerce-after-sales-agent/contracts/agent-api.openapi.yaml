@@ -163,6 +163,21 @@ components:
         verifiedRefundRequestId:
           description: The refund id authority confirmed. Null unless verificationStatus is VERIFIED_SUCCESS.
           type: [string, 'null']
+        clarification:
+          description: >-
+            What the customer must supply before the run can continue, present only while the run is
+            WAITING_USER. A customer-facing channel on purpose: 'waiting for more information' is not
+            actionable, and candidateOrderIds are the caller's own orders, so they leak nothing.
+          type: [object, 'null']
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              enum: [INTENT_UNKNOWN, ORDER_AMBIGUOUS]
+            candidateOrderIds:
+              type: array
+              items: { type: string }
         version:
           description: The compare-and-swap token a client passes back when retrying a write.
           type: integer

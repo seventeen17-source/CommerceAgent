@@ -20,7 +20,12 @@ from app.agent.state import (
     RunStatus,
     VerificationStatus,
 )
-from app.api.runs import _final_message, _verified_refund_request_id, _view
+from app.api.runs import (
+    _clarification_for,
+    _final_message,
+    _verified_refund_request_id,
+    _view,
+)
 from app.trace.checkpoint import RunRecord
 
 
@@ -154,3 +159,36 @@ def test_a_compacted_record_publishes_no_payload_facts_and_says_why() -> None:
     assert view.verification_status is None
     assert view.verified_refund_request_id is None
     assert view.checkpoint_compacted_at is not None
+
+
+def test_the_customer_is_told_which_orders_to_choose_from() -> None:
+    """'Waiting for more information' is not actionable, so candidates must reach the customer."""
+    state = make_state(
+        intent="REFUND_REQUEST",
+        candidate_order_ids=["demo-order-001", "demo-order-002"],
+    )
+
+    clarification = _clarification_for(RunStatus.WAITING_USER, state)
+
+    assert clarification is not None
+    assert clarification.kind == "ORDER_AMBIGUOUS"
+    assert clarification.candidate_order_ids == ["demo-order-001", "demo-order-002"]
+
+
+def test_an_unrecognised_intent_asks_for_the_request_itself() -> None:
+    clarification = _clarification_for(RunStatus.WAITING_USER, make_state(intent="UNKNOWN"))
+
+    assert clarification is not None
+    assert clarification.kind == "INTENT_UNKNOWN"
+    assert clarification.candidate_order_ids == []
+
+
+def test_a_wait_we_cannot_explain_is_not_guessed_at() -> None:
+    """A run waiting for a reason we cannot name gets no prompt rather than an invented one."""
+    state = make_state(intent="REFUND_REQUEST", candidate_order_ids=["only-one"])
+
+    assert _clarification_for(RunStatus.WAITING_USER, state) is None
+
+
+def test_a_run_that_is_not_waiting_asks_nothing() -> None:
+    assert _clarification_for(RunStatus.RUNNING, make_state(intent="UNKNOWN")) is None

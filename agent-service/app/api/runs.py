@@ -165,6 +165,7 @@ class AgentRunView(BaseModel):
     verification_status: VerificationStatus | None = Field(
         default=None, serialization_alias="verificationStatus"
     )
+    clarification: RunClarification | None = None
     verified_refund_request_id: str | None = Field(
         default=None, serialization_alias="verifiedRefundRequestId"
     )
@@ -220,11 +221,52 @@ def _view(record: RunRecord) -> AgentRunView:
         final_message=_final_message(record.status, state),
         approval_request_id=_approval_request_id(state),
         verification_status=state.verification.status if state is not None else None,
+        clarification=_clarification_for(record.status, state),
         verified_refund_request_id=_verified_refund_request_id(state),
         error_code=record.error_code,
         version=record.version,
         checkpoint_compacted_at=record.checkpoint_compacted_at,
     )
+
+
+#: Why a run is waiting for the customer, phrased so the customer can act on it. A Literal rather
+#: than an enum because it crosses the API boundary as a plain string.
+ClarificationKind = Literal["INTENT_UNKNOWN", "ORDER_AMBIGUOUS"]
+
+
+class RunClarification(BaseModel):
+    """What the customer has to supply before the run can continue.
+
+    Customer-safe by construction: ``candidate_order_ids`` are the caller's own orders, resolved
+    through ownership, so publishing them tells the customer nothing they could not already see.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: ClarificationKind
+    candidate_order_ids: list[str] = Field(
+        default_factory=list, serialization_alias="candidateOrderIds"
+    )
+
+
+def _clarification_for(status: RunStatus, state: AgentState | None) -> RunClarification | None:
+    """What to ask the customer, derived from the facts the payload recorded.
+
+    The routing decision is not stored, so this rebuilds the question from its inputs - and only
+    from inputs that are facts: an unset/UNKNOWN intent, and the candidate orders the understanding
+    step recorded. When neither explains the wait, it returns None rather than inventing a question,
+    because a customer-facing prompt that might be wrong is worse than no prompt.
+    """
+    if status is not RunStatus.WAITING_USER or state is None:
+        return None
+    if state.intent is None or state.intent == "UNKNOWN":
+        return RunClarification(kind="INTENT_UNKNOWN")
+    if len(state.candidate_order_ids) >= 2:
+        return RunClarification(
+            kind="ORDER_AMBIGUOUS",
+            candidate_order_ids=[str(order_id) for order_id in state.candidate_order_ids],
+        )
+    return None
 
 
 def _approval_request_id(state: AgentState | None) -> str | None:
