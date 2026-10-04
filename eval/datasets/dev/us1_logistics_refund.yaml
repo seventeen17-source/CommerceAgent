@@ -1,0 +1,42 @@
+datasetVersion: v1
+dataset: us1_logistics_refund
+description: >-
+  US1 的三条判定线。每个 case 都写成"事后世界必须长什么样"，而不是"Agent 应该说什么"——
+  判分器只读业务状态，因此这里能表达的期望也只有业务状态与机制两类。
+
+  关于 recoveryReadRequired：只断言"最终恰好一行退款"是不够的。一个什么都没做的 run
+  （SAFE_STOP、资格被拒、甚至根本没走到写路径）同样会留下恰好一行或零行，于是会在
+  "Agent 没有工作"的情况下判为通过——这是评分器最危险的假通过。因此需要恢复的 case
+  必须同时断言"恢复读确实发生过"，用机制把结果钉住。
+
+cases:
+  - caseId: us1-happy-refund
+    fixtureVersion: t014-refund-logistics-001-v1
+    user: customer-001
+    request: 我的包裹物流三天没动了，我要退款
+    scenario: 未签收 + 物流超过阈值 + 资格允许 → 应创建且仅创建一笔退款
+    expect:
+      terminalStatus: COMPLETED
+      refundsForOrder: 1
+      refundStatuses: [PENDING, SUCCEEDED]
+      recoveryReadRequired: false
+
+  - caseId: us1-duplicate-request
+    fixtureVersion: t014-refund-logistics-001-v1
+    user: customer-001
+    request: 我的包裹物流三天没动了，我要退款
+    scenario: 同一个逻辑写在同一个 fixture 上请求两次 → 幂等保护下仍只有一行
+    expect:
+      # 这个数字就是这个 case 的全部意义：第二次请求如果又写一行，幂等就失效了。
+      refundsForOrder: 1
+      recoveryReadRequired: false
+
+  - caseId: us1-unknown-write-timeout
+    fixtureVersion: t014-refund-logistics-001-v1
+    user: customer-001
+    request: 我的包裹物流三天没动了，我要退款
+    scenario: 写调用超时、结果未知 → 必须先读权威再决定，不得盲目重写
+    expect:
+      # 结果 + 机制两条一起断言（只断结果会在"根本没写"时假通过）
+      refundsForOrder: 1
+      recoveryReadRequired: true

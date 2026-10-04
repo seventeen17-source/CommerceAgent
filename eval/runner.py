@@ -1,0 +1,178 @@
+"""Run the US1 eval cases: reset the world, run the agent, grade the business state.
+
+Usage (from the repository root)::
+
+    python eval/runner.py --dataset eval/datasets/dev/us1_logistics_refund.yaml
+
+What it refuses to do
+---------------------
+If the reset endpoint is not reachable, this exits with an **infrastructure failure**, not a model
+failure. The eval contract says so explicitly, and the reason is arithmetic: a run that could not
+start from a known world tells you nothing about the agent, and counting it as a wrong answer quietly
+poisons the success rate. The reset route is registered only under the test/eval profile, so a dev
+profile backend correctly produces this outcome rather than a silent pass.
+
+Why the recovery read is asserted separately
+--------------------------------------------
+See the dataset's header. A case that only counts rows passes when the agent did nothing at all.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import httpx
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from scorers.business_state import Expectation, RefundFacts, score_business_state
+
+AGENT_BASE = "http://127.0.0.1:8000/api/v1/agent"
+JAVA_BASE = "http://127.0.0.1:8080"
+#: The agent's own role cannot read the business schema (by design), so the facts are read with the
+#: business role. That separation is exactly what stops the agent from grading itself.
+COMMERCE_DSN = "postgresql://commerce_app:commerce_app_dev_only@127.0.0.1:5432/commerceagent"
+
+
+@dataclass(frozen=True)
+class Outcome:
+    case_id: str
+    kind: str  # "pass" | "fail" | "infrastructure"
+    detail: str
+
+
+def load_cases(path: Path) -> list[dict[str, Any]]:
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return list(document["cases"])
+
+
+def mint_token(user_id: str) -> str:
+    from datetime import UTC, datetime, timedelta
+
+    import jwt
+    from app.config.settings import Settings  # type: ignore[import-not-found]
+
+    settings = Settings()
+    now = datetime.now(UTC)
+    return jwt.encode(
+        {
+            "iss": settings.commerce_jwt_issuer,
+            "sub": user_id,
+            "iat": now,
+            "exp": now + timedelta(minutes=30),
+        },
+        settings.commerce_jwt_secret,
+        algorithm="HS256",
+    )
+
+
+def reset_case(client: httpx.Client, case: dict[str, Any]) -> str | None:
+    """Return an infrastructure failure message, or None when the world is ready."""
+    try:
+        response = client.post(f"{JAVA_BASE}/internal/eval/fixtures/{case['caseId']}/reset")
+    except httpx.HTTPError as exc:
+        return f"reset endpoint unreachable: {type(exc).__name__}"
+    if response.status_code == 404:
+        return (
+            "reset endpoint is not registered - it exists only under the test/eval profile, "
+            "so this backend cannot provide a deterministic starting world"
+        )
+    if response.status_code >= 500:
+        return f"reset failed with {response.status_code} (EVAL_RESET_FAILED)"
+    if response.status_code >= 400:
+        return f"reset refused with {response.status_code}"
+    return None
+
+
+def refund_rows(order_id: str) -> list[RefundFacts]:
+    import psycopg
+
+    with (
+        psycopg.connect(COMMERCE_DSN, connect_timeout=5) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            "SELECT order_id, status FROM commerce.refund_requests WHERE order_id = %s",
+            (order_id,),
+        )
+        return [RefundFacts(order_id=row[0], status=row[1]) for row in cursor.fetchall()]
+
+
+def recovery_read_happened(run_id: str) -> bool:
+    import psycopg
+    from app.config.settings import Settings  # type: ignore[import-not-found]
+
+    with (
+        psycopg.connect(Settings().agent_database_url, connect_timeout=5) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            "SELECT count(*) FROM agent.tool_executions WHERE run_id = %s AND tool_name = %s",
+            (run_id, "get_after_sales_status"),
+        )
+        return (cursor.fetchone() or [0])[0] > 0
+
+
+def run_case(case: dict[str, Any], order_id: str) -> Outcome:
+    expect = case.get("expect") or {}
+    with httpx.Client(timeout=300.0, trust_env=False) as client:
+        problem = reset_case(client, case)
+        if problem is not None:
+            return Outcome(case["caseId"], "infrastructure", problem)
+
+        token = mint_token(case["user"])
+        response = client.post(
+            f"{AGENT_BASE}/runs",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"message": case["request"]},
+        )
+        if response.status_code != 201:
+            return Outcome(case["caseId"], "fail", f"run was not created: {response.status_code}")
+        view = response.json()
+
+        observed = refund_rows(order_id)
+        verdict = score_business_state(
+            Expectation(
+                refunds_for_order=expect.get("refundsForOrder"),
+                refund_statuses=tuple(expect.get("refundStatuses") or ()),
+            ),
+            observed,
+        )
+        reasons = list(verdict.reasons)
+
+        if expect.get("terminalStatus") and view.get("status") != expect["terminalStatus"]:
+            reasons.append(f"expected status {expect['terminalStatus']}, got {view.get('status')}")
+
+        # The mechanism half of the assertion: without it, "wrote nothing" would pass a case whose
+        # whole point is that a lost write was recovered.
+        if expect.get("recoveryReadRequired") and not recovery_read_happened(view["runId"]):
+            reasons.append("no recovery read (get_after_sales_status) was performed")
+
+    kind = "pass" if not reasons else "fail"
+    return Outcome(case["caseId"], kind, "; ".join(reasons) or "business state matches the case")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the US1 eval dataset.")
+    parser.add_argument("--dataset", required=True, type=Path)
+    parser.add_argument("--order-id", default="order-001", help="the order the case writes against")
+    args = parser.parse_args(argv)
+
+    outcomes = [run_case(case, args.order_id) for case in load_cases(args.dataset)]
+    for outcome in outcomes:
+        print(f"[{outcome.kind:>14}] {outcome.case_id}: {outcome.detail}")
+    print(json.dumps({o.kind: sum(1 for x in outcomes if x.kind == o.kind) for o in outcomes}))
+
+    # Infrastructure failures are returned as their own exit code so a caller can never mistake them
+    # for a poor model score.
+    return 2 if any(o.kind == "infrastructure" for o in outcomes) else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
