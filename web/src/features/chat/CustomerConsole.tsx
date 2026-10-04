@@ -123,7 +123,14 @@ export function CustomerConsole() {
     if (!text || busy) return
     setTurns((prev) => [...prev, { role: 'customer', text }])
     setDraft('')
-    void call('/runs', { message: text })
+    // If the run is already waiting for an answer, this text IS the answer: it has to continue that
+    // run rather than start a second one. Otherwise the customer's reply would silently abandon the
+    // waiting run and lose everything the first walk had already established.
+    if (activeRunId) {
+      void call(`/runs/${activeRunId}/input`, { message: text })
+    } else {
+      void call('/runs', { message: text })
+    }
   }
 
   function choose(orderId: string) {
