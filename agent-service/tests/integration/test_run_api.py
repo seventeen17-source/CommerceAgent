@@ -31,6 +31,7 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agent.routing import Node
 from app.agent.state import RunStatus
 from app.config.settings import Settings
 from app.main import create_app
@@ -337,6 +338,77 @@ def test_resuming_a_waiting_run_advances_it(
 
     assert response.status_code == 200, response.text
     assert len(driver.advanced) == before + 1
+
+
+def test_durable_positions_use_the_graphs_own_node_names(
+    client: TestClient, db_factory: ConnectionFactory
+) -> None:
+    """A run row must not describe a graph that does not exist.
+
+    The vocabulary is owned by the graph. If the row says "understand_request" while the graph's
+    node is "understand", every later reader - a debugging session, an eval, a trace viewer - is
+    looking at a position nothing can resolve.
+    """
+    body = create_run_via_api(client)
+    assert body["nextAction"] == Node.UNDERSTAND.value
+
+    store = PostgresRunStore(db_factory)
+    record = store.get_run(UUID(body["runId"]))
+    assert record.next_action == Node.UNDERSTAND.value
+
+    store.transition(
+        record.run_id,
+        Transition(
+            expected_version=record.version,
+            status=RunStatus.WAITING_USER,
+            trigger="INTERRUPT",
+            current_node=Node.WAITING_USER.value,
+            next_action=Node.UNDERSTAND.value,
+        ),
+    )
+    supplied = client.post(
+        f"/api/v1/agent/runs/{body['runId']}/input",
+        json={"message": "订单 order-001"},
+        headers=auth_header(mint_token("customer-001")),
+    )
+    assert supplied.status_code == 200, supplied.text
+    assert supplied.json()["nextAction"] == Node.UNDERSTAND.value
+
+    # /resume needs its own parked run: the one above is RUNNING after /input claimed it.
+    second = create_run_via_api(client)
+    second_record = store.get_run(UUID(second["runId"]))
+    store.transition(
+        second_record.run_id,
+        Transition(
+            expected_version=second_record.version,
+            status=RunStatus.WAITING_USER,
+            trigger="INTERRUPT",
+            current_node=Node.WAITING_USER.value,
+            next_action=Node.UNDERSTAND.value,
+        ),
+    )
+    resumed = client.post(
+        f"/api/v1/agent/runs/{second['runId']}/resume",
+        json={},
+        headers=auth_header(mint_token("customer-001")),
+    )
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["nextAction"] == Node.UNDERSTAND.value
+
+    # Every position written so far must be a real member of the graph vocabulary.
+    stored = PostgresRunStore(db_factory).get_run(UUID(body["runId"]))
+    assert stored.next_action in {node.value for node in Node}
+
+
+def test_a_new_run_records_the_runtime_version_that_produced_it(
+    client: TestClient, db_factory: ConnectionFactory
+) -> None:
+    """The row answers 'which runtime was this?', so it must not still say t018-skeleton-v1."""
+    body = create_run_via_api(client)
+
+    record = PostgresRunStore(db_factory).get_run(UUID(body["runId"]))
+    assert record.prompt_version == "t032-us1-runtime-v1"
+    assert "t018-skeleton" not in record.prompt_version
 
 
 def test_a_follow_up_that_cannot_fit_leaves_the_run_waiting(
