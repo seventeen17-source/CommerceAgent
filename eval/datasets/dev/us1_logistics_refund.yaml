@@ -34,6 +34,8 @@ cases:
     user: customer-001
     request: 我的包裹物流三天没动了，我要退款
     scenario: 同一个逻辑写在同一个 fixture 上请求两次 → 幂等保护下仍只有一行
+    # 真的问两次：只问一次的话，"重复请求"这件事根本没被测到（一次请求本来就只会留一行）。
+    repeatRequest: 2
     expect:
       # 这个数字就是这个 case 的全部意义：第二次请求如果又写一行，幂等就失效了。
       refundsForOrder: 1

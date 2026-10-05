@@ -159,14 +159,25 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
             return Outcome(case.get("scenarioId") or case["caseId"], "infrastructure", problem)
 
         token = mint_token(case["user"])
-        response = client.post(
-            f"{AGENT_BASE}/runs",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"message": case["request"]},
-        )
-        if response.status_code != 201:
-            return Outcome(case.get("scenarioId") or case["caseId"], "fail", f"run was not created: {response.status_code}")
-        view = response.json()
+        # A case can ask more than once. "The same request twice" is the entire point of the
+        # duplicate case, and asking once would let it pass without testing anything: a single
+        # request produces one row whether or not idempotency works at all. Each request is its own
+        # run, which is what a customer pressing send twice actually does.
+        views: list[dict[str, Any]] = []
+        for _ in range(int(case.get("repeatRequest") or 1)):
+            response = client.post(
+                f"{AGENT_BASE}/runs",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"message": case["request"]},
+            )
+            if response.status_code != 201:
+                return Outcome(
+                    case.get("scenarioId") or case["caseId"],
+                    "fail",
+                    f"run was not created: {response.status_code}",
+                )
+            views.append(response.json())
+        view = views[-1]
 
         observed = refund_rows(order_id)
         verdict = score_business_state(
