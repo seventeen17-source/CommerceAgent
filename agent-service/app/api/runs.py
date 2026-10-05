@@ -1,13 +1,16 @@
-"""Run lifecycle endpoints (T018 skeleton): create, read, events, input, resume, trace.
+"""Run lifecycle endpoints: create, read, events, input, resume, trace.
 
-"Skin and skeleton, not muscle"
--------------------------------
-These endpoints really create runs, really read them back, and really enforce ownership. What they
-do **not** do is run the Agent: there is no LLM call, no order lookup and no refund. Creating a run
-today produces a ``RUNNING`` row with a state whose only content is the request and the principal;
-T030 attaches the graph that advances it. The point of T018 is that the *plumbing* is real and
-tested, so T030 adds behaviour to a working pipe instead of debugging plumbing and behaviour at
-once.
+What these endpoints actually do
+--------------------------------
+Create a run and **drive it**: the request is understood by the model, the order is resolved against
+Java, evidence and eligibility come from the authoritative services, a write may be performed and
+then verified, and the run ends on a terminal state or an interrupt. The path is
+
+    Run API -> RunDriver -> build_agent_graph -> drive_graph -> RunStore (durable seam)
+
+so a run row is a real projection of a real walk. This module owns the transport and the projection;
+it owns none of the decisions -- eligibility, amounts and success belong to Java, and the routing
+belongs to the graph.
 
 Two different questions, two different status codes
 ---------------------------------------------------
@@ -129,9 +132,11 @@ class ResumeRunRequest(BaseModel):
     """``POST /agent/runs/{runId}/resume``.
 
     ``approval_request_id`` is a *reference*, never an assertion. The contract is explicit that
-    resume must not trust approval status supplied by the caller: T049+ re-reads the authoritative
-    approval record from Java before continuing. Accepting the id here records what the caller
-    believes it is
+    resume must not trust approval status supplied by the caller, so this field is accepted for
+    contract compatibility and **deliberately not stored anywhere**: US1 has no approval record to
+    bind it to, and writing a caller's claim into ``AgentState.approval`` would turn a string a
+    client chose into evidence. Until T049+ re-reads the authoritative record from Java, a non-null
+    value here changes nothing.
     resuming, which is useful for the audit trail and useless as authority.
     """
 
@@ -496,9 +501,7 @@ def _timeline(store: StoreDep, record: RunRecord) -> list[RunEvent]:
 
 
 @router.get("/{run_id}/events")
-async def list_events(
-    run_id: str, call: AuthenticatedDep, store: StoreDep
-) -> StreamingResponse:
+async def list_events(run_id: str, call: AuthenticatedDep, store: StoreDep) -> StreamingResponse:
     """The run's timeline as Server-Sent Events, oldest first.
 
     The contract has advertised ``text/event-stream`` since T018 while this returned JSON, which is

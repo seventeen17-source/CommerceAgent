@@ -24,10 +24,11 @@ from app.agent.state import (
 from app.api.runs import (
     _clarification_for,
     _final_message,
+    _timeline,
     _verified_refund_request_id,
     _view,
 )
-from app.trace.checkpoint import RunRecord
+from app.trace.checkpoint import RunRecord, ToolTraceRecord
 
 
 def make_state(**overrides: Any) -> AgentState:
@@ -260,3 +261,38 @@ def test_the_completed_messages_are_unaffected_by_the_stop_rewrite() -> None:
 
     assert "refund-001" in str(_final_message(RunStatus.COMPLETED, success))
     assert "没有这笔退款" in str(_final_message(RunStatus.COMPLETED, failure))
+
+
+def test_a_tool_event_is_timed_by_the_trace_not_by_the_run() -> None:
+    """A run that called tools over minutes must not report them all at its own start instant.
+
+    This is the regression that keeps the timeline trustworthy: the database records when each call
+    happened, and the event has to carry that rather than falling back to the run's start time.
+    """
+    started = datetime(2025, 1, 1, tzinfo=UTC)
+    later = datetime(2025, 1, 1, 0, 5, tzinfo=UTC)
+    record = make_record(make_state(), started_at=started)
+    trace = ToolTraceRecord(
+        run_id=record.run_id,
+        step_index=2,
+        tool_name="get_order",
+        risk_level="MEDIUM",
+        status="SUCCESS",
+        trace_id="trace-12345678",
+        latency_ms=12,
+        created_at=later,
+    )
+
+    class StubStore:
+        """Only what ``_timeline`` reads, so the test is about the timestamp and nothing else."""
+
+        def list_checkpoints(self, run_id: object) -> list[object]:
+            return []
+
+        def list_tool_traces(self, run_id: object) -> list[ToolTraceRecord]:
+            return [trace]
+
+    events = _timeline(StubStore(), record)  # type: ignore[arg-type]
+
+    assert [event.timestamp for event in events] == [later]
+    assert events[0].timestamp != record.started_at
