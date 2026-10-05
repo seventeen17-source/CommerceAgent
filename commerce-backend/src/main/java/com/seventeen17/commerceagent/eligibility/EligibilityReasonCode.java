@@ -45,6 +45,10 @@ public enum EligibilityReasonCode {
     RULE_ACTION_DENY,
     /** 规则本身要求的动作就是人工复核。 */
     RULE_ACTION_MANUAL_REVIEW,
+    // T039：退货窗口的两个具名结论。它们分开是有意的 —— "过了窗口"与"拿不到签收时刻"是两件不同的事，
+    // 前者是业务结论（可以告诉客户为什么不行），后者是数据缺口（应该被看见并修，而不是变成一句"不可退"）。
+    RETURN_WINDOW_EXPIRED,
+    RETURN_WINDOW_UNKNOWN,
     /** 规则要求的动作（退货类）在本版本没有可执行的证据校验，因此 fail closed 为人工复核。 */
     RULE_ACTION_NOT_SUPPORTED
 }

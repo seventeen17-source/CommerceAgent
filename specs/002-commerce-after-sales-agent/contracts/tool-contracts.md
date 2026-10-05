@@ -75,6 +75,10 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 输出：
 - shipment status
 - signed flag
+- **signed timestamp**（`shipments.signed_at` 的原样直传，T039 起加入）
+  它是退货窗口的起算点：资格判定用「签收时刻 + 规则声明的窗口天数」判断还来不来得及。
+  承运方没有给出签收时刻时它是 `null`，此时 Java 返回 `RETURN_WINDOW_UNKNOWN` 并拒绝，
+  **不猜**一个时刻 —— 那是数据缺口，与「已经过了窗口」是两件不同的事。
 - last meaningful event/time
 - deterministic anomaly projection（如有）
 

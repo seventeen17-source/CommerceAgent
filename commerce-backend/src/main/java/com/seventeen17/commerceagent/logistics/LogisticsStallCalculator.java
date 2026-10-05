@@ -45,12 +45,13 @@ public class LogisticsStallCalculator {
         Instant baseline = latestOf(shipment.getLastEventAt(), latestEventOccurredAt);
         if (baseline == null || signed) {
             // 已签收时 stalledHours 保持 null：签收意味着物流已经走完，"停滞"不再是一个有意义的量。
-            return new LogisticsSnapshot(shipment.getStatus(), signed, baseline, null);
+            return new LogisticsSnapshot(shipment.getStatus(), signed, shipment.getSignedAt(), baseline, null);
         }
         long stalledHours = Duration.between(baseline, clock.instant()).toHours();
         // 时间戳落在未来（时钟偏移或脏数据）时夹到 0：不谎报停滞，但也不销毁事实——
         // lastMeaningfulEventAt 照实暴露那个未来时间戳，异常本身仍然看得见。
-        return new LogisticsSnapshot(shipment.getStatus(), signed, baseline, Math.max(0L, stalledHours));
+        return new LogisticsSnapshot(
+                shipment.getStatus(), signed, shipment.getSignedAt(), baseline, Math.max(0L, stalledHours));
     }
 
     /**

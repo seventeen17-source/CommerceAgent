@@ -8,6 +8,7 @@ import com.seventeen17.commerceagent.security.CommercePrincipal;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -129,10 +130,17 @@ public class EligibilityService {
      * 确实声明了停滞阈值且动作是需要物流证据的退款。
      */
     static boolean needsLogisticsFacts(OrderSnapshot order, RuleSelection selection) {
-        return selection.isSelected()
-                && order.afterSalesStatus() == null
-                && selection.rule().getAllowedAction() == AllowedAction.REFUND_ONLY
-                && selection.rule().getLogisticsStalledHours() != null;
+        if (!selection.isSelected() || order.afterSalesStatus() != null) {
+            return false;
+        }
+        // REFUND_ONLY 要的是停滞证据；RETURN / RETURN_REFUND 要的是签收时刻（退货窗口的起算点）。
+        // 漏掉后者会让退货永远拿到 null 快照 → 每个退货都变成 RETURN_WINDOW_UNKNOWN：
+        // 测试可能全绿，而功能在真实环境里是死的。
+        return switch (selection.rule().getAllowedAction()) {
+            case REFUND_ONLY -> selection.rule().getLogisticsStalledHours() != null;
+            case RETURN, RETURN_REFUND -> selection.rule().getReturnWindowDays() != null;
+            default -> false;
+        };
     }
 
     /**
@@ -164,9 +172,24 @@ public class EligibilityService {
                 return manualReview(rule, EligibilityReasonCode.RULE_ACTION_MANUAL_REVIEW, now);
             }
             case RETURN, RETURN_REFUND -> {
-                // 规则可以是任何动作，但本版本只实现了退款所需的证据校验。宁可转人工，也不在没有退货窗口
-                // 校验的情况下自动放行一个退货动作（T039 会补上 return window 判定并替换这条分支）。
-                return manualReview(rule, EligibilityReasonCode.RULE_ACTION_NOT_SUPPORTED, now);
+                // T039：退货窗口。判据只依赖两件已经存在的权威事实 —— 规则声明的窗口天数，以及运单的签收
+                // 时刻（本仓库自己的"已签收"判据也用它）。它回答的是"还来不来得及"，而不是"能不能"。
+                Integer returnWindowDays = rule.getReturnWindowDays();
+                if (returnWindowDays == null) {
+                    // 规则声称可以退货却没声明窗口：这是配置问题，不是客户的错，所以转人工而不是拒绝。
+                    return manualReview(rule, EligibilityReasonCode.RULE_ACTION_NOT_SUPPORTED, now);
+                }
+                if (logistics == null || logistics.signedAt() == null) {
+                    // 拿不到签收时刻时【不猜】：窗口算不出来就明确说算不出来 —— 与"过了窗口"是两件事，
+                    // 因此用不同的原因码，好让数据缺口被看见，而不是被伪装成一个业务结论。
+                    return denied(rule, EligibilityReasonCode.RETURN_WINDOW_UNKNOWN, now);
+                }
+                if (logistics.signedAt().plus(returnWindowDays, ChronoUnit.DAYS).isBefore(now)) {
+                    return denied(rule, EligibilityReasonCode.RETURN_WINDOW_EXPIRED, now);
+                }
+                // 窗口内：这里不 return，贯穿到下面的金额与审批校验 —— RETURN_REFUND 同样会动钱，那两道闸
+                // 必须一样过。另注意：退货规则不得声明 logistics_stalled_hours，否则已签收运单会让停滞分支
+                // 命中 LOGISTICS_CONFLICTS_WITH_ORDER 而转人工。
             }
             case REFUND_ONLY -> {
                 // 继续做退款所需的证据与金额校验。
@@ -211,7 +234,7 @@ public class EligibilityService {
 
         return new EligibilityDecision(
                 true,
-                AllowedAction.REFUND_ONLY,
+                rule.getAllowedAction(),
                 refundableAmount,
                 approvalRequired,
                 rule.getRuleCode(),

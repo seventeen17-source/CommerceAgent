@@ -280,8 +280,8 @@ class EligibilityServiceTest {
         AfterSalesRule rule = refundRule("T020-CONTRADICTION", 1, "ELECTRONICS", OrderStatus.SHIPPED);
 
         // 订单行说 SHIPPED，运单说已签收。两个权威来源冲突时选错方向就是"给已签收订单退款"。
-        EligibilityDecision decision =
-                decide(shippedOrder("199.00"), rule, new LogisticsSnapshot(ShipmentStatus.DELIVERED, true, null, null));
+        EligibilityDecision decision = decide(
+                shippedOrder("199.00"), rule, new LogisticsSnapshot(ShipmentStatus.DELIVERED, true, null, null, null));
 
         assertFalse(decision.eligible());
         assertEquals(AllowedAction.MANUAL_REVIEW, decision.allowedAction());
@@ -458,14 +458,81 @@ class EligibilityServiceTest {
                 EFFECTIVE_FROM,
                 null);
 
-        // 本版本只实现了退款所需的证据校验：退货窗口判定属于 T039。在没有那套校验之前宁可转人工，
-        // 也不能因为规则行写着 RETURN 就自动放行。
+        // T039 已实现退货窗口判定：规则行声称可以退货，但这次调用【没有带上物流事实】→ 窗口算不出来
+        // → 明确说"算不出来"（RETURN_WINDOW_UNKNOWN）并拒绝，既不放行、也不假装成"需要人工"。
+        // 它证明的事情没变：一个写着 RETURN 的规则行，不会被当成退款执行，也不会在没有窗口依据时放行。
         for (AfterSalesRule rule : List.of(returnRule, returnRefundRule)) {
             EligibilityDecision decision = decide(delivered, rule, null);
-            assertEquals(AllowedAction.MANUAL_REVIEW, decision.allowedAction(), rule.getRuleCode());
-            assertEquals(List.of(EligibilityReasonCode.RULE_ACTION_NOT_SUPPORTED), decision.reasonCodes());
-            assertFalse(decision.eligible(), "未实现的动作不得被视为已批准");
+            assertEquals(AllowedAction.DENY, decision.allowedAction(), rule.getRuleCode());
+            assertEquals(List.of(EligibilityReasonCode.RETURN_WINDOW_UNKNOWN), decision.reasonCodes());
+            assertFalse(decision.eligible(), "拿不到签收时刻时不得放行退货");
         }
+    }
+
+    // ------------------------------------------------------------------
+    // T039：退货窗口
+    // ------------------------------------------------------------------
+
+    @Test
+    void aReturnInsideTheWindowIsGranted() {
+        AfterSalesRule rule = returnRule("T039-RETURN-OPEN", 1, "ELECTRONICS", OrderStatus.DELIVERED, 7, null);
+
+        EligibilityDecision decision = decide(
+                order(OrderStatus.DELIVERED, "199.00", null, "ELECTRONICS"),
+                rule,
+                signedLogistics(NOW.minus(Duration.ofDays(3))));
+
+        assertEquals(AllowedAction.RETURN_REFUND, decision.allowedAction());
+        assertTrue(decision.eligible(), "签收 3 天、窗口 7 天：应当放行退货");
+        assertEquals("T039-RETURN-OPEN", decision.ruleCode());
+    }
+
+    @Test
+    void aReturnOutsideTheWindowIsDeniedWithANamedReason() {
+        AfterSalesRule rule = returnRule("T039-RETURN-EXPIRED", 1, "ELECTRONICS", OrderStatus.DELIVERED, 7, null);
+
+        EligibilityDecision decision = decide(
+                order(OrderStatus.DELIVERED, "199.00", null, "ELECTRONICS"),
+                rule,
+                signedLogistics(NOW.minus(Duration.ofDays(8))));
+
+        assertFalse(decision.eligible());
+        assertEquals(AllowedAction.DENY, decision.allowedAction());
+        assertEquals(List.of(EligibilityReasonCode.RETURN_WINDOW_EXPIRED), decision.reasonCodes());
+    }
+
+    @Test
+    void aReturnWithoutASignedTimestampIsUnknownRatherThanExpired() {
+        AfterSalesRule rule = returnRule("T039-RETURN-UNKNOWN", 1, "ELECTRONICS", OrderStatus.DELIVERED, 7, null);
+
+        EligibilityDecision decision = decide(
+                order(OrderStatus.DELIVERED, "199.00", null, "ELECTRONICS"),
+                rule,
+                // 已签收，但承运方没给出签收时刻：窗口算不出来。
+                new LogisticsSnapshot(ShipmentStatus.DELIVERED, true, null, null, null));
+
+        assertFalse(decision.eligible());
+        assertEquals(
+                List.of(EligibilityReasonCode.RETURN_WINDOW_UNKNOWN),
+                decision.reasonCodes(),
+                "拿不到签收时刻是数据缺口，不是'过了窗口'——两者必须用不同原因码");
+    }
+
+    @Test
+    void aReturnRuleThatAlsoDeclaresAStallThresholdSendsEverySignedReturnToReview() {
+        // 刻意的错误配置：退货规则不得声明停滞阈值。已签收运单会让停滞分支命中
+        // LOGISTICS_CONFLICTS_WITH_ORDER（"订单行说 SHIPPED、运单说已签收"那种冲突判据），
+        // 于是每一笔本该放行的退货都被转人工。这条用例把"为什么不能这么配"钉在代码里。
+        AfterSalesRule rule = returnRule("T039-RETURN-MISCONFIGURED", 1, "ELECTRONICS", OrderStatus.DELIVERED, 7, 48);
+
+        EligibilityDecision decision = decide(
+                order(OrderStatus.DELIVERED, "199.00", null, "ELECTRONICS"),
+                rule,
+                signedLogistics(NOW.minus(Duration.ofDays(3))));
+
+        assertFalse(decision.eligible());
+        assertEquals(AllowedAction.MANUAL_REVIEW, decision.allowedAction());
+        assertEquals(List.of(EligibilityReasonCode.LOGISTICS_CONFLICTS_WITH_ORDER), decision.reasonCodes());
     }
 
     // ------------------------------------------------------------------
@@ -598,11 +665,46 @@ class EligibilityServiceTest {
 
     private static LogisticsSnapshot stalledLogistics(long stalledHours) {
         return new LogisticsSnapshot(
-                ShipmentStatus.IN_TRANSIT, false, NOW.minus(Duration.ofHours(stalledHours)), stalledHours);
+                ShipmentStatus.IN_TRANSIT, false, null, NOW.minus(Duration.ofHours(stalledHours)), stalledHours);
+    }
+
+    private static LogisticsSnapshot signedLogistics(Instant signedAt) {
+        // 已签收的运单：stalledHours 保持 null（签收意味着物流走完了，"停滞"不再有意义），
+        // 而 signedAt 是退货窗口的起算点 —— 这正是 T039 需要的那个事实。
+        return new LogisticsSnapshot(ShipmentStatus.DELIVERED, true, signedAt, signedAt, null);
     }
 
     private static LogisticsSnapshot noLogisticsEvidence() {
-        return new LogisticsSnapshot(ShipmentStatus.CREATED, false, null, null);
+        return new LogisticsSnapshot(ShipmentStatus.CREATED, false, null, null, null);
+    }
+
+    /**
+     * 退货规则的夹具：动作是 {@code RETURN_REFUND}（会动钱，所以金额与审批两道闸照样适用）。
+     *
+     * <p>刻意把 {@code logisticsStalledHours} 暴露成参数，而不是写死 null：T039 的规则里<b>不得</b>声明停滞阈值，
+     * 否则已签收运单会命中 {@code LOGISTICS_CONFLICTS_WITH_ORDER} 并转人工 —— 这条要靠一个用例钉住，
+     * 而钉住它需要一个"故意写错"的规则，所以这里必须能传。
+     */
+    private static AfterSalesRule returnRule(
+            String ruleCode,
+            int version,
+            String productCategory,
+            OrderStatus requiredOrderStatus,
+            Integer returnWindowDays,
+            Integer logisticsStalledHours) {
+        return AfterSalesRule.create(
+                ruleCode,
+                version,
+                productCategory,
+                requiredOrderStatus,
+                logisticsStalledHours,
+                returnWindowDays,
+                new BigDecimal("500.00"),
+                new BigDecimal("300.00"),
+                AllowedAction.RETURN_REFUND,
+                true,
+                EFFECTIVE_FROM,
+                null);
     }
 
     /** 夹具规则统一使用 48 小时停滞阈值、500.00 上限、300.00 审批阈值，个别用例再按需覆盖。 */

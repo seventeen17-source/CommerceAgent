@@ -17,7 +17,13 @@ import java.time.Instant;
  * 不是靠推理补上缺失的证据。
  */
 public record LogisticsSnapshot(
-        ShipmentStatus status, boolean signed, Instant lastMeaningfulEventAt, Long stalledHours) {
+        ShipmentStatus status,
+        boolean signed,
+        // 签收【时刻】而不是"是否签收"的布尔值：T039 的退货窗口要从它起算，而 boolean 算不出一个窗口。
+        // 它是 shipments.signed_at 的直传（本仓库自己的"已签收"判据也用它，见 LogisticsStallCalculator）。
+        Instant signedAt,
+        Instant lastMeaningfulEventAt,
+        Long stalledHours) {
 
     /**
      * 是否达到给定停滞阈值。
