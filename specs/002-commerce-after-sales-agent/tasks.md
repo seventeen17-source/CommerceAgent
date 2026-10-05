@@ -80,7 +80,7 @@
 
 ## Phase 4：US2 已签收商品改走退货（P1）
 
-- [ ] T036 [P] [US2] 编写 Return eligibility/state/idempotency Java Integration Test：`ReturnIntegrationTest.java`。
+- [X] T036 [P] [US2] 编写 Return eligibility/state/idempotency Java Integration Test：`ReturnIntegrationTest.java`。→ **已交付（2026-09-29）**：落地为 `ReturnEligibilityIntegrationTest.java`（根包 ✓，与 T020 的 eligibility 集成测试同风格 ✓），两个用例：**激活**的 `aDeliveredOrderIsNotEligibleForADirectRefund` 断言"已签收订单不得被判成直接退款"（断言**决策**而非代码路径 → 今天成立 ✓ 且 T039 之后仍成立 ✓，是回归保险而不是将来要重写的测试 ✓；并刻意种下 US2 禁止的配置——一条在 `DELIVERED` 上授予 `REFUND_ONLY` 的规则 ✓）；**`@Disabled`** 的 `aDeliveredOrderIsRoutedToAReturnAction` 把"还没做的部分"写进代码 ✓。**接缝选择**：T036 落在**已存在的规则层** ✓；数据层的幂等约束测试应与 **T038 建表配对** ✓，状态层随 **T040** ✓（直接引用不存在的类会让整个 `verify` 红 ✗，而不是一条用例红 ✓）。门禁：`spotless:apply` → 定点 test → **`clean verify` BUILD SUCCESS** ✓（`Tests run: 165, Failures: 0, Errors: 0, Skipped: 1` ✓ / `Spotless 98 files clean` ✓ / `BugInstance 0` ✓）。附带还清旧账：`spotless:apply` 因新的 LF 策略规范化整个 Java 树（~100 文件，diff 纯格式 ✓）→ T028 遗留格式债务一并修好 ✓，工作区完全干净 ✓。
 - [ ] T037 [P] [US2] 编写 Python Branching Test，证明 `DELIVERED` 证据会把 refund path 改成 return path：`test_us2_delivered_return.py`。
 - [ ] T038 [US2] 新建 `commerce.return_requests` schema、Entity/Repository：`V004__return_schema.sql`、`returns/`；同步扩展 T014 fixture reset 清理 return state。
 - [ ] T039 [US2] 扩展 eligibility rules 支持 return window、`RETURN`、`RETURN_REFUND`。
