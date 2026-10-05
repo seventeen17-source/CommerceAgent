@@ -489,7 +489,10 @@ async def list_events(run_id: str, call: AuthenticatedDep, store: StoreDep) -> l
                 error_code=trace.error_code,
                 latency_ms=trace.latency_ms,
                 summary=f"step {trace.step_index} trace {trace.trace_id}",
-                timestamp=record.started_at,
+                # The trace's own time, not the run's start: the row has recorded when the call
+                # actually happened all along, and stamping every call with started_at made the
+                # timeline read as if they had all run at the instant the run was created.
+                timestamp=trace.created_at or record.started_at,
             )
         )
 

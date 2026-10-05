@@ -275,6 +275,14 @@ class ToolTraceRecord(BaseModel):
     error_code: str | None = Field(default=None, max_length=100)
     retryable: bool = False
     latency_ms: int = Field(default=0, ge=0)
+    #: When the call actually happened, as the database recorded it.
+    #:
+    #: Optional on purpose: the column is filled by ``DEFAULT CURRENT_TIMESTAMP``, so a trace being
+    #: *written* legitimately does not know it yet. ``None`` therefore means "this object was never
+    #: read back from the database", not "the call happened at an unknown time" -- and readers that
+    #: came from ``list_tool_traces`` always have it. Consumers must not substitute the run's start
+    #: time for it, which is exactly the mistake that made four tool calls look simultaneous.
+    created_at: datetime | None = None
 
     @field_validator("input_summary", "output_summary")
     @classmethod
