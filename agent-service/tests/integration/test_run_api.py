@@ -729,6 +729,31 @@ def test_every_run_endpoint_requires_a_credential(client: TestClient) -> None:
         assert response.status_code == 401, f"{method.upper()} {path} was reachable unauthenticated"
 
 
+def test_a_client_supplied_approval_id_grants_nothing(
+    client: TestClient, db_factory: ConnectionFactory
+) -> None:
+    """An approval id the caller invents must stay inert: US1 has no approval record to bind it to.
+
+    The field is accepted for contract compatibility. Writing it into the run's approval state would
+    turn a string the caller chose into evidence, which is precisely the bypass that US4's binding
+    has to close - so the safe behaviour today is that it changes nothing.
+    """
+    body = waiting_run(client, db_factory)
+
+    response = client.post(
+        f"/api/v1/agent/runs/{body['runId']}/resume",
+        json={"approval_request_id": "approval-i-just-invented"},
+        headers=auth_header(mint_token("customer-001")),
+    )
+
+    assert response.status_code == 200, response.text
+    payload = PostgresRunStore(db_factory).get_run(UUID(body["runId"])).to_state()
+    assert payload is not None
+    # The caller's string reached no authoritative field, and the view publishes no approval either.
+    assert payload.approval is None
+    assert response.json()["approvalRequestId"] is None
+
+
 def test_health_reports_configuration_without_the_secret(client: TestClient) -> None:
     response = client.get("/health")
 
