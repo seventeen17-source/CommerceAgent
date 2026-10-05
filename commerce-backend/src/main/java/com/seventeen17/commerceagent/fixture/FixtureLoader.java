@@ -86,6 +86,9 @@ public class FixtureLoader {
         // FK 违约失败。Eval reset 的语义是"业务状态回到基线"，退款这类写入结果必须一起清掉，否则"重置后重跑同一个
         // 用例"会因为上一轮的退款行而得到不同结论。
         jdbcTemplate.update("DELETE FROM commerce.refund_requests WHERE order_id IN ('order-001', 'order-002')");
+        // T038：退货行与退款行同类 —— 都是"运行产生的写入结果"，不是用例的起点。同样必须在删 orders 之前
+        // 处理掉（同样的外键），否则"重置后重跑同一个用例"会带着上一轮的退货行，结论不可比。
+        jdbcTemplate.update("DELETE FROM commerce.return_requests WHERE order_id IN ('order-001', 'order-002')");
         jdbcTemplate.update(
                 "DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002')");
         jdbcTemplate.update("DELETE FROM commerce.shipments WHERE order_id IN ('order-001', 'order-002')");
