@@ -4,13 +4,20 @@ description: >-
   US1 的三条判定线。每个 case 都写成"事后世界必须长什么样"，而不是"Agent 应该说什么"——
   判分器只读业务状态，因此这里能表达的期望也只有业务状态与机制两类。
 
+  两个 id 是两件事，不要混：
+    · caseId     = fixture（FixtureCaseRegistry 认识的那个世界，reset 用它）
+    · scenarioId = 场景（在同一个世界里问什么、期望什么；报告与判分用它）
+  一开始我把场景 id 填进了 caseId，reset 于是返回 404 —— 404 的含义是"registry 里没有这个
+  case"，不是"路由没注册"。
+
   关于 recoveryReadRequired：只断言"最终恰好一行退款"是不够的。一个什么都没做的 run
   （SAFE_STOP、资格被拒、甚至根本没走到写路径）同样会留下恰好一行或零行，于是会在
   "Agent 没有工作"的情况下判为通过——这是评分器最危险的假通过。因此需要恢复的 case
   必须同时断言"恢复读确实发生过"，用机制把结果钉住。
 
 cases:
-  - caseId: us1-happy-refund
+  - scenarioId: us1-happy-refund
+    caseId: refund-logistics-001
     fixtureVersion: t014-refund-logistics-001-v1
     user: customer-001
     request: 我的包裹物流三天没动了，我要退款
@@ -18,10 +25,11 @@ cases:
     expect:
       terminalStatus: COMPLETED
       refundsForOrder: 1
-      refundStatuses: [PENDING, SUCCEEDED]
+      refundStatuses: [CREATED]
       recoveryReadRequired: false
 
-  - caseId: us1-duplicate-request
+  - scenarioId: us1-duplicate-request
+    caseId: refund-logistics-001
     fixtureVersion: t014-refund-logistics-001-v1
     user: customer-001
     request: 我的包裹物流三天没动了，我要退款
@@ -31,7 +39,8 @@ cases:
       refundsForOrder: 1
       recoveryReadRequired: false
 
-  - caseId: us1-unknown-write-timeout
+  - scenarioId: us1-unknown-write-timeout
+    caseId: refund-logistics-001
     fixtureVersion: t014-refund-logistics-001-v1
     user: customer-001
     request: 我的包裹物流三天没动了，我要退款

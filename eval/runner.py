@@ -29,7 +29,15 @@ from typing import Any
 import httpx
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The eval tree and the agent service are deliberately separate: the runner drives the agent from
+# outside, so it must not become importable as part of it. Two paths are added explicitly rather than
+# relying on the working directory, because `python script.py` puts the *script's* directory on
+# sys.path rather than the current one:
+#   * eval/          so `scorers.*` resolves
+#   * agent-service/ only to reuse the configured JWT issuer/secret when minting eval tokens
+_EVAL_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_EVAL_DIR))
+sys.path.insert(0, str(_EVAL_DIR.parent / "agent-service"))
 
 from scorers.business_state import Expectation, RefundFacts, score_business_state
 
@@ -75,9 +83,17 @@ def mint_token(user_id: str) -> str:
 def reset_case(client: httpx.Client, case: dict[str, Any]) -> str | None:
     """Return an infrastructure failure message, or None when the world is ready."""
     try:
-        response = client.post(f"{JAVA_BASE}/internal/eval/fixtures/{case['caseId']}/reset")
+        response = client.post(
+            f"{JAVA_BASE}/internal/eval/fixtures/{case['caseId']}/reset",
+            # Every route is behind `anyRequest().authenticated()`, reset included, so an
+            # unauthenticated reset is refused with 401 rather than 404 -- which is also why a 401
+            # says nothing about whether the endpoint is registered. Only the profile does.
+            headers={"Authorization": f"Bearer {mint_token(case['user'])}"},
+        )
     except httpx.HTTPError as exc:
         return f"reset endpoint unreachable: {type(exc).__name__}"
+    if response.status_code == 401:
+        return "reset refused with 401 - the runner must authenticate this call"
     if response.status_code == 404:
         return (
             "reset endpoint is not registered - it exists only under the test/eval profile, "
@@ -105,6 +121,13 @@ def refund_rows(order_id: str) -> list[RefundFacts]:
 
 
 def recovery_read_happened(run_id: str) -> bool:
+    """True only when a *lost* write was recovered: an unknown outcome, then an authority read.
+
+    The plain verify read is not enough. Every successful run reads authority after writing, so
+    accepting any such read would let this case pass with no timeout and no unknown write at all --
+    a false pass of exactly the kind this assertion exists to prevent. The sequence is what makes it
+    evidence: the write first reported that it did not know, and only then did the run go and ask.
+    """
     import psycopg
     from app.config.settings import Settings  # type: ignore[import-not-found]
 
@@ -113,8 +136,17 @@ def recovery_read_happened(run_id: str) -> bool:
         connection.cursor() as cursor,
     ):
         cursor.execute(
-            "SELECT count(*) FROM agent.tool_executions WHERE run_id = %s AND tool_name = %s",
-            (run_id, "get_after_sales_status"),
+            "SELECT step_index, error_code FROM agent.tool_executions "
+            "WHERE run_id = %s AND tool_name = %s ORDER BY step_index",
+            (run_id, "create_refund_request"),
+        )
+        unknown_steps = [row[0] for row in cursor.fetchall() if row[1] == "WRITE_TIMEOUT_UNKNOWN"]
+        if not unknown_steps:
+            return False
+        cursor.execute(
+            "SELECT count(*) FROM agent.tool_executions "
+            "WHERE run_id = %s AND tool_name = %s AND step_index > %s",
+            (run_id, "get_after_sales_status", min(unknown_steps)),
         )
         return (cursor.fetchone() or [0])[0] > 0
 
@@ -124,7 +156,7 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
     with httpx.Client(timeout=300.0, trust_env=False) as client:
         problem = reset_case(client, case)
         if problem is not None:
-            return Outcome(case["caseId"], "infrastructure", problem)
+            return Outcome(case.get("scenarioId") or case["caseId"], "infrastructure", problem)
 
         token = mint_token(case["user"])
         response = client.post(
@@ -133,7 +165,7 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
             json={"message": case["request"]},
         )
         if response.status_code != 201:
-            return Outcome(case["caseId"], "fail", f"run was not created: {response.status_code}")
+            return Outcome(case.get("scenarioId") or case["caseId"], "fail", f"run was not created: {response.status_code}")
         view = response.json()
 
         observed = refund_rows(order_id)
@@ -155,7 +187,7 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
             reasons.append("no recovery read (get_after_sales_status) was performed")
 
     kind = "pass" if not reasons else "fail"
-    return Outcome(case["caseId"], kind, "; ".join(reasons) or "business state matches the case")
+    return Outcome(case.get("scenarioId") or case["caseId"], kind, "; ".join(reasons) or "business state matches the case")
 
 
 def main(argv: list[str] | None = None) -> int:
