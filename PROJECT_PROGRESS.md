@@ -5,7 +5,7 @@
 ## 当前状态
 
 - **当前 Phase**：Phase 3 — US1 MVP
-- **当前 Tasks**：T034 — 可信客户界面（客户视角最小 Console）。**实现已完成、四条门禁全绿、关键路径已预检，待用户在浏览器手工验收**；范围定义见 `spec.md` 用户故事 1 的「客户界面范围」段。
+- **当前 Tasks**：**Phase 4 — US2 已签收商品改走退货**；Current Task：**T036**（退货的 Java 集成测试）。US1 已收口：T019–T035 完成 ✅，其中 T034 经**用户浏览器验收** ✅、T035 的 Eval 首次真实结果为 **2 pass / 1 预期内 fail**（`us1-unknown-write-timeout` 的 fail 是因为**故障注入尚不存在**，不伪造 pass ✓）。**明确延期的债**：T027 的 approval binding（US4/T049）· `eval` profile 缺配置（T071 前置）· Agent API `ErrorResponse` 与契约不一致（`{"detail": ...}`，记为 contract-hardening debt）· `web/` 无前端测试设施 · `/events` 仍返回 JSON 而契约写 `text/event-stream`（见下）。
   - **已完成**：`state.advance()` 作为唯一校验变更入口；全部条件边的路由规则与 step/retry 预算；图的装配与拓扑校验（去向显式声明、缺节点启动即报错）；**10 / 10 个节点**；**持久化接缝**（`runtime.py` 的 `RunSession`：`checkpoint_state` / `persist_intent` / `transition` 三个 seam + 版本跟踪，边界写延迟一步使 `next_action` 是事实而非猜测）；**失败收尸**（非终态出口一律先落 `FAILED` 再原样抛出；版本冲突与已终态两种预期拒绝静默）；**生产接线**（`wiring.py` 是 10 节点 + 9 依赖的唯一组装点；`POST /runs`、`/input`、`/resume` 三个入口都会组装图并驱动 run）；**工具 trace 接线**（主链上五条碰 Java 的路径全部上报到 `agent.tool_executions`：证据在产生点生成而不到事后反推、缺 `trace_id` 用本地 id 并标 `traceIdSource: LOCAL`、`risk_level` 在 registry 处绑定且未注册工具名归 HIGH 但照样记录）。
   - **`POST /runs` 是第一次 invocation 的唯一入口**：契约没有 execute 端点，而 `/input` 与 `/resume` 都要求 run 处于 `WAITING_*`，所以创建时不驱动就等于"永远不动"。驱动做成了可注入的 `RunDriver` 接缝（`check` + `run` 两个方法）：**`check` 在写任何东西之前**回答"现在能不能跑"，没配模型 → 503 且库中不留任何东西——否则会留下一个没人能推进的 `RUNNING` run，而 `RUNNING` 刻意不可 resume。
   - **未完成**：**5173 live 验收**、**`/input` 与 `/resume` 的 HTTP happy-path 用例**（`POST /runs` 已有：断言它确实调用了 driver；这两个入口目前只有单元测试覆盖文本规则与组装）。
