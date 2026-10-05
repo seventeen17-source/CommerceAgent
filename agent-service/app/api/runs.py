@@ -41,8 +41,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from app.agent.routing import Node
 from app.agent.runtime import RunSession, drive_graph
-from app.agent.state import AgentState, RunStatus, VerificationStatus, advance
+from app.agent.state import (
+    AgentState,
+    RunStatus,
+    VerificationStatus,
+    WriteStatus,
+    advance,
+)
 from app.agent.wiring import build_agent_graph
 from app.clients.commerce_client import CommerceClient
 from app.config.settings import Settings
@@ -305,12 +312,35 @@ def _final_message(status: RunStatus, state: AgentState | None) -> str | None:
     if status is RunStatus.ESCALATED:
         return "已转人工处理。"
     if status is RunStatus.SAFE_STOP:
-        # The stop reason is recorded on the checkpoint, not on the run row, so it is not repeated
-        # here. Saying "safely stopped" without a reason is still true; inventing one would not be.
-        return "已在安全边界内停止，未执行资金动作。"
+        return _safe_stop_message(state)
     if status is RunStatus.FAILED:
         return "执行失败，未完成。"
     return _completed_message(state)
+
+
+def _safe_stop_message(state: AgentState | None) -> str:
+    """What a stopped run may say about money -- which depends entirely on where it stopped.
+
+    Two different facts share this status, and they must never share a sentence. A *refusal* (no
+    evidence, eligibility unavailable) never reached a write, so saying no money moved is a fact. An
+    *unconfirmable outcome* is the opposite: the write or the verification went UNKNOWN, which by
+    definition means the request may have reached the business side. There, "nothing happened" is a
+    lie with money behind it -- and the run's own trace is the only thing that can reconcile it.
+
+    The retired-payload case gets its own sentence for the same reason: not knowing must not be
+    rendered as either conclusion.
+    """
+    if state is None:
+        return "处理已停止（该 run 的详细执行状态已按保留策略回收，无法从该记录确认资金处理明细）。"
+    unconfirmable = state.verification.status in (
+        VerificationStatus.UNKNOWN,
+        VerificationStatus.PENDING,
+    ) or state.write.status in (WriteStatus.UNKNOWN, WriteStatus.PENDING)
+    if unconfirmable:
+        return "处理已停止，但当前无法确认退款请求最终是否已提交。请勿重复发起，需要进一步核对。"
+    if state.write_intent is None and state.write.status is WriteStatus.NOT_ATTEMPTED:
+        return "处理已在安全边界内停止，未发起退款写入。"
+    return "处理已停止；最终是否产生资金动作尚需核对。"
 
 
 def _completed_message(state: AgentState | None) -> str:
@@ -503,11 +533,11 @@ async def submit_input(
     driver = _driver(request)
     driver.check(settings)
     merged = _merge_user_input(_payload_of(record), body.message)
-    resumed = _resume(store, record, current_node="user_input_received", next_action=_UNDERSTAND)
+    resumed = _resume(store, record, current_node=Node.UNDERSTAND.value, next_action=_UNDERSTAND)
     session = RunSession(store, resumed)
     session.checkpoint(
         state=advance(session.state, user_request=merged),
-        current_node="user_input_received",
+        current_node=Node.UNDERSTAND.value,
         next_action=_UNDERSTAND,
     )
     return _view(await driver.run(request, call, session, settings))
@@ -532,7 +562,12 @@ async def resume_run(
     record = _owned_run(store, run_id, call)
     driver = _driver(request)
     driver.check(settings)
-    resumed = _resume(store, record, current_node="resumed", next_action=_UNDERSTAND)
+    resumed = _resume(
+        store,
+        record,
+        current_node=record.current_node or Node.WAITING_USER.value,
+        next_action=_UNDERSTAND,
+    )
     return _view(await driver.run(request, call, RunSession(store, resumed), settings))
 
 
@@ -579,7 +614,10 @@ def _resume(
 
 #: The node the walk starts at. Spelled the way ``create_run`` already spells it, so the two entry
 #: points cannot disagree about what a freshly woken run is about to do.
-_UNDERSTAND = "understand_request"
+#: The node a freshly claimed run will execute next. It is a *reference* to the graph's vocabulary
+#: rather than a second literal: storing "understand_request" while the graph calls the node
+#: "understand" makes the run row describe a graph that does not exist.
+_UNDERSTAND = Node.UNDERSTAND.value
 
 #: How a follow-up is appended to the original request. A visible marker rather than a bare
 #: concatenation, so a reviewer reading the payload can tell what the user typed when.
@@ -733,4 +771,4 @@ def _prompt_version() -> str:
     creation rather than derived later because a run must be explainable by the configuration that
     produced it, not by whatever the configuration is when someone reads it.
     """
-    return "t018-skeleton-v1"
+    return "t032-us1-runtime-v1"

@@ -19,6 +19,7 @@ from app.agent.state import (
     PrincipalRole,
     RunStatus,
     VerificationStatus,
+    WriteStatus,
 )
 from app.api.runs import (
     _clarification_for,
@@ -134,7 +135,8 @@ def test_each_non_completion_status_has_its_own_ending() -> None:
     assert "补充信息" in str(_final_message(RunStatus.WAITING_USER, None))
     assert "审批" in str(_final_message(RunStatus.WAITING_APPROVAL, None))
     assert "人工" in str(_final_message(RunStatus.ESCALATED, None))
-    assert "安全边界" in str(_final_message(RunStatus.SAFE_STOP, None))
+    # SAFE_STOP is deliberately absent here: its sentence depends on where the run stopped, so it
+    # has its own tests below rather than one fixed expectation.
     assert "失败" in str(_final_message(RunStatus.FAILED, None))
 
 
@@ -192,3 +194,69 @@ def test_a_wait_we_cannot_explain_is_not_guessed_at() -> None:
 
 def test_a_run_that_is_not_waiting_asks_nothing() -> None:
     assert _clarification_for(RunStatus.RUNNING, make_state(intent="UNKNOWN")) is None
+
+
+def test_a_refusal_may_say_no_refund_was_started() -> None:
+    """A stop that never reached a write may say so, because that is a recorded fact."""
+    stopped = make_state(
+        verification={"status": VerificationStatus.NOT_RUN},
+        write={"status": WriteStatus.NOT_ATTEMPTED},
+    )
+
+    message = _final_message(RunStatus.SAFE_STOP, stopped)
+
+    assert message is not None
+    assert "未发起退款写入" in message
+    assert "无法确认" not in message
+
+
+def test_an_unconfirmable_write_must_not_claim_nothing_happened() -> None:
+    """The write may have reached the business side; 'no money moved' would be a lie with money."""
+    stopped = make_state(write={"status": WriteStatus.UNKNOWN})
+
+    message = _final_message(RunStatus.SAFE_STOP, stopped)
+
+    assert message is not None
+    assert "无法确认" in message
+    for forbidden in ("未执行资金动作", "未发起退款写入", "没有产生退款", "退款失败"):
+        assert forbidden not in message
+
+
+def test_an_unconfirmable_verification_also_refuses_to_conclude() -> None:
+    stopped = make_state(verification={"status": VerificationStatus.UNKNOWN})
+
+    message = _final_message(RunStatus.SAFE_STOP, stopped)
+
+    assert message is not None
+    assert "无法确认" in message
+    assert "未发起退款写入" not in message
+
+
+def test_a_write_still_in_flight_is_not_reported_as_concluded() -> None:
+    """PENDING is not 'nothing happened' either: the request may be in flight right now."""
+    stopped = make_state(write={"status": WriteStatus.PENDING})
+
+    message = _final_message(RunStatus.SAFE_STOP, stopped)
+
+    assert message is not None
+    assert "无法确认" in message
+
+
+def test_a_stop_with_a_reclaimed_payload_concludes_nothing() -> None:
+    message = _final_message(RunStatus.SAFE_STOP, None)
+
+    assert message is not None
+    assert "回收" in message
+    for forbidden in ("未执行资金动作", "未发起退款写入", "无法确认退款请求最终是否已提交"):
+        assert forbidden not in message
+
+
+def test_the_completed_messages_are_unaffected_by_the_stop_rewrite() -> None:
+    """The verified outcomes keep their meaning: this change is only about the unknown ones."""
+    success = make_state(
+        verification={"status": VerificationStatus.VERIFIED_SUCCESS, "resource_id": "refund-001"}
+    )
+    failure = make_state(verification={"status": VerificationStatus.VERIFIED_FAILURE})
+
+    assert "refund-001" in str(_final_message(RunStatus.COMPLETED, success))
+    assert "没有这笔退款" in str(_final_message(RunStatus.COMPLETED, failure))
