@@ -122,7 +122,8 @@ class RefundHttpIntegrationTest {
                 .andExpect(jsonPath("$.acceptedAmount").value(199.00))
                 .andReturn();
 
-        String refundId = com.jayway.jsonpath.JsonPath.read(first.getResponse().getContentAsString(), "$.refundRequestId");
+        String refundId =
+                com.jayway.jsonpath.JsonPath.read(first.getResponse().getContentAsString(), "$.refundRequestId");
 
         mockMvc.perform(post("/api/v1/refunds")
                         .header("Authorization", "Bearer " + token)
@@ -246,10 +247,9 @@ class RefundHttpIntegrationTest {
 
     @AfterEach
     void removeT028Rows() {
-        jdbcTemplate.update(
-                "DELETE FROM commerce.audit_logs WHERE resource_id IN "
-                        + "(SELECT id FROM commerce.refund_requests WHERE order_id LIKE 't028-%') "
-                        + "OR resource_id LIKE 't028-%'");
+        jdbcTemplate.update("DELETE FROM commerce.audit_logs WHERE resource_id IN "
+                + "(SELECT id FROM commerce.refund_requests WHERE order_id LIKE 't028-%') "
+                + "OR resource_id LIKE 't028-%'");
         jdbcTemplate.update("DELETE FROM commerce.refund_requests WHERE order_id LIKE 't028-%'");
         jdbcTemplate.update("DELETE FROM commerce.logistics_events WHERE shipment_id LIKE 't028-%'");
         jdbcTemplate.update("DELETE FROM commerce.shipments WHERE id LIKE 't028-%'");
@@ -263,8 +263,8 @@ class RefundHttpIntegrationTest {
         seedUser(ownerId, UserRole.CUSTOMER);
         seedOrder(orderId, ownerId);
         seedRule();
-        Shipment shipment =
-                Shipment.create(orderId + "-shipment", orderId, "T028", orderId + "-tracking", ShipmentStatus.IN_TRANSIT);
+        Shipment shipment = Shipment.create(
+                orderId + "-shipment", orderId, "T028", orderId + "-tracking", ShipmentStatus.IN_TRANSIT);
         shipment.setLastEventAt(NOW.minus(Duration.ofHours(72)));
         shipmentRepository.saveAndFlush(shipment);
     }
