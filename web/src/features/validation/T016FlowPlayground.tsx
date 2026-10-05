@@ -432,7 +432,7 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
       live: 'read-events',
       title: '读取 Checkpoint 与 Trace',
       file: 'app/api/runs.py + app/trace/store.py',
-      action: 'GET /api/v1/agent/runs/{runId}/events',
+      action: 'GET /api/v1/agent/runs/{runId}/trace',
       input: 'Bearer token + runId',
       work: '按顺序读取持久化事件；当前新 Run 至少应包含 version=1 的创建 Checkpoint。',
       output: 'checkpoint timeline + structured tool traces',
@@ -570,7 +570,7 @@ export function T016FlowPlayground() {
                   ? T031_DEBUG_API
                 : step === 'read-run'
                   ? `${AGENT_API}/${runId.trim()}`
-                  : `${AGENT_API}/${runId.trim()}/events`
+                  : `${AGENT_API}/${runId.trim()}/trace`
     const init: RequestInit =
       step === 'check-eligibility'
         ? {

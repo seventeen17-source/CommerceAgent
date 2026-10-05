@@ -690,11 +690,18 @@ def test_events_and_trace_are_owner_scoped_and_return_the_timeline(client: TestC
     )
 
     assert events.status_code == 200
-    # The creation checkpoint is itself a timeline entry, which is why a run created one second ago
-    # already has one event.
-    assert events.json()[0]["eventType"] == "STATE_TRANSITION"
-    assert events.json()[0]["status"] == "RUNNING"
+    # /events is SSE now: the timeline is read from its data frames, not from response.json().
+    assert events.headers["content-type"].startswith("text/event-stream")
+    frames = [
+        line[len("data: ") :] for line in events.text.splitlines() if line.startswith("data: ")
+    ]
+    assert frames
+    assert '"eventType":"STATE_TRANSITION"' in frames[0]
+    assert '"status":"RUNNING"' in frames[0]
+    # /trace carries the same timeline as a plain JSON array, which is what the debugger reads.
     assert trace.status_code == 200
+    assert isinstance(trace.json(), list)
+    assert trace.json()[0]["eventType"] == "STATE_TRANSITION"
     assert stranger.status_code == 403
 
 

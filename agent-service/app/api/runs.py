@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, Protocol, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.agent.routing import Node
@@ -455,19 +456,13 @@ async def get_run(run_id: str, call: AuthenticatedDep, store: StoreDep) -> Agent
     return _view(record)
 
 
-@router.get("/{run_id}/events")
-async def list_events(run_id: str, call: AuthenticatedDep, store: StoreDep) -> list[RunEvent]:
-    """The run's structured timeline, newest last.
+def _timeline(store: StoreDep, record: RunRecord) -> list[RunEvent]:
+    """One ordered timeline for a run: its state transitions and its tool calls, oldest first.
 
-    ``text/event-stream`` is what the contract advertises, but streaming is a transport choice that
-    belongs with the UI work; returning the same events as JSON now keeps the *content* correct and
-    the contract satisfiable, without shipping a half-built stream that no client consumes yet. The
-    shape is what matters for T018: a client can render a timeline today.
-
-    Completed the state transitions and the tool calls into one ordered list, because that is how a
-    reviewer reads a failed run -- "it moved here, then it called this, then it failed".
+    Ordered by time and completed into a single list because that is how a reviewer reads a failed
+    run -- "it moved here, then it called this, then it failed". The two transports below share this
+    and differ only in how they hand the result out.
     """
-    record = _owned_run(store, run_id, call)
     events: list[RunEvent] = []
 
     for checkpoint in store.list_checkpoints(record.run_id):
@@ -500,15 +495,40 @@ async def list_events(run_id: str, call: AuthenticatedDep, store: StoreDep) -> l
     return events
 
 
+@router.get("/{run_id}/events")
+async def list_events(
+    run_id: str, call: AuthenticatedDep, store: StoreDep
+) -> StreamingResponse:
+    """The run's timeline as Server-Sent Events, oldest first.
+
+    The contract has advertised ``text/event-stream`` since T018 while this returned JSON, which is
+    the kind of quiet disagreement that teaches every later reader to distrust the contract. It now
+    returns what it promised: one ``data:`` frame per event, each a complete JSON object, nothing
+    truncated and no hidden reasoning.
+
+    Deliberately a *finite* stream over events already persisted rather than a live subscription:
+    nothing at this stage follows a run while it walks, and a half-built live stream would be worse
+    than an honest replay.
+    """
+    record = _owned_run(store, run_id, call)
+    events = _timeline(store, record)
+    # One frame per event, each a complete JSON object, so a browser EventSource (or curl -N) sees
+    # exactly the payload the JSON endpoint used to return.
+    frames = "".join(f"data: {event.model_dump_json(by_alias=True)}\n\n" for event in events)
+    return StreamingResponse(iter([frames]), media_type="text/event-stream")
+
+
 @router.get("/{run_id}/trace")
 async def get_trace(run_id: str, call: AuthenticatedDep, store: StoreDep) -> list[RunEvent]:
-    """Alias of ``/events`` for the contract's separate ``/trace`` path.
+    """The same timeline as a plain JSON array, for the Playground, the debugger and Eval.
 
-    Kept as a separate handler rather than a redirect so the two can diverge later without a
-    behavioural change hiding inside a 307: ``/trace`` is documented as the state/tool timeline,
-    ``/events`` as the stream. Today they carry the same payload.
+    It used to delegate to ``/events``, which meant the two paths could not actually differ even
+    though the contract documents them separately - and when ``/events`` became a stream, this path
+    silently became one too while still promising a list. A debugger wants to map over the whole
+    thing rather than consume frames, so this builds the array from the shared timeline.
     """
-    return await list_events(run_id, call, store)
+    record = _owned_run(store, run_id, call)
+    return _timeline(store, record)
 
 
 @router.post("/{run_id}/input")
