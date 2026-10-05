@@ -82,7 +82,7 @@
 
 - [ ] T036 [P] [US2] 编写 Return eligibility/state/idempotency Java Integration Test：`ReturnIntegrationTest.java`。
 - [ ] T037 [P] [US2] 编写 Python Branching Test，证明 `DELIVERED` 证据会把 refund path 改成 return path：`test_us2_delivered_return.py`。
-- [ ] T038 [US2] 新建 `commerce.return_requests` schema、Entity/Repository：`V003__return_schema.sql`、`returns/`；同步扩展 T014 fixture reset 清理 return state。
+- [ ] T038 [US2] 新建 `commerce.return_requests` schema、Entity/Repository：`V004__return_schema.sql`、`returns/`；同步扩展 T014 fixture reset 清理 return state。
 - [ ] T039 [US2] 扩展 eligibility rules 支持 return window、`RETURN`、`RETURN_REFUND`。
 - [ ] T040 [US2] 实现受保护 Return Create/Status API；如要求审批，与 Refund 一样验证权威 `approvalRequestId`。
 - [ ] T041 [US2] 增加 `create_return_request` Tool，并在 graph/routing 中根据 delivered evidence 进入 Return Path。
@@ -107,7 +107,7 @@
 
 - [ ] T049 [P] [US4] 编写 Approval 状态迁移/Auth/Binding Java Test：`PENDING → APPROVED|DENIED|EXPIRED`、终态不可逆、run/order/action/amount binding、non-approver denial。
 - [ ] T050 [P] [US4] 编写 Python HITL Test，证明 Agent 不能 self-approve、伪造 approval state 或使用其他 run 的 approval id。
-- [ ] T051 [US4] 新建 `commerce.approval_requests` schema 与 Entity/Repository：`V004__approval_schema.sql`、`approval/`；同步扩展 T014 fixture reset 清理 approval state。
+- [ ] T051 [US4] 新建 `commerce.approval_requests` schema 与 Entity/Repository：`V005__approval_schema.sql`、`approval/`；同步扩展 T014 fixture reset 清理 approval state。
 - [ ] T052 [US4] 实现 Approval Create/List/Decision API；List/Decision 要求 `APPROVER` role 并写 Audit。
 - [ ] T053 [US4] 实现 `request_human_approval` Tool，返回权威 `approvalRequestId`，并进入 `WAITING_APPROVAL`；Agent 不得生成 approval token/status。
 - [ ] T054 [US4] 实现 owner-authorized Agent Resume；恢复前重新读取 Java Approval 状态并验证 run/order/action/amount binding。
