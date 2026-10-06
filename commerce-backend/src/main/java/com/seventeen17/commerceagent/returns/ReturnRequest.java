@@ -41,6 +41,16 @@ public class ReturnRequest {
     @Column(name = "reason_code", length = 100, nullable = false, updatable = false)
     private String reasonCode;
 
+    /**
+     * T040：调用方声明的退货方式，可空，V1 不给它任何行为。
+     *
+     * <p>它落库的唯一理由是**参与幂等指纹**：一个决定"这是不是同一次逻辑请求"的字段，必须能与第一次尝试
+     * 存下来的值比较，否则"同一个 key、换一种退货方式"就会被静默当成同一次写入。{@code reason_code} 落库
+     * 是同一个理由。等退货处理真的给它语义时，那次改动负责定义取值集合 —— 这里刻意不发明词表。
+     */
+    @Column(name = "return_method", length = 32, updatable = false)
+    private String returnMethod;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 32, nullable = false)
     private ReturnStatus status;
@@ -58,6 +68,18 @@ public class ReturnRequest {
     /** 不透明的 Agent run 关联 id：只用于追踪，<b>绝不用来授权</b>（跨服务、无法校验）。 */
     @Column(name = "run_id", length = 64, nullable = false, updatable = false)
     private String runId;
+
+    /**
+     * T040：受理这笔退货时冻结下来的退货截止时刻（规则窗口天数 + 运单签收时刻）。
+     *
+     * <p>它可空，且**可空是有意的**：契约把 {@code returnDeadline} 标为可空，而"决策只在窗口可算时才放行"
+     * 已经由 T039 保证，所以 V1 写出来的行一定带值。可空留给将来"不带窗口的退货规则"，那种情况不该需要改表。
+     *
+     * <p>为什么不读时再算一遍：截止日是**对客户承诺过的事实**，规则改版或运单被重新播种都不该把它改写 ——
+     * 与退款行冻结"实际接受的金额"是同一条理由。
+     */
+    @Column(name = "return_deadline", updatable = false)
+    private Instant returnDeadline;
 
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
@@ -80,20 +102,24 @@ public class ReturnRequest {
             String orderId,
             String userId,
             String reasonCode,
+            String returnMethod,
             String idempotencyKey,
             String eligibilityRuleCode,
             String approvalRequestId,
-            String runId) {
+            String runId,
+            Instant returnDeadline) {
         ReturnRequest request = new ReturnRequest();
         request.id = id;
         request.orderId = orderId;
         request.userId = userId;
         request.reasonCode = reasonCode;
+        request.returnMethod = returnMethod;
         request.status = ReturnStatus.CREATED;
         request.idempotencyKey = idempotencyKey;
         request.eligibilityRuleCode = eligibilityRuleCode;
         request.approvalRequestId = approvalRequestId;
         request.runId = runId;
+        request.returnDeadline = returnDeadline;
         return request;
     }
 
@@ -111,6 +137,10 @@ public class ReturnRequest {
 
     public String getReasonCode() {
         return reasonCode;
+    }
+
+    public String getReturnMethod() {
+        return returnMethod;
     }
 
     public ReturnStatus getStatus() {
@@ -131,6 +161,10 @@ public class ReturnRequest {
 
     public String getRunId() {
         return runId;
+    }
+
+    public Instant getReturnDeadline() {
+        return returnDeadline;
     }
 
     public Instant getCreatedAt() {

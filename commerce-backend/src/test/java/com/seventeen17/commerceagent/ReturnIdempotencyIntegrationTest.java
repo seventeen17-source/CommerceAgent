@@ -103,8 +103,10 @@ class ReturnIdempotencyIntegrationTest {
     }
 
     private ReturnRequest row(String id, String idempotencyKey) {
+        // T040 给工厂加了两个参数：returnMethod（参与幂等指纹）与 returnDeadline（受理时冻结）。本用例只针对
+        // 两条唯一约束，因此两者都传 null —— 约束与它们无关。
         return ReturnRequest.create(
-                id, ORDER_ID, OWNER_ID, "LOGISTICS_DELAY", idempotencyKey, "T038-RULE", null, "t038-run");
+                id, ORDER_ID, OWNER_ID, "LOGISTICS_DELAY", null, idempotencyKey, "T038-RULE", null, "t038-run", null);
     }
 
     private static String causeMessage(Exception thrown) {
