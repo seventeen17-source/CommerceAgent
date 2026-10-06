@@ -1,17 +1,19 @@
 package com.seventeen17.commerceagent;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.seventeen17.commerceagent.eligibility.AfterSalesRule;
 import com.seventeen17.commerceagent.eligibility.AfterSalesRuleRepository;
 import com.seventeen17.commerceagent.eligibility.AllowedAction;
 import com.seventeen17.commerceagent.eligibility.EligibilityDecision;
+import com.seventeen17.commerceagent.eligibility.EligibilityReasonCode;
 import com.seventeen17.commerceagent.eligibility.EligibilityService;
 import com.seventeen17.commerceagent.logistics.Shipment;
 import com.seventeen17.commerceagent.logistics.ShipmentRepository;
 import com.seventeen17.commerceagent.logistics.ShipmentStatus;
-import com.seventeen17.commerceagent.order.AfterSalesStatus;
 import com.seventeen17.commerceagent.order.Order;
 import com.seventeen17.commerceagent.order.OrderItem;
 import com.seventeen17.commerceagent.order.OrderRepository;
@@ -23,6 +25,7 @@ import com.seventeen17.commerceagent.user.UserRole;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,9 +40,11 @@ import org.springframework.test.context.ActiveProfiles;
  * <p>Two assertions about a delivered order, deliberately different in kind:
  *
  * <ul>
- *   <li>A delivered order must never be granted a direct refund. True before T039 (no rule grants one)
- *       and still true after it (the granted action is a return action), so it is a regression guard
- *       rather than a placeholder waiting to be rewritten.
+ *   <li>A delivered order must never be granted a direct refund — not even when a rule row says it should.
+ *       True before T039 (no rule granted one) and still true after it, so it is a regression guard rather
+ *       than a placeholder waiting to be rewritten. Since T036's guard the decision enforces it itself, and
+ *       the refusal names the conflict ({@code DELIVERED_ORDER_IS_RETURN_ONLY}) instead of hiding behind a
+ *       generic "not eligible".
  *   <li>A delivered order inside the return window is granted a return action. This one only became
  *       true with T039, and it is the half that proves the feature does something: a suite of
  *       refusals alone stays green while every real return is still answered with "no".
@@ -91,30 +96,29 @@ class ReturnEligibilityIntegrationTest {
     }
 
     @Test
-    void aDeliveredOrderIsNotEligibleForADirectRefund() {
+    void aDeliveredOrderIsNotEligibleForADirectRefundWhateverTheRuleSays() {
         seedUser(OWNER_ID);
+        // 这张订单**没有任何售后动作**（seedOrder 不再伪造一个）：这是本用例能不能成立的前提。夹具一旦把订单
+        // 写成"已有售后动作"，决策会在第一步以 ORDER_ALREADY_HAS_AFTER_SALES 拒绝 —— 测试仍然绿，而它声称
+        // 要守的那条不变量（已签收不得被直接退款）根本没被执行过。
         seedOrder("T036-order-delivered-direct", OrderStatus.DELIVERED);
         seedDirectRefundRule("T036-direct-refund-direct", 1);
 
         EligibilityDecision decision = eligibilityService.evaluate(OWNER, "T036-order-delivered-direct");
 
-        // A fact about the decision rather than a code path: whatever else it decides, it must not hand
-        // a delivered order a direct refund.
-        assertFalse(
-                decision.eligible() && decision.allowedAction() == AllowedAction.REFUND_ONLY,
-                "a delivered order must never be granted a direct refund");
+        // 断言的是"决策的事实"而不是某条代码路径：无论它怎么绕，都不能把直接退款交给一张已签收的订单。
+        assertFalse(decision.eligible(), "已签收订单不得被 REFUND_ONLY 放行");
+        assertNotEquals(AllowedAction.REFUND_ONLY, decision.allowedAction());
+        assertFalse(decision.grantsMoneyAction(), "一张已签收的订单不能在这里拿到资金动作");
+        // 具名原因码，而不是"反正不批"：它一次说清是谁的问题 —— 规则声明的动作与订单状态不相容。
+        assertEquals(List.of(EligibilityReasonCode.DELIVERED_ORDER_IS_RETURN_ONLY), decision.reasonCodes());
     }
 
     @Test
     void aDeliveredOrderIsRoutedToAReturnAction() {
         seedUser(OWNER_ID);
+        // 这张订单同样没有任何售后动作：null 表示"还没开始"，也正是退货窗口该被评估的那个起点。
         seedOrder("T036-order-delivered-return", OrderStatus.DELIVERED);
-        // 这条订单还没有任何售后动作。null 才是"还没开始"，而带一个值时决策会（正确地）在第一步就以
-        // ORDER_ALREADY_HAS_AFTER_SALES 拒绝 —— 那条分支没错，错的是夹具：它把"已签收、尚未申请任何售后"
-        // 写成了"已有售后动作"。这也是 reasonCodes 值得被断言的原因：它一次就说清了是谁的问题。
-        Order order = orderRepository.findById("T036-order-delivered-return").orElseThrow();
-        order.setAfterSalesStatus(null);
-        orderRepository.save(order);
         seedReturnRule("T036-return-open", 1, 7);
         seedSignedShipment("T036-shipment-open", "T036-order-delivered-return", Duration.ofDays(3));
 
@@ -143,7 +147,9 @@ class ReturnEligibilityIntegrationTest {
         Order order = Order.create(orderId, OWNER_ID, status, amount("120.00"), "USD");
         order.addItem(OrderItem.create(
                 orderId + "-item-1", orderId + "-product-1", "Test Product", CATEGORY, amount("120.00"), 1));
-        order.setAfterSalesStatus(AfterSalesStatus.REFUND_REQUESTED);
+        // 刻意不写 afterSalesStatus：null 表示"这张订单还没有任何售后动作"，那是两个用例都需要的起点。
+        // 曾经这里写过 REFUND_REQUESTED，于是负例在决策的第一步（ORDER_ALREADY_HAS_AFTER_SALES）就被拦下，
+        // "已签收不得直接退款"这条断言在夹具撒谎的情况下一直为真，而真正的守卫从未被触发过。
         orderRepository.save(order);
     }
 
@@ -160,7 +166,14 @@ class ReturnEligibilityIntegrationTest {
         shipmentRepository.save(shipment);
     }
 
-    /** The configuration US2 forbids: a direct refund granted on the delivered status itself. */
+    /**
+     * The configuration US2 forbids: a direct refund granted on the delivered status itself.
+     *
+     * <p>It exists to <em>trigger</em> the guard, not to describe a permitted setup: the decision must refuse it
+     * on its own, which is what {@code DELIVERED_ORDER_IS_RETURN_ONLY} reports. That only holds while the order
+     * has no after-sales action yet — an existing one would short-circuit the decision before the guard is ever
+     * consulted, and the test would pass while testing nothing.
+     */
     private void seedDirectRefundRule(String ruleCode, int version) {
         ruleRepository.saveAndFlush(AfterSalesRule.create(
                 ruleCode,
