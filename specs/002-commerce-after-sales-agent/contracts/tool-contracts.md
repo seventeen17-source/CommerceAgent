@@ -177,6 +177,12 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 
 前置条件：deterministic return eligibility、ownership、当前状态/窗口检查，以及需要时的权威审批记录校验。
 
+**V1 实现口径（T040/T041）**：
+- 输入里**没有金额**，而且这不是"暂时不用"：退货行没有金额列（V004），"退多少钱"在这条路径上无法表达；
+- **它只创建退货单。** `RETURN_REFUND` 的"退钱"不在这个 Tool 里发生 —— 退款需要它自己那条受保护的写路径与授权，否则就等于绕过"已签收订单不得被直接退款"这条 US2 守卫；
+- `approval_request_id` 在 V1 无法校验，任何非空值一律 `400` fail closed（US4/T049 才做真绑定）；
+- 返回的 `return_deadline` 是**受理时冻结**的（规则窗口 + 运单签收时刻），不是读时重算的。
+
 ## T8 `create_support_ticket`
 
 **用途**：自动化无法安全继续时升级人工。
