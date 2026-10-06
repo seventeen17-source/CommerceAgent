@@ -521,6 +521,37 @@ class EligibilityServiceTest {
     // ------------------------------------------------------------------
 
     @Test
+    void aPureReturnInsideTheWindowIsGrantedWithoutAnAmount() {
+        // T040 的用例抓到过这里的遗留缺陷：decide 曾把 refundableAmount 无条件塞进决策，而 EligibilityDecision
+        // 的不变量禁止"纯退货动作带金额" → 任何成功的纯 RETURN 决策都会抛 IllegalArgumentException（500），
+        // 演示数据里的 DEMO_HOME_30D_RETURN 就是这种规则。
+        AfterSalesRule rule = AfterSalesRule.create(
+                "T039-RETURN-PURE",
+                1,
+                "ELECTRONICS",
+                OrderStatus.DELIVERED,
+                null,
+                7,
+                new BigDecimal("500.00"),
+                new BigDecimal("1000.00"),
+                AllowedAction.RETURN,
+                true,
+                EFFECTIVE_FROM,
+                null);
+
+        EligibilityDecision decision = decide(
+                order(OrderStatus.DELIVERED, "199.00", null, "ELECTRONICS"),
+                rule,
+                signedLogistics(NOW.minus(Duration.ofDays(3))));
+
+        assertTrue(decision.eligible());
+        assertEquals(AllowedAction.RETURN, decision.allowedAction());
+        assertFalse(decision.grantsMoneyAction(), "退货是动作，不是资金授权");
+        assertNull(decision.maxRefundAmount(), "纯退货动作不得携带金额：契约与 EligibilityDecision 的不变量都这么要求");
+        assertFalse(decision.approvalRequired(), "不涉及资金的动作不该被资金阈值触发审批");
+    }
+
+    @Test
     void aReturnInsideTheWindowIsGranted() {
         AfterSalesRule rule = returnRule("T039-RETURN-OPEN", 1, "ELECTRONICS", OrderStatus.DELIVERED, 7, null);
 

@@ -168,6 +168,28 @@ public class EligibilityService {
     }
 
     /**
+     * T039 / T040：退货窗口的截止时刻 —— 规则声明的窗口天数，从运单的签收时刻起算。
+     *
+     * <p>它是**唯一**的窗口算术：决策层用它判断"还来不来得及"（{@link #decide} 的 RETURN 分支），写路径
+     * （T040 的 {@code ReturnService}）用它冻结对客户的承诺。两处各算一遍的后果不是重复代码，而是
+     * "据以拒绝的窗口"与"已经承诺给客户的窗口"可以悄悄不一致。
+     *
+     * <p>两个事实缺一不可，缺任何一个返回 {@code null}：规则没有声明窗口，或拿不到签收时刻。调用方必须把它
+     * 当作"算不出来"，而不是回落到订单状态自己编一个起点 —— 那正是 T039 拒绝使用
+     * {@code orders.delivered_at} 的理由（那一列没有任何生产写入路径）。
+     *
+     * <p>它是 {@code public} 的，因为写路径（{@code returns.ReturnService}）也要用它 —— 这是唯一一处允许跨包
+     * 复用的决策算术；把它私有化就等于逼写路径自己抄一遍公式。
+     */
+    public static Instant returnDeadline(LogisticsSnapshot logistics, AfterSalesRule rule) {
+        Integer windowDays = rule.getReturnWindowDays();
+        if (windowDays == null || logistics == null || logistics.signedAt() == null) {
+            return null;
+        }
+        return logistics.signedAt().plus(windowDays, ChronoUnit.DAYS);
+    }
+
+    /**
      * 纯决策函数：把权威事实翻译成资格结论。
      *
      * <p>{@code logistics} 可以为 {@code null}，但**仅当**被选中的规则没有声明停滞阈值时。若规则要求停滞证据
@@ -208,7 +230,9 @@ public class EligibilityService {
                     // 因此用不同的原因码，好让数据缺口被看见，而不是被伪装成一个业务结论。
                     return denied(rule, EligibilityReasonCode.RETURN_WINDOW_UNKNOWN, now);
                 }
-                if (logistics.signedAt().plus(returnWindowDays, ChronoUnit.DAYS).isBefore(now)) {
+                // 截止时刻只在一个地方算（returnDeadline）：判定用它、T040 写给客户的承诺也用它，否则
+                // "我们据以拒绝的窗口"与"我们承诺出去的窗口"会各自演化。
+                if (returnDeadline(logistics, rule).isBefore(now)) {
                     return denied(rule, EligibilityReasonCode.RETURN_WINDOW_EXPIRED, now);
                 }
                 // 窗口内：这里不 return，贯穿到下面的金额与审批校验 —— RETURN_REFUND 同样会动钱，那两道闸
@@ -246,6 +270,19 @@ public class EligibilityService {
                 return denied(rule, EligibilityReasonCode.STALL_THRESHOLD_NOT_MET, now);
             }
             reasons.add(EligibilityReasonCode.STALL_THRESHOLD_MET);
+        }
+
+        // 金额只对**会动钱**的动作有意义：REFUND_ONLY 与 RETURN_REFUND。纯 RETURN 是"把商品退回来"，与金额
+        // 无关，因此两件事都必须挡住：
+        //   1. 不能用退款上限去否掉一次退货 —— 一条 RETURN 规则声明 max_refund_amount 不代表它不能退货；
+        //   2. 更不能把金额塞进决策 —— EligibilityDecision 自身的不变量禁止"纯退货动作带金额"，塞进去就是一次
+        //      IllegalArgumentException（500）。这正是 T040 的用例抓到的 T039 遗留缺陷：演示数据里的
+        //      DEMO_HOME_30D_RETURN 是纯 RETURN 规则，它一旦判定成功就会 500。
+        boolean moneyGranting = rule.getAllowedAction() == AllowedAction.REFUND_ONLY
+                || rule.getAllowedAction() == AllowedAction.RETURN_REFUND;
+        if (!moneyGranting) {
+            return new EligibilityDecision(
+                    true, rule.getAllowedAction(), null, false, rule.getRuleCode(), rule.getVersion(), reasons, now);
         }
 
         // 金额一律取权威订单金额，不接受调用方传入的金额：契约的 eligibility 请求里根本没有金额字段，这样
