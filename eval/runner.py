@@ -39,13 +39,20 @@ _EVAL_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_EVAL_DIR))
 sys.path.insert(0, str(_EVAL_DIR.parent / "agent-service"))
 
-from scorers.business_state import Expectation, RefundFacts, score_business_state
+from scorers.business_state import (
+    Expectation,
+    RefundFacts,
+    ReturnFacts,
+    score_business_state,
+)
 
 AGENT_BASE = "http://127.0.0.1:8000/api/v1/agent"
 JAVA_BASE = "http://127.0.0.1:8080"
 #: The agent's own role cannot read the business schema (by design), so the facts are read with the
 #: business role. That separation is exactly what stops the agent from grading itself.
-COMMERCE_DSN = "postgresql://commerce_app:commerce_app_dev_only@127.0.0.1:5432/commerceagent"
+COMMERCE_DSN = (
+    "postgresql://commerce_app:commerce_app_dev_only@127.0.0.1:5432/commerceagent"
+)
 
 
 @dataclass(frozen=True)
@@ -117,7 +124,51 @@ def refund_rows(order_id: str) -> list[RefundFacts]:
             "SELECT order_id, status FROM commerce.refund_requests WHERE order_id = %s",
             (order_id,),
         )
-        return [RefundFacts(order_id=row[0], status=row[1]) for row in cursor.fetchall()]
+        return [
+            RefundFacts(order_id=row[0], status=row[1]) for row in cursor.fetchall()
+        ]
+
+
+def return_rows(order_id: str) -> list[ReturnFacts]:
+    """Fetch this order's return rows (T042), under the same shape rule as refunds.
+
+    Read from the authority's own storage with the *business* role, never through the Agent's API:
+    the Agent must not be able to grade itself.
+    """
+    import psycopg
+
+    with (
+        psycopg.connect(COMMERCE_DSN, connect_timeout=5) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            "SELECT order_id, status FROM commerce.return_requests WHERE order_id = %s",
+            (order_id,),
+        )
+        return [
+            ReturnFacts(order_id=row[0], status=row[1]) for row in cursor.fetchall()
+        ]
+
+
+def tool_call_count(run_id: str, tool_name: str) -> int:
+    """How many times this run recorded one Tool name in the cross-service evidence table.
+
+    This is the mechanism half of a T042 assertion. Business rows say what the world looks like; they
+    cannot say *whose path* produced it, and a prohibition ("no refund row") cannot be told apart from
+    a run that never got out of bed. The Tool trace can.
+    """
+    import psycopg
+    from app.config.settings import Settings  # type: ignore[import-not-found]
+
+    with (
+        psycopg.connect(Settings().agent_database_url, connect_timeout=5) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            "SELECT count(*) FROM agent.tool_executions WHERE run_id = %s AND tool_name = %s",
+            (run_id, tool_name),
+        )
+        return int((cursor.fetchone() or [0])[0])
 
 
 def recovery_read_happened(run_id: str) -> bool:
@@ -140,7 +191,9 @@ def recovery_read_happened(run_id: str) -> bool:
             "WHERE run_id = %s AND tool_name = %s ORDER BY step_index",
             (run_id, "create_refund_request"),
         )
-        unknown_steps = [row[0] for row in cursor.fetchall() if row[1] == "WRITE_TIMEOUT_UNKNOWN"]
+        unknown_steps = [
+            row[0] for row in cursor.fetchall() if row[1] == "WRITE_TIMEOUT_UNKNOWN"
+        ]
         if not unknown_steps:
             return False
         cursor.execute(
@@ -156,7 +209,9 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
     with httpx.Client(timeout=300.0, trust_env=False) as client:
         problem = reset_case(client, case)
         if problem is not None:
-            return Outcome(case.get("scenarioId") or case["caseId"], "infrastructure", problem)
+            return Outcome(
+                case.get("scenarioId") or case["caseId"], "infrastructure", problem
+            )
 
         token = mint_token(case["user"])
         # A case can ask more than once. "The same request twice" is the entire point of the
@@ -180,37 +235,75 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
         view = views[-1]
 
         observed = refund_rows(order_id)
+        observed_returns = return_rows(order_id)
         verdict = score_business_state(
             Expectation(
                 refunds_for_order=expect.get("refundsForOrder"),
                 refund_statuses=tuple(expect.get("refundStatuses") or ()),
+                returns_for_order=expect.get("returnsForOrder"),
+                return_statuses=tuple(expect.get("returnStatuses") or ()),
             ),
             observed,
+            returns=observed_returns,
         )
         reasons = list(verdict.reasons)
 
-        if expect.get("terminalStatus") and view.get("status") != expect["terminalStatus"]:
-            reasons.append(f"expected status {expect['terminalStatus']}, got {view.get('status')}")
+        if (
+            expect.get("terminalStatus")
+            and view.get("status") != expect["terminalStatus"]
+        ):
+            reasons.append(
+                f"expected status {expect['terminalStatus']}, got {view.get('status')}"
+            )
 
         # The mechanism half of the assertion: without it, "wrote nothing" would pass a case whose
         # whole point is that a lost write was recovered.
-        if expect.get("recoveryReadRequired") and not recovery_read_happened(view["runId"]):
+        if expect.get("recoveryReadRequired") and not recovery_read_happened(
+            view["runId"]
+        ):
             reasons.append("no recovery read (get_after_sales_status) was performed")
 
+        # T042's mechanism half. `refundToolForbidden` is the executable form of "a delivered order is
+        # never granted a direct refund": the rows already forbid the *result*, and this forbids the
+        # *attempt* -- the part that would otherwise be invisible, since a refused attempt leaves no
+        # business row at all.
+        if (
+            expect.get("returnToolRequired")
+            and tool_call_count(view["runId"], "create_return_request") == 0
+        ):
+            reasons.append(
+                "the return write never happened (create_return_request was not called)"
+            )
+        if (
+            expect.get("refundToolForbidden")
+            and tool_call_count(view["runId"], "create_refund_request") > 0
+        ):
+            reasons.append("a refund write was attempted for a delivered order")
+
     kind = "pass" if not reasons else "fail"
-    return Outcome(case.get("scenarioId") or case["caseId"], kind, "; ".join(reasons) or "business state matches the case")
+    return Outcome(
+        case.get("scenarioId") or case["caseId"],
+        kind,
+        "; ".join(reasons) or "business state matches the case",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the US1 eval dataset.")
     parser.add_argument("--dataset", required=True, type=Path)
-    parser.add_argument("--order-id", default="order-001", help="the order the case writes against")
+    parser.add_argument(
+        "--order-id", default="order-001", help="the order the case writes against"
+    )
     args = parser.parse_args(argv)
 
     outcomes = [run_case(case, args.order_id) for case in load_cases(args.dataset)]
     for outcome in outcomes:
         print(f"[{outcome.kind:>14}] {outcome.case_id}: {outcome.detail}")
-    print(json.dumps({o.kind: sum(1 for x in outcomes if x.kind == o.kind) for o in outcomes}))
+    print(
+        json.dumps(
+            {o.kind: sum(1 for x in outcomes if x.kind == o.kind) for o in outcomes}
+        )
+    )
 
     # Infrastructure failures are returned as their own exit code so a caller can never mistake them
     # for a poor model score.

@@ -1,0 +1,36 @@
+datasetVersion: v1
+dataset: us2_delivered_return
+description: >-
+  US2 的判定线：同一句"把钱退给我"，落在一张**已签收、仍在退货窗口内**的订单上时，必须走退货路径，
+  而且**绝不能动钱**。
+
+  与 US1 数据集共用同一条纪律：判分只读事后真实业务行，不读 status / finalMessage / 工具"成功"。
+
+  这个 case 有两半，缺一不可：
+    · 结果层：return_requests 恰好 1 行，且 refund_requests 恰好 0 行；
+    · 机制层：Tool trace 里确实出现过 create_return_request，且从未出现 create_refund_request。
+  只断结果会假通过 —— "refunds == 0" 在一个什么都没做的 run 上同样成立，而它恰好是 US2 最需要
+  证明的那件事（"已签收订单不得被直接退款"）。
+
+  前置（T042 的 Java 侧改动）：fixture case `return-delivered-001` 必须注册进 FixtureCaseRegistry，
+  并且它的 delivered 订单的 signed_at 要**相对 reset 时刻**生成（"已签收 3 天"）。在那之前 reset 会
+  返回 404 —— 与 US1 数据集里记的那条一样：404 的含义是"registry 里没有这个 case"，不是"路由没注册"。
+  绝对时间戳的夹具会随时间腐烂：老的 fixture 写死 2026-09-12，配上 7 天窗口，今天早就过期了，
+  于是任何"窗口内"的 case 都会得到 RETURN_WINDOW_EXPIRED —— 那不是代码错，是夹具的错。
+
+cases:
+  - scenarioId: us2-delivered-return
+    caseId: return-delivered-001
+    fixtureVersion: t042-return-delivered-001-v1
+    user: customer-001
+    request: 东西我收到了，但我不要了，钱退给我
+    scenario: 已签收 + 窗口内 + 规则授予 RETURN_REFUND → 应创建且仅创建一笔退货，且不得创建任何退款
+    expect:
+      terminalStatus: COMPLETED
+      returnsForOrder: 1
+      returnStatuses: [CREATED]
+      # forbidden-direct-refund：事后世界不得出现退款行。
+      refundsForOrder: 0
+      # 机制两半：正断言证明退货真的发生过，反断言证明退款**尝试**也没发生过。
+      returnToolRequired: true
+      refundToolForbidden: true

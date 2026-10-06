@@ -20,6 +20,14 @@ What it deliberately does not accept
 
 So the only inputs are an expectation and the rows that exist afterwards. A case that cannot express
 its expectation in those terms is a badly written case, not a scorer limitation.
+
+What this scorer cannot do, and why the runner has to help
+----------------------------------------------------------
+A *zero* expectation ("no refund row") is the easiest thing in the world to satisfy: a run that did
+nothing satisfies it. US2's prohibition is exactly that kind of assertion, so the case must pair it
+with a positive mechanism fact ("the return write did happen") which lives in the Tool trace, not in
+business storage. That half belongs to the runner, and the split is deliberate: rows decide *what*
+happened, the trace decides *whether our path produced it*.
 """
 
 from __future__ import annotations
@@ -41,16 +49,35 @@ class RefundFacts:
 
 
 @dataclass(frozen=True)
+class ReturnFacts:
+    """One ``commerce.return_requests`` row (T042).
+
+    The same rule as ``RefundFacts``, for the other after-sales object. It carries no amount because
+    the row has none: "how much money moved" is a question only the refund side can answer, and
+    keeping that asymmetry here is what stops a case from "proving" a payment nobody made.
+    """
+
+    order_id: str
+    status: str
+
+
+@dataclass(frozen=True)
 class Expectation:
     """What a case says the world must look like once the run is over.
 
     ``None`` means "this case does not constrain that", which is different from ``0`` ("must be
     absent"). Keeping the two apart matters: most cases should constrain as little as they need, and
     a case that asserts nothing is a case that cannot fail.
+
+    ``returns_for_order`` is the US2 side. A case that forbids a refund should state both halves --
+    ``refunds_for_order=0`` *and* ``returns_for_order=1`` -- because the zero alone is satisfied by a
+    run that never got out of bed.
     """
 
     refunds_for_order: int | None = None
     refund_statuses: tuple[str, ...] = ()
+    returns_for_order: int | None = None
+    return_statuses: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -61,19 +88,49 @@ class Verdict:
     reasons: tuple[str, ...] = ()
 
 
-def score_business_state(expectation: Expectation, observed: Sequence[RefundFacts]) -> Verdict:
+def score_business_state(
+    expectation: Expectation,
+    observed: Sequence[RefundFacts],
+    *,
+    returns: Sequence[ReturnFacts] = (),
+) -> Verdict:
     """Grade one case from the rows that exist afterwards."""
     reasons: list[str] = []
 
-    if expectation.refunds_for_order is not None and len(observed) != expectation.refunds_for_order:
+    if (
+        expectation.refunds_for_order is not None
+        and len(observed) != expectation.refunds_for_order
+    ):
         reasons.append(
             f"expected {expectation.refunds_for_order} refund row(s), found {len(observed)}"
         )
 
     if expectation.refund_statuses:
         allowed = set(expectation.refund_statuses)
-        unexpected = sorted({row.status for row in observed if row.status not in allowed})
+        unexpected = sorted(
+            {row.status for row in observed if row.status not in allowed}
+        )
         if unexpected:
-            reasons.append(f"refund status(es) not allowed by the case: {', '.join(unexpected)}")
+            reasons.append(
+                f"refund status(es) not allowed by the case: {', '.join(unexpected)}"
+            )
+
+    if (
+        expectation.returns_for_order is not None
+        and len(returns) != expectation.returns_for_order
+    ):
+        reasons.append(
+            f"expected {expectation.returns_for_order} return row(s), found {len(returns)}"
+        )
+
+    if expectation.return_statuses:
+        allowed_returns = set(expectation.return_statuses)
+        unexpected_returns = sorted(
+            {row.status for row in returns if row.status not in allowed_returns}
+        )
+        if unexpected_returns:
+            reasons.append(
+                f"return status(es) not allowed by the case: {', '.join(unexpected_returns)}"
+            )
 
     return Verdict(passed=not reasons, reasons=tuple(reasons))
