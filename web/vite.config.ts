@@ -37,6 +37,12 @@ export default defineConfig({
         changeOrigin: false,
         rewrite: (path) => path.replace(/^\/commerce/, '/api/v1'),
       },
+      // US2 (T041/T042): the eval fixture reset the Playground must call before driving its case.
+      // It is mounted at /internal/... on Java (see EvalFixtureController) *outside* the /api/v1
+      // contract prefix, so unlike the two entries above this one needs no rewrite: the path crosses
+      // :5173 unchanged. It only exists under the test/eval profiles -- a dev-only fixture seam, not
+      // a product endpoint.
+      '/internal': { target: 'http://127.0.0.1:8080', changeOrigin: false },
     },
   },
 })

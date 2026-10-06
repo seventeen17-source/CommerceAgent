@@ -24,6 +24,7 @@ type LiveStepId =
   | 't032-live-run'
   | 'read-run'
   | 'read-events'
+  | 'us2-delivered-return'
 
 type FlowStep = {
   id: string
@@ -44,11 +45,32 @@ type Scenario = {
   summary: string
 }
 
+/**
+ * One raw HTTP exchange of a live step that needs more than one call.
+ *
+ * A step that resets a fixture, drives a run and then reads two authorities has four real responses,
+ * and collapsing them into one would hide which of the four failed. Each entry keeps the bytes the
+ * service actually returned.
+ */
+type LiveTrailEntry = {
+  label: string
+  path: string
+  status: number | null
+  body?: unknown
+  note?: string
+}
+
 type CallResult =
   | { kind: 'idle' }
   | { kind: 'pending'; step: LiveStepId }
-  | { kind: 'ok'; step: LiveStepId; status: number; body: unknown }
-  | { kind: 'error'; step: LiveStepId; status: number | null; detail: string }
+  | { kind: 'ok'; step: LiveStepId; status: number; body: unknown; trail?: LiveTrailEntry[] }
+  | {
+      kind: 'error'
+      step: LiveStepId
+      status: number | null
+      detail: string
+      trail?: LiveTrailEntry[]
+    }
 
 type CompletedLiveSteps = Record<LiveStepId, boolean>
 
@@ -59,6 +81,17 @@ const REFUND_API = '/commerce/refunds'
 const TOOL_DEBUG_API = '/agent/dev/tools/execute'
 const T030_DEBUG_API = '/agent/dev/t030/run'
 const T031_DEBUG_API = '/agent/dev/t031/run'
+
+// US2 (T041/T042): the eval fixture reset lives on Java *without* the /api/v1 prefix -- the
+// controller's own @RequestMapping is "/internal/eval/fixtures" -- so the Vite proxy entry added for
+// it carries no rewrite, unlike /agent and /commerce.
+const EVAL_FIXTURE_API = '/internal/eval/fixtures'
+const US2_RETURN_CASE_ID = 'return-delivered-001'
+const US2_RETURN_ORDER_ID = 'order-003'
+// The exact request this step grades: "I received it, I don't want it, refund me". Deliberately a
+// constant instead of the shared message box, so clicking this step cannot run a different case than
+// the one the fixture reset above just prepared.
+const US2_RETURN_MESSAGE = '东西我收到了，但是我不要了，钱退给我'
 
 const scenarios: Scenario[] = [
   { id: 'normal', label: '正常流程', summary: '身份 → 订单 → 物流 → eligibility 全部通过' },
@@ -81,6 +114,70 @@ function statusIcon(status: StepStatus) {
   if (status === 'warning') return '!'
   if (status === 'blocked') return '×'
   return '·'
+}
+
+type RawResponse = { status: number; ok: boolean; text: string; body: unknown }
+
+/**
+ * One HTTP exchange, returned with its own status instead of thrown.
+ *
+ * A multi-call step has to show *which* call failed, so the failure has to arrive as a value. The
+ * non-JSON fallback is kept for the same reason as in the single-call path: a proxy or service error
+ * page is still evidence.
+ */
+async function sendJson(path: string, init: RequestInit): Promise<RawResponse> {
+  const response = await fetch(path, init)
+  const text = await response.text()
+  let body: unknown = text
+  try {
+    body = JSON.parse(text)
+  } catch {
+    // Keep non-JSON proxy/service responses visible for diagnosis.
+  }
+  return { status: response.status, ok: response.ok, text, body }
+}
+
+function runIdOf(body: unknown): string | null {
+  if (body && typeof body === 'object' && 'runId' in body) {
+    const value = (body as { runId?: unknown }).runId
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return null
+}
+
+/** The tool names on a run's trace timeline, in the order the timeline already sorted them. */
+function toolNamesFromTrace(body: unknown): string[] {
+  if (!Array.isArray(body)) return []
+  const names: string[] = []
+  for (const event of body) {
+    if (event && typeof event === 'object' && 'toolName' in event) {
+      const name = (event as { toolName?: unknown }).toolName
+      if (typeof name === 'string' && name.length > 0) names.push(name)
+    }
+  }
+  return names
+}
+
+/**
+ * The two counts US2 is graded on, or ``null`` when the body is not the documented aggregate.
+ *
+ * Returning ``null`` rather than zero matters: "the shape was not what we expected" and "the
+ * authority said there are none" are opposite readings of the same screen.
+ */
+function afterSalesCounts(body: unknown): { returns: number; refunds: number } | null {
+  if (!body || typeof body !== 'object') return null
+  const aggregate = body as { returns?: unknown; refunds?: unknown }
+  if (!Array.isArray(aggregate.returns) || !Array.isArray(aggregate.refunds)) return null
+  return { returns: aggregate.returns.length, refunds: aggregate.refunds.length }
+}
+
+/** One string field of a JSON object, for rendering a short "key point" line next to raw JSON. */
+function fieldOf(body: unknown, key: string): string | null {
+  if (body && typeof body === 'object' && key in body) {
+    const value = (body as Record<string, unknown>)[key]
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return null
 }
 
 function buildSteps(scenario: ScenarioId): FlowStep[] {
@@ -439,6 +536,18 @@ function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | 
       status: statusFor('read-events'),
       note: '当前还没有真正执行 Tool，所以创建后 tool trace 数量为 0 是正确结果。',
     },
+    {
+      id: 'us2-delivered-return',
+      live: 'us2-delivered-return',
+      title: 'US2 退货路径：已签收证据走退货而不是退款',
+      file: 'app/agent/routing.py + app/agent/nodes.py + returns/ReturnService.java',
+      action: 'POST /api/v1/agent/runs（reset → run → trace → after-sales）',
+      input: `Bearer token + 固定请求「${US2_RETURN_MESSAGE}」+ eval case「${US2_RETURN_CASE_ID}」`,
+      work: `按真实顺序走四步：① POST ${EVAL_FIXTURE_API}/${US2_RETURN_CASE_ID}/reset 把世界换成隔离世界（customer-001 只有一张 DELIVERED 的 ${US2_RETURN_ORDER_ID}，签收时刻是 reset 时刻的 3 天前，退货窗口 7 天，且只有一条匹配规则）；② 创建并驱动真实 LangGraph 主链；③ 读回 runs/{runId} 与 trace；④ 读 Java 权威 after-sales 聚合。Java 的确定性规则判定这张已签收的 APPAREL 订单返回 RETURN_REFUND，所以 routing.py 走 RETURN_WRITE 而不是 REFUND_WRITE，Tool 层只会调用 create_return_request。`,
+      output: `trace 里出现 create_return_request、不出现 create_refund_request；GET /api/v1/orders/${US2_RETURN_ORDER_ID}/after-sales 返回 returns 恰好 1 条、refunds 为 0`,
+      status: statusFor('us2-delivered-return'),
+      note: `这是 US2 的页面级真实验收，判据只有两个：退货写入发生（trace 里 create_return_request 出现、create_refund_request 不出现），以及权威读回的事实是 returns=1 / refunds=0。第 4 步的读没有带 Idempotency-Key：Agent 生成的写 key 只存在于它自己的 write intent（AgentState）里，GET /agent/runs/{runId} 与 /trace 都不发布它，页面拿不到，所以展示的是不带过滤的聚合 —— 因为 reset 之后这个订单上不存在别的退货/退款行，这份聚合仍然能回答"我这一笔落库了没有"。`,
+    },
   ]
 }
 
@@ -468,6 +577,7 @@ export function T016FlowPlayground() {
     't032-live-run': false,
     'read-run': false,
     'read-events': false,
+    'us2-delivered-return': false,
   })
 
   const failedStep = result.kind === 'error' ? result.step : null
@@ -537,6 +647,7 @@ export function T016FlowPlayground() {
       step !== 'tool-after-sales' &&
       step !== 't030-live-agent' &&
       step !== 't032-live-run' &&
+      step !== 'us2-delivered-return' &&
       !runId.trim()
     ) {
       setResult({
@@ -545,6 +656,11 @@ export function T016FlowPlayground() {
         status: null,
         detail: '请先执行步骤 10 创建 Run，或在 runId 输入框中填入已有 ID。',
       })
+      return
+    }
+
+    if (step === 'us2-delivered-return') {
+      await callUs2DeliveredReturnPath(step)
       return
     }
 
@@ -671,6 +787,145 @@ export function T016FlowPlayground() {
     }
   }
 
+  /**
+   * US2 (T041/T042): reset the eval fixture, drive one real graph run, then read the authorities back.
+   *
+   * Four calls in this exact order, and the order is the point: the reset is what makes the run's
+   * outcome meaningful (one delivered order, one matching rule), and the reads are what make the
+   * outcome evidence rather than a claim. Every response is kept, including the failing one, because
+   * "which call failed" is the only question this panel exists to answer.
+   */
+  async function callUs2DeliveredReturnPath(step: LiveStepId): Promise<void> {
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    }
+    const trail: LiveTrailEntry[] = []
+    const stopWith = (detail: string, status: number | null): void => {
+      setResult({ kind: 'error', step, status, detail, trail })
+    }
+
+    setResult({ kind: 'pending', step })
+    try {
+      // 1/4 -- known isolated world.
+      const reset = await sendJson(`${EVAL_FIXTURE_API}/${US2_RETURN_CASE_ID}/reset`, {
+        method: 'POST',
+        headers: authHeaders,
+      })
+      trail.push({
+        label: '1/4 eval reset：把世界换成这个用例的隔离世界',
+        path: `${EVAL_FIXTURE_API}/${US2_RETURN_CASE_ID}/reset`,
+        status: reset.status,
+        body: reset.body,
+        note: `期望 fixtureVersion/datasetVersion + resetAt；reset 之后 customer-001 只有一张 DELIVERED 的 ${US2_RETURN_ORDER_ID}（签收=reset 前 3 天，窗口 7 天）。`,
+      })
+      if (!reset.ok) {
+        stopWith(`eval reset 失败，后面三步不应继续：${reset.text}`, reset.status)
+        return
+      }
+
+      // 2/4 -- create the run; the graph drives the whole chain before this response arrives.
+      const created = await sendJson(AGENT_API, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ message: US2_RETURN_MESSAGE }),
+      })
+      trail.push({
+        label:
+          '2/4 创建并驱动真实 LangGraph run（创建即驱动；503 MODEL_API_KEY_NOT_CONFIGURED 也是设计的一部分）',
+        path: AGENT_API,
+        status: created.status,
+        body: created.body,
+        note: `请求体是固定的一句话：{"message":"${US2_RETURN_MESSAGE}"}。页面不提交 orderId / 金额 / idempotency key。`,
+      })
+      if (!created.ok) {
+        stopWith(`创建 run 失败：${created.text}`, created.status)
+        return
+      }
+      const createdRunId = runIdOf(created.body)
+      if (createdRunId === null) {
+        stopWith('创建 run 的响应里没有 runId，无法继续读 run/trace。', created.status)
+        return
+      }
+      setRunId(createdRunId)
+
+      // 3/4 -- read the durable projection and then the timeline it was built from.
+      const run = await sendJson(`${AGENT_API}/${createdRunId}`, {
+        method: 'GET',
+        headers: authHeaders,
+      })
+      trail.push({
+        label: '3a/4 读取持久化 Run：状态与终态节点',
+        path: `${AGENT_API}/${createdRunId}`,
+        status: run.status,
+        body: run.body,
+        note: `status=${fieldOf(run.body, 'status') ?? '?'} · currentNode=${fieldOf(run.body, 'currentNode') ?? '?'} · finalAction=${fieldOf(run.body, 'finalAction') ?? 'null'} · verificationStatus=${fieldOf(run.body, 'verificationStatus') ?? 'null'}`,
+      })
+      const trace = await sendJson(`${AGENT_API}/${createdRunId}/trace`, {
+        method: 'GET',
+        headers: authHeaders,
+      })
+      const toolNames = toolNamesFromTrace(trace.body)
+      trail.push({
+        label: '3b/4 读取 Checkpoint 与 Trace：关键看点是工具名',
+        path: `${AGENT_API}/${createdRunId}/trace`,
+        status: trace.status,
+        body: trace.body,
+        note: `本次 trace 的工具名（按时间顺序）：${toolNames.length > 0 ? toolNames.join(' → ') : '（没有工具调用）'}｜看点：create_return_request ${toolNames.includes('create_return_request') ? '出现了 ✓' : '没有出现（异常）'}；create_refund_request ${toolNames.includes('create_refund_request') ? '出现了（异常：走了退款而不是退货）' : '没有出现 ✓'}`,
+      })
+
+      // 4/4 -- the Java authority's own answer, read back after the write.
+      const afterSales = await sendJson(`${COMMERCE_API}/${US2_RETURN_ORDER_ID}/after-sales`, {
+        method: 'GET',
+        headers: authHeaders,
+      })
+      const counts = afterSalesCounts(afterSales.body)
+      trail.push({
+        label: '4/4 Java 权威售后状态（未按 Idempotency-Key 过滤）',
+        path: `${COMMERCE_API}/${US2_RETURN_ORDER_ID}/after-sales`,
+        status: afterSales.status,
+        body: afterSales.body,
+        note:
+          counts === null
+            ? '响应不是契约里的 { returns[], refunds[] } 形状，只能人工判读。'
+            : `returns ${counts.returns} 条 / refunds ${counts.refunds} 条 —— US2 的判据是 returns 恰好 1 条、refunds 为 0。这一读**没有带 Idempotency-Key**：Agent 生成并复用的写 key 只存在于它自己的 write intent（AgentState）里，GET /agent/runs/{runId} 与 /trace 都不发布它，页面拿不到，所以展示的是不带过滤的聚合；因为 reset 之后这个订单上不存在别的退货/退款行，这份聚合仍然能回答"我这一笔落库了没有"。要按 key 过滤的读，走 T031 的 verify 路径（key 由 Agent 服务端持有）。`,
+      })
+
+      const failed = [reset, created, run, trace, afterSales].find((item) => !item.ok)
+      if (failed) {
+        stopWith(`有一处调用返回了 HTTP ${failed.status}，请看上面的原始响应。`, failed.status)
+        return
+      }
+
+      setCompletedLiveSteps((current) => ({ ...current, [step]: true }))
+      setResult({ kind: 'ok', step, status: afterSales.status, body: afterSales.body, trail })
+    } catch (error) {
+      setResult({
+        kind: 'error',
+        step,
+        status: null,
+        detail: `${String(error)} - 对应服务（Agent :8000 / Java :8080）与 Vite proxy 是否都正常？`,
+        trail,
+      })
+    }
+  }
+
+  const renderTrail = (trail: LiveTrailEntry[]) => (
+    <div className="validation-trail">
+      {trail.map((entry) => (
+        <div className="io-card" key={`${entry.label}-${entry.path}`}>
+          <span className="io-label">{entry.label}</span>
+          <code>{entry.path}</code>
+          <p className={entry.status !== null && entry.status < 400 ? 'validation-success' : 'validation-error'}>
+            {entry.status === null ? '没有拿到 HTTP 响应' : `HTTP ${entry.status}`}
+          </p>
+          {entry.note ? <p className="helper-text">{entry.note}</p> : null}
+          <pre>{typeof entry.body === 'string' ? entry.body : JSON.stringify(entry.body, null, 2)}</pre>
+        </div>
+      ))}
+    </div>
+  )
+
   const chooseScenario = (id: ScenarioId) => {
     setScenario(id)
     setStarted(false)
@@ -749,6 +1004,16 @@ export function T016FlowPlayground() {
             }}
           >
             T032 · LIVE GRAPH RUN
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('us2-delivered-return')
+            }}
+          >
+            US2 · LIVE RETURN PATH
           </button>
         </div>
       </header>
@@ -843,6 +1108,8 @@ export function T016FlowPlayground() {
                             ? 'LIVE STEP · T031 SAFE WRITE + VERIFY'
                           : step.live === 't032-live-run'
                             ? 'LIVE STEP · T032 GRAPH-DRIVEN MAIN CHAIN'
+                          : step.live === 'us2-delivered-return'
+                            ? 'LIVE STEP · US2 DELIVERED-RETURN PATH'
                           : 'LIVE STEP · T017 PERSISTENCE VIA T018 API'}
                       </span>
                       <h2>{step.title}</h2>
@@ -990,6 +1257,19 @@ export function T016FlowPlayground() {
                             idempotency key 由 Agent 生成并先写入 checkpoint；页面不允许手填。
                           </p>
                         </>
+                      ) : step.live === 'us2-delivered-return' ? (
+                        <>
+                          <label htmlFor="live-us2-case">eval fixture case</label>
+                          <input id="live-us2-case" value={US2_RETURN_CASE_ID} readOnly />
+                          <label htmlFor="live-us2-message">固定用户请求（本步骤不使用上面的输入框）</label>
+                          <textarea id="live-us2-message" value={US2_RETURN_MESSAGE} readOnly rows={2} />
+                          <p className="helper-text">
+                            点击按钮会按顺序真实调用四次：eval reset → POST /agent/runs → GET run /
+                            trace → GET /commerce/orders/{US2_RETURN_ORDER_ID}/after-sales。
+                            页面不提交 orderId、金额或 idempotency key；这些都由 Agent 服务端或
+                            Java 权威决定。
+                          </p>
+                        </>
                       ) : step.live === 'create-refund' ? (
                         <>
                           <label htmlFor="live-refund-order-id">orderId</label>
@@ -1073,12 +1353,23 @@ export function T016FlowPlayground() {
                           {result.detail}
                         </p>
                       )}
-                      {result.kind === 'ok' && result.step === step.live && (
+                      {result.kind === 'ok' && result.step === step.live && !result.trail && (
                         <>
                           <p className="validation-success">HTTP {result.status} · 已从真实服务返回</p>
                           <pre>{JSON.stringify(result.body, null, 2)}</pre>
                         </>
                       )}
+                      {result.kind === 'ok' && result.step === step.live && result.trail ? (
+                        <>
+                          <p className="validation-success">
+                            四个真实调用全部完成（最后一次 HTTP {result.status}）· 每一步的原始响应如下
+                          </p>
+                          {renderTrail(result.trail)}
+                        </>
+                      ) : null}
+                      {result.kind === 'error' && result.step === step.live && result.trail
+                        ? renderTrail(result.trail)
+                        : null}
                     </div>
                   </div>
 
