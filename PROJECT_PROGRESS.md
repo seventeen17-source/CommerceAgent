@@ -12,7 +12,7 @@
   - **真库 E2E 已在本机跑通**：`tests/integration/test_runtime_seam.py` 6 个用例打在**真实 PostgreSQL** 上（版本递增与行同步、payload 快照不得改 status、过期版本被拒且败者什么都没改、intent 回调后可从行读回、驱动走完由 `transition` 落终态、失败走路留下 FAILED 行）。**集成套件共 65 passed**（含 T017/T018 既有用例）。
   - **门禁（2026-09-29 最后一次全绿，Docker 运行时）**：`ruff check --no-cache` All checks passed / `ruff format --check` **83 files** / `mypy app` **Success: 47 source files** / `pytest -q` **451 passed, 6 skipped**（6 个 skip 全部来自 `test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化，与数据库无关 —— 曾误判为"需要 DATABASE_URL"，见 devlog 的更正）。
   - **环境事实（会改变上面的测试数字，不是代码问题）**：PostgreSQL 跑在 `infra/docker-compose.yml` 的 `postgres` 容器里。**Docker Desktop 没启动时，集成用例按设计 skip（约 49 个），而不是 fail**——`tests/conftest.py` 的既定取舍："缺本地数据库是环境事实，为它变红的套件会训练人忽略红"。此时 `pytest -q` 约为 **402 passed, 55 skipped**。要跑真库验收：`cd infra; docker compose up -d postgres`。
-  - 分支：US2 的 checkpoint 是 `feat/us2-return-integration`（从最新 dev 派生，与 `origin` 同名分支一致；待本机 Java `clean verify` 通过后快进合入 `dev`）。
+  - 分支：US2 的 checkpoint 是 `feat/us2-return-integration`（从最新 dev 派生）；**2026-10-06 经本机 `mvnw.cmd clean verify` 绿后 fast-forward 合入 `dev`**，feature 分支保留为 checkpoint。下一个功能（T040）必须**从更新后的 dev 新建** `feat/...`，禁止从这个 feature 分支继续派生。
 - **仓库换行策略根治（工程 / 可复现性，2026-09-29）**：`.gitattributes` 增加 `* text=auto eol=lf`，让 LF 成为**全仓库默认**，取代原先"按路径逐个钉"的做法（`*.sh` / `.env` / `Dockerfile` / `*.sql` ✓ 但漏了 `*.java` ✗）。根因是系统级 `core.autocrlf=true` 在 checkout 时把工作区文件改成 CRLF，而 Spotless / Palantir 要求 LF → **没改过的文件也报格式错误** ✓。`.gitattributes` 优先级高于 `core.autocrlf`，因此克隆者无需改本机设置 ✓。`git add --renormalize .` 仅影响 2 个文件，反证仓库内本就存 LF ✓。提交 `156d5c4` ✓。详见 `docs/devlog/2026-09-29.md`。**未立 T 编号**（任务号归 `plan.md` / `tasks.md`，若要进 Phase 9 由用户决定 ✓）。
 - **T033 — Agent Run Response Serialization（已完成并验收，2026-09-29）**：`api/runs.py` 的 `AgentRunView` 现在**只报告权威确认过的事实**——补齐契约已发布但服务从未返回的 `finalMessage` / `approvalRequestId`，新增 `verificationStatus`（权威确认了什么）、`verifiedRefundRequestId`（**只在 `VERIFIED_SUCCESS` 时非空**）、`version`（CAS 重试要传回的值）与 `checkpointCompactedAt`（区分"没有校验过"与"payload 已被保留策略回收"），并把后三项补进 `contracts/agent-api.openapi.yaml`。`finalMessage` 由**终态 + 校验结果确定性推导**，没有任何分支复述模型的话。测试：`tests/unit/test_run_view.py` 11 条 + `test_run_api.py` 响应形状用例；真库集成 **68 passed**；四条门禁 `ruff` / `format` **86 files** / `mypy` **48 files** / `pytest` **475 passed, 6 skipped**。
   - **边界**：Create / Execute 的接线属 T032（`POST /runs` 创建即驱动），T033 只负责序列化。
@@ -101,13 +101,13 @@ T025 已从**最新 dev**创建独立分支 `feat/us1-eligibility-http-api` 并�
 当前分支线实况（2026-10-06，以 `origin/dev` 为基准）：
 
 ```text
-origin/dev/002-commerce-after-sales-mvp  ← US1 的 T028–T033 已 fast-forward 合入
+origin/dev/002-commerce-after-sales-mvp  ← US1（T028–T033）与 US2（T036/T038/T039）均已 fast-forward 合入
    ├─ feat/us1-refund-http-api        ← T028 checkpoint（已验收）
    ├─ feat/us1-typed-tools            ← T029 checkpoint（已验收）
    ├─ feat/us1-agent-evidence-routing ← T030 checkpoint（已验收）
    ├─ feat/us1-write-verify-recovery  ← T031 checkpoint（已验收）
    ├─ feat/us1-langgraph-assembly     ← T032/T033 checkpoint（已验收，US1 收口）
-   └─ feat/us2-return-integration     ← US2 checkpoint（**待合入**：T036/T038/T039 已交付，等待本机 `clean verify`）
+   └─ feat/us2-return-integration     ← US2 checkpoint（**已合入 dev**：T036/T038/T039 + 本次文档收口）
 ```
 
 T031 已收口：交付物（`execute_write.py` / `verify_business_state.py` / CAS `checkpoint_state` / dev-only live harness）齐备，收口时修掉 9 个远端提交带进来的 lint/format 债后，四条 Python 门禁全绿。**T032 必须从最新 dev 新建** `feat/us1-langgraph-assembly` 之类的分支，**禁止从这个 T031 feature 分支继续派生**。
