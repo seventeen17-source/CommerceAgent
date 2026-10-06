@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.5
+  version: 0.2.6
   description: |
     ## Write-path idempotency (T021)
 
@@ -250,7 +250,17 @@ paths:
   /returns:
     post:
       summary: Create idempotent return request
-      description: The backend revalidates authenticated ownership, current state, eligibility, approval record, and idempotency immediately before commit.
+      description: |
+        US2's write path: a delivered order inside its return window is accepted here instead of on
+        `POST /refunds`. The backend revalidates authenticated ownership, current state, eligibility,
+        approval record, and idempotency immediately before commit, and freezes the return deadline at
+        acceptance.
+
+        This endpoint creates the **return request only**. `RETURN_REFUND` means "return and refund", and the
+        money movement is deliberately not part of this call: an amount is expressed only by a refund row, and
+        V1 records that through a separate, separately authorised write. The US2 invariant — a delivered order
+        is never granted a direct refund — therefore stays intact rather than being relaxed to make this
+        endpoint convenient.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -260,14 +270,41 @@ paths:
             schema: { $ref: '#/components/schemas/CreateReturnRequest' }
       responses:
         '200':
-          description: Existing or newly created logical return
+          description: |
+            Existing or newly created logical return. `200` rather than `201` because an idempotent replay
+            returns the same committed object.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReturnResult' }
+        '400':
+          $ref: '#/components/responses/Error'
+          description: |
+            INVALID_PARAMETER: malformed Idempotency-Key, non-UUID runId, an over-long reasonCode/returnMethod,
+            or an approval reference that this version cannot validate.
         '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
-        '422': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: ACCESS_DENIED. The endpoint is customer-scoped; an authenticated principal without the customer capability is refused regardless of order ownership.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: ORDER_NOT_FOUND, identical for "order does not exist" and "order belongs to another user".
+        '409':
+          $ref: '#/components/responses/Error'
+          description: |
+            DUPLICATE_AFTER_SALES: the order already carries a live after-sales action, including a live return.
+            IDEMPOTENCY_CONFLICT: this key was already used for a different logical request.
+        '422':
+          $ref: '#/components/responses/Error'
+          description: |
+            ELIGIBILITY_DENIED (deterministic rules refuse a return: past the window, no signed-at fact, or a
+            delivered order whose rule only grants a direct refund), MANUAL_REVIEW_REQUIRED, or
+            APPROVAL_REQUIRED.
+        '503':
+          $ref: '#/components/responses/Error'
+          description: |
+            LOGISTICS_UNAVAILABLE: revalidating the return window needs authoritative logistics evidence and it
+            is unavailable (or disappeared between evaluation and commit). Retryable within a budget; never read
+            as "refused".
   /support-tickets:
     post:
       summary: Create after-sales escalation ticket
@@ -538,16 +575,31 @@ components:
       required: [orderId, reasonCode, runId]
       properties:
         orderId: { type: string }
-        reasonCode: { type: string }
-        returnMethod: { type: [string, 'null'] }
-        approvalRequestId: { type: [string, 'null'] }
+        reasonCode:
+          type: string
+          description: Descriptive reason. It participates in the idempotency fingerprint but never selects a rule or authorises an action.
+        returnMethod:
+          type: [string, 'null']
+          description: |
+            Optional, max 32 characters. V1 attaches no behaviour to it: it is validated, stored and part of the
+            idempotency fingerprint (so "same key, different method" is a conflict rather than a silent replay),
+            but no rule or state depends on it.
+        approvalRequestId:
+          type: [string, 'null']
+          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
         runId: { type: string }
     ReturnResult:
       type: object
       properties:
         returnRequestId: { type: string }
         status: { type: string }
-        returnDeadline: { type: [string, 'null'], format: date-time }
+        returnDeadline:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Frozen at acceptance: the rule's return window measured from the carrier's signed-at timestamp. It is
+            stored rather than recomputed on read so a later rule revision cannot rewrite a deadline the customer
+            was already told. Null means the accepted return carried no window.
     CreateTicketRequest:
       type: object
       required: [category, evidenceSummary, runId]
@@ -775,16 +827,31 @@ components:
       required: [orderId, reasonCode, runId]
       properties:
         orderId: { type: string }
-        reasonCode: { type: string }
-        returnMethod: { type: [string, 'null'] }
-        approvalRequestId: { type: [string, 'null'] }
+        reasonCode:
+          type: string
+          description: Descriptive reason. It participates in the idempotency fingerprint but never selects a rule or authorises an action.
+        returnMethod:
+          type: [string, 'null']
+          description: |
+            Optional, max 32 characters. V1 attaches no behaviour to it: it is validated, stored and part of the
+            idempotency fingerprint (so "same key, different method" is a conflict rather than a silent replay),
+            but no rule or state depends on it.
+        approvalRequestId:
+          type: [string, 'null']
+          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
         runId: { type: string }
     ReturnResult:
       type: object
       properties:
         returnRequestId: { type: string }
         status: { type: string }
-        returnDeadline: { type: [string, 'null'], format: date-time }
+        returnDeadline:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Frozen at acceptance: the rule's return window measured from the carrier's signed-at timestamp. It is
+            stored rather than recomputed on read so a later rule revision cannot rewrite a deadline the customer
+            was already told. Null means the accepted return carried no window.
     CreateTicketRequest:
       type: object
       required: [category, evidenceSummary, runId]
@@ -1007,16 +1074,31 @@ components:
       required: [orderId, reasonCode, runId]
       properties:
         orderId: { type: string }
-        reasonCode: { type: string }
-        returnMethod: { type: [string, 'null'] }
-        approvalRequestId: { type: [string, 'null'] }
+        reasonCode:
+          type: string
+          description: Descriptive reason. It participates in the idempotency fingerprint but never selects a rule or authorises an action.
+        returnMethod:
+          type: [string, 'null']
+          description: |
+            Optional, max 32 characters. V1 attaches no behaviour to it: it is validated, stored and part of the
+            idempotency fingerprint (so "same key, different method" is a conflict rather than a silent replay),
+            but no rule or state depends on it.
+        approvalRequestId:
+          type: [string, 'null']
+          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
         runId: { type: string }
     ReturnResult:
       type: object
       properties:
         returnRequestId: { type: string }
         status: { type: string }
-        returnDeadline: { type: [string, 'null'], format: date-time }
+        returnDeadline:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Frozen at acceptance: the rule's return window measured from the carrier's signed-at timestamp. It is
+            stored rather than recomputed on read so a later rule revision cannot rewrite a deadline the customer
+            was already told. Null means the accepted return carried no window.
     CreateTicketRequest:
       type: object
       required: [category, evidenceSummary, runId]
@@ -1244,16 +1326,31 @@ components:
       required: [orderId, reasonCode, runId]
       properties:
         orderId: { type: string }
-        reasonCode: { type: string }
-        returnMethod: { type: [string, 'null'] }
-        approvalRequestId: { type: [string, 'null'] }
+        reasonCode:
+          type: string
+          description: Descriptive reason. It participates in the idempotency fingerprint but never selects a rule or authorises an action.
+        returnMethod:
+          type: [string, 'null']
+          description: |
+            Optional, max 32 characters. V1 attaches no behaviour to it: it is validated, stored and part of the
+            idempotency fingerprint (so "same key, different method" is a conflict rather than a silent replay),
+            but no rule or state depends on it.
+        approvalRequestId:
+          type: [string, 'null']
+          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
         runId: { type: string }
     ReturnResult:
       type: object
       properties:
         returnRequestId: { type: string }
         status: { type: string }
-        returnDeadline: { type: [string, 'null'], format: date-time }
+        returnDeadline:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Frozen at acceptance: the rule's return window measured from the carrier's signed-at timestamp. It is
+            stored rather than recomputed on read so a later rule revision cannot rewrite a deadline the customer
+            was already told. Null means the accepted return carried no window.
     CreateTicketRequest:
       type: object
       required: [category, evidenceSummary, runId]

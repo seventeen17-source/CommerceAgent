@@ -163,9 +163,14 @@ Python **不得直接读写 `commerce` 业务表**；它访问权威业务状态
 - `order_id`
 - `user_id`
 - `reason_code`
-- `status`: `CREATED | WAITING_SHIPMENT | RECEIVED | REFUND_PENDING | COMPLETED | REJECTED`
-- `return_deadline`
+- `return_method` nullable（V005/T040：契约发布了它，V1 不给它行为，但它参与幂等指纹，因此必须落库）
+- `status`: `CREATED | PROCESSING | COMPLETED | REJECTED | CANCELLED`
+  —— **与 `RefundStatus` 同一套词表**，这是实现里的有意选择：V1 没有任何状态迁移，写进一组到不了的状态只会变成死词表
+  （V004 用同一条理由省掉了 `version` 列）。本文件此前写的是 `WAITING_SHIPMENT | RECEIVED | REFUND_PENDING`
+  的退货专属集合；T040 按"以代码为准"统一到上面这一套，等退货处理真正引入状态迁移时再由那次改动定义词表。
+- `return_deadline` nullable（V005/T040：规则 `return_window_days` + 运单 `signed_at`，**受理时冻结**）
 - `idempotency_key`
+- `eligibility_rule_code`（哪条规则批准了这笔退货：写在行上，而不是只在审计里）
 - `approval_request_id` nullable
 - `run_id`
 - `created_at`
@@ -175,6 +180,9 @@ Python **不得直接读写 `commerce` 业务表**；它访问权威业务状态
 - 幂等规则与 RefundRequest 一致；
 - 创建必须经过 deterministic return eligibility；
 - 要求审批时执行与 RefundRequest 相同的 Approval Binding。
+
+**T040 写入语义**：`POST /returns` 只创建这一行 + 订单投影 `after_sales_status = RETURN_REQUESTED` + 审计，三者同事务。
+`RETURN_REFUND` 的"退款"这一半**不在**这个接口里发生 —— 金额只由退款行表达，退款需要它自己那条受保护的写路径。
 
 ## 10. SupportTicket
 

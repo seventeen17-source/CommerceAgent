@@ -60,6 +60,32 @@ id 存不存在"。本项目订单 id 形如 `order-001`，是可枚举的；把
 - 反过来，把 `eligible=false` 当成请求失败（例如抛出 `500`）同样是错的：它是一次成功且权威的回答，Agent 应当
   据此解释拒绝或转人工，而不是重试。
 
+## 退货写路径（US2 / T040）
+
+`POST /returns` 与 `POST /refunds` 共用同一套写路径纪律（写前重校验、行锁 + 复查、唯一约束兜底、状态与审计同事务），
+错误码语义也逐条对齐：
+
+| 情形 | 形态 |
+|---|---|
+| 幂等重放（同 key、同逻辑请求） | `200` + 同一笔 `ReturnResult`（不是第二行，也不是冲突） |
+| 同 key、不同逻辑请求（order / reasonCode / returnMethod 任一不同） | `409 IDEMPOTENCY_CONFLICT` |
+| 订单已有活动售后动作（含活动退货） | `409 DUPLICATE_AFTER_SALES` |
+| 越权 / 订单不存在 | `404 ORDER_NOT_FOUND`（两者不可区分） |
+| 角色或能力不足 | `403 ACCESS_DENIED`（**只**表示能力不足） |
+| 带本版本无法校验的审批引用 | `400 INVALID_PARAMETER`（fail closed，不留任何业务痕迹） |
+| 规则判定拒绝（超出退货窗口、缺签收时刻、已签收却被授予直接退款） | `422 ELIGIBILITY_DENIED` |
+| 需要人工 | `422 MANUAL_REVIEW_REQUIRED` |
+| 需要权威审批 | `422 APPROVAL_REQUIRED` |
+| 评估到提交之间物流事实消失、窗口无法冻结 | `503 LOGISTICS_UNAVAILABLE` |
+
+两条只属于退货路径的约定：
+
+- **`RETURN_REFUND` 不在这个接口里动钱。** 退货行只表达"哪一单在走退货、哪条规则批的、截止到什么时候"；金额只由退款行
+  表达（`refund_requests.amount`）。因此"已签收订单不得被直接退款"这条 US2 不变量不会因为多了退货接口而松动 —— 它仍然
+  由 `EligibilityService` 的守卫在决策层保证。
+- **`returnDeadline` 是受理时冻结的事实**，不是读时重算的派生值：规则改版不得改写已经承诺给客户的截止日。`503` 只出现
+  在"决策刚刚放行、但受理时窗口已经算不出来"这一种情形，此时**不写半截行**。
+
 ## Error Taxonomy
 
 | Code | 含义 | 可重试 | Agent 处理 |
