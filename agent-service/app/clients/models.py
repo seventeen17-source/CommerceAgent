@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 __all__ = [
     "AfterSalesStatus",
     "CreateRefundRequest",
+    "CreateReturnRequest",
     "CurrentPrincipal",
     "EligibilityDecision",
     "EligibilityRequest",
@@ -47,6 +48,7 @@ __all__ = [
     "OrderSnapshot",
     "OrderSummary",
     "RefundResult",
+    "ReturnResult",
 ]
 
 # Responses come from Java: tolerate additive fields rather than failing the call.
@@ -207,6 +209,43 @@ class RefundResult(BaseModel):
     accepted_amount: Decimal = Field(alias="acceptedAmount")
 
 
+class CreateReturnRequest(BaseModel):
+    """``POST /returns`` request body (T041).
+
+    Note what is *absent*, and absent by construction rather than merely unused: there is no amount
+    field. A return row never carries money (V004 deliberately has no amount column), so "how much"
+    is not expressible here at all -- the same type-level argument that stops a model from
+    proposing an amount on a refund.
+
+    ``returnMethod`` is published by the contract and, on the Java side, participates in the
+    idempotency fingerprint, so a replay must send the same value or Java answers 409.
+    """
+
+    model_config = _REQUEST
+
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    reason_code: str = Field(alias="reasonCode", min_length=1, max_length=100)
+    return_method: str | None = Field(default=None, alias="returnMethod", max_length=32)
+    approval_request_id: str | None = Field(default=None, alias="approvalRequestId", max_length=64)
+    run_id: str = Field(alias="runId", min_length=1, max_length=64)
+
+
+class ReturnResult(BaseModel):
+    """``ReturnResult`` -- the authoritative return row that exists right now.
+
+    ``returnDeadline`` is nullable in the contract, and a missing value is a *fact*, not a gap:
+    it means the accepted return carried no window. The deadline is frozen by Java at acceptance, so
+    a consumer must never recompute it from the current rule.
+    """
+
+    model_config = _RESPONSE
+
+    return_request_id: str = Field(alias="returnRequestId", min_length=1, max_length=64)
+    # Java-owned forward-compatible status (CREATED in V1). Open string on purpose, like refunds.
+    status: str = Field(min_length=1, max_length=32)
+    return_deadline: datetime | None = Field(default=None, alias="returnDeadline")
+
+
 class AfterSalesStatus(BaseModel):
     """``GET /orders/{orderId}/after-sales`` -- the authoritative answer to "did it commit?".
 
@@ -219,7 +258,9 @@ class AfterSalesStatus(BaseModel):
     model_config = _RESPONSE
 
     refunds: list[RefundResult]
-    returns: list[dict[str, object]]
+    # T041 makes this typed: a return write is verified by reading this array back, and "is my row
+    # in it?" cannot be answered from opaque dicts without re-implementing the contract here.
+    returns: list[ReturnResult]
 
 
 class ErrorEnvelope(BaseModel):

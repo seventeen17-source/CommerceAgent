@@ -23,6 +23,7 @@ ToolName = Literal[
     "get_logistics",
     "check_after_sales_eligibility",
     "create_refund_request",
+    "create_return_request",
     "get_after_sales_status",
 ]
 
@@ -64,6 +65,15 @@ _REGISTRATIONS: Final[dict[ToolName, ToolRegistration]] = {
         risk=ToolRisk.HIGH_WRITE,
         description="Create or replay one protected refund request using a stable idempotency key.",
     ),
+    # T041. Risk stays HIGH_WRITE rather than earning a new level: the trace table's ``risk_level``
+    # vocabulary is LOW/MEDIUM/HIGH, so a "medium write" would be recorded indistinguishably from a
+    # read. The money/non-money distinction is carried where it is actually load-bearing -- the node
+    # (``RETURN_WRITE`` vs ``REFUND_WRITE``), this name, and a request type with no amount field.
+    "create_return_request": ToolRegistration(
+        name="create_return_request",
+        risk=ToolRisk.HIGH_WRITE,
+        description="Create or replay one protected return request using a stable idempotency key.",
+    ),
     "get_after_sales_status": ToolRegistration(
         name="get_after_sales_status",
         risk=ToolRisk.READ_PRIVACY_MEDIUM,
@@ -99,7 +109,7 @@ class ToolRegistry:
         """Resolve a registered name to its already-authenticated Tool implementation.
 
         Binding is explicit rather than based on arbitrary attribute lookup. A model-produced string
-        can select only one of these six predeclared capabilities; it can never name an arbitrary
+        can select only one of these seven predeclared capabilities; it can never name an arbitrary
         method, URL, service or SQL statement.
         """
         registration = self.get(name)
@@ -112,6 +122,7 @@ class ToolRegistry:
             "get_logistics": self._tools.get_logistics,
             "check_after_sales_eligibility": self._tools.check_after_sales_eligibility,
             "create_refund_request": self._tools.create_refund_request,
+            "create_return_request": self._tools.create_return_request,
             "get_after_sales_status": self._tools.get_after_sales_status,
         }
         return implementations[registration.name]

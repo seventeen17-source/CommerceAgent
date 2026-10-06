@@ -55,6 +55,7 @@ from app.clients.errors import (
 from app.clients.models import (
     AfterSalesStatus,
     CreateRefundRequest,
+    CreateReturnRequest,
     CurrentPrincipal,
     EligibilityDecision,
     EligibilityRequest,
@@ -63,6 +64,7 @@ from app.clients.models import (
     OrderSnapshot,
     OrderSummary,
     RefundResult,
+    ReturnResult,
 )
 
 if TYPE_CHECKING:
@@ -346,6 +348,36 @@ class CommerceClient:
             "/refunds",
             auth,
             response_model=RefundResult,
+            request_is_safe=False,
+            json_body=request.model_dump(by_alias=True, mode="json"),
+            extra_headers={IDEMPOTENCY_KEY_HEADER: key},
+        )
+
+    async def create_return(
+        self,
+        auth: AuthContext,
+        *,
+        idempotency_key: str,
+        request: CreateReturnRequest,
+    ) -> CommerceCall[ReturnResult]:
+        """``POST /returns`` -- create (or replay) exactly one logical return request.
+
+        ``request_is_safe=False`` matches :meth:`create_refund`, and for the same reason: when no
+        answer arrives, Java may or may not have committed a return row, so the caller must read
+        ``GET /orders/{orderId}/after-sales`` (scoped by this key) before any same-key retry. The
+        *cost* of the unknown outcome is smaller than a stray payment -- which is why the trace and
+        the run's final message must not describe the two as one thing -- but "unknown" is still not
+        "did not happen".
+
+        The idempotency key travels as a header and is shape-checked first, so a malformed key never
+        reaches the business endpoint: nothing is sent at all.
+        """
+        key = _safe_idempotency_key(idempotency_key)
+        return await self._request(
+            "POST",
+            "/returns",
+            auth,
+            response_model=ReturnResult,
             request_is_safe=False,
             json_body=request.model_dump(by_alias=True, mode="json"),
             extra_headers={IDEMPOTENCY_KEY_HEADER: key},

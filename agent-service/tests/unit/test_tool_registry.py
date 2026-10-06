@@ -12,26 +12,28 @@ from app.tools import REGISTERED_TOOL_NAMES, CommerceTools, ToolEnvelope, ToolRe
 _FAKE_JWT = "header.payload.signature"
 
 
-def test_us1_registry_exposes_only_the_six_declared_capabilities() -> None:
+def test_us1_registry_exposes_only_the_seven_declared_capabilities() -> None:
     assert REGISTERED_TOOL_NAMES == {
         "list_user_orders",
         "get_order",
         "get_logistics",
         "check_after_sales_eligibility",
         "create_refund_request",
+        "create_return_request",
         "get_after_sales_status",
     }
 
 
-def test_refund_write_is_the_only_high_write_capability_in_us1() -> None:
+def test_the_write_capabilities_are_exactly_the_refund_and_the_return() -> None:
     registry = ToolRegistry()
     risks = {registration.name: registration.risk for registration in registry.all()}
 
-    assert risks["create_refund_request"] is ToolRisk.HIGH_WRITE
+    # T041 added the second write capability. Listing them explicitly (rather than asserting
+    # "at least one write exists") turns an accidental third write tool into a test failure.
+    writes = {name for name, risk in risks.items() if risk is ToolRisk.HIGH_WRITE}
+    assert writes == {"create_refund_request", "create_return_request"}
     assert all(
-        risk is ToolRisk.READ_PRIVACY_MEDIUM
-        for name, risk in risks.items()
-        if name != "create_refund_request"
+        risk is ToolRisk.READ_PRIVACY_MEDIUM for name, risk in risks.items() if name not in writes
     )
 
 

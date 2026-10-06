@@ -18,12 +18,14 @@ from app.clients.errors import (
 from app.clients.models import (
     AfterSalesStatus,
     CreateRefundRequest,
+    CreateReturnRequest,
     EligibilityDecision,
     EligibilityRequest,
     LogisticsSnapshot,
     OrderSnapshot,
     OrderSummary,
     RefundResult,
+    ReturnResult,
 )
 from app.tools.models import ToolEnvelope
 
@@ -149,6 +151,75 @@ class CommerceTools:
             )
 
         return ToolEnvelope[RefundResult](
+            success=True,
+            data=call.value,
+            latencyMs=_elapsed_ms(started),
+            traceId=call.trace_id,
+        )
+
+    async def create_return_request(
+        self,
+        *,
+        order_id: str,
+        reason_code: str,
+        idempotency_key: str,
+        run_id: str,
+        return_method: str | None = None,
+        approval_request_id: str | None = None,
+    ) -> ToolEnvelope[ReturnResult]:
+        """Attempt one protected return write without performing any blind retry.
+
+        The envelope rule is identical to the refund tool's, and for the same reason: a transport
+        failure means the return row may already exist, so this is reported as
+        ``WRITE_TIMEOUT_UNKNOWN`` with ``retryable=False`` and the caller must read authoritative
+        after-sales state (same key) before retrying.
+
+        Note what the signature cannot express: an amount. A return never moves money, so "how much"
+        is absent from the type rather than merely ignored -- the return row has no amount column
+        either (V004).
+        """
+        started = perf_counter()
+        try:
+            request = CreateReturnRequest.model_validate(
+                {
+                    "orderId": order_id,
+                    "reasonCode": reason_code,
+                    "returnMethod": return_method,
+                    "approvalRequestId": approval_request_id,
+                    "runId": run_id,
+                }
+            )
+            call = await self._client.create_return(
+                self._auth,
+                idempotency_key=idempotency_key,
+                request=request,
+            )
+        except ValidationError:
+            return _invalid_parameter(started)
+        except UnsafeRequestParameterError as exc:
+            return ToolEnvelope[ReturnResult](
+                success=False,
+                errorCode=exc.error_code,
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+            )
+        except CommerceApiError as exc:
+            return ToolEnvelope[ReturnResult](
+                success=False,
+                errorCode=exc.error_code,
+                retryable=exc.retryable,
+                latencyMs=_elapsed_ms(started),
+                traceId=exc.trace_id,
+            )
+        except CommerceTransportError:
+            return ToolEnvelope[ReturnResult](
+                success=False,
+                errorCode="WRITE_TIMEOUT_UNKNOWN",
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+            )
+
+        return ToolEnvelope[ReturnResult](
             success=True,
             data=call.value,
             latencyMs=_elapsed_ms(started),
