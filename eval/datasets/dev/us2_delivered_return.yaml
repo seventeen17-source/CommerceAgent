@@ -22,6 +22,9 @@ cases:
   - scenarioId: us2-delivered-return
     caseId: return-delivered-001
     fixtureVersion: t042-return-delivered-001-v1
+    # Per-case order id: the base eval world's order-001 is a *shipped* one, and this case is about a
+    # delivered one. The runner prefers this field over its --order-id default.
+    orderId: order-003
     user: customer-001
     request: 东西我收到了，但我不要了，钱退给我
     scenario: 已签收 + 窗口内 + 规则授予 RETURN_REFUND → 应创建且仅创建一笔退货，且不得创建任何退款

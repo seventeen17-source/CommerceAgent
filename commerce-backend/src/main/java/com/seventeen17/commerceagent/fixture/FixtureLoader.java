@@ -4,6 +4,7 @@ import com.seventeen17.commerceagent.common.error.BusinessException;
 import com.seventeen17.commerceagent.common.error.ErrorCode;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,25 @@ public class FixtureLoader {
     private static final Instant FIXTURE_CREATED_AT = Instant.parse("2026-09-01T00:00:00Z");
     private static final Instant ORDER_SHIPPED_AT = Instant.parse("2026-09-10T08:00:00Z");
     private static final Instant LAST_LOGISTICS_EVENT_AT = Instant.parse("2026-09-12T08:00:00Z");
+
+    /**
+     * The literal signing time the older fixtures use.
+     *
+     * <p>Named rather than inlined because it is the *reason* T042's case cannot reuse them: paired with
+     * a 7-day window it stopped being "inside the window" on 2026-09-19, so a case built on it would be
+     * graded against {@code RETURN_WINDOW_EXPIRED} -- a fixture that rots looks exactly like a product
+     * regression.
+     */
+    private static final Instant LEGACY_DELIVERED_AT = Instant.parse("2026-09-12T10:00:00Z");
+
+    /** T042: the eval case whose world must stay inside the return window whenever it is reset. */
+    static final String RETURN_DELIVERED_CASE = "return-delivered-001";
+
+    private static final String RETURN_DELIVERED_ORDER_ID = "order-003";
+    private static final String RETURN_DELIVERED_SHIPMENT_ID = "shipment-003";
+    private static final String RETURN_DELIVERED_RULE_CODE = "RETURN_DELIVERED_WINDOW";
+    private static final int RETURN_WINDOW_DAYS = 7;
+    private static final Duration SIGNED_AGO = Duration.ofDays(3);
 
     private final JdbcTemplate jdbcTemplate;
     private final FixtureCaseRegistry registry;
@@ -54,6 +74,9 @@ public class FixtureLoader {
             clearFixtureState();
             seedBaseUsers();
             seedRefundLogisticsCase();
+            if (RETURN_DELIVERED_CASE.equals(fixtureCase.caseId())) {
+                seedDeliveredReturnCase();
+            }
             return new FixtureResetResponse(
                     fixtureCase.caseId(), fixtureCase.datasetVersion(), fixtureCase.fixtureVersion(), clock.instant());
         } catch (BusinessException exception) {
@@ -85,16 +108,20 @@ public class FixtureLoader {
         // T021/T026：refund_requests 对 orders 有外键，因此必须在下游对象之后再删 orders，否则 fixture reset 会以
         // FK 违约失败。Eval reset 的语义是"业务状态回到基线"，退款这类写入结果必须一起清掉，否则"重置后重跑同一个
         // 用例"会因为上一轮的退款行而得到不同结论。
-        jdbcTemplate.update("DELETE FROM commerce.refund_requests WHERE order_id IN ('order-001', 'order-002')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.refund_requests WHERE order_id IN ('order-001', 'order-002', 'order-003')");
         // T038：退货行与退款行同类 —— 都是"运行产生的写入结果"，不是用例的起点。同样必须在删 orders 之前
         // 处理掉（同样的外键），否则"重置后重跑同一个用例"会带着上一轮的退货行，结论不可比。
-        jdbcTemplate.update("DELETE FROM commerce.return_requests WHERE order_id IN ('order-001', 'order-002')");
         jdbcTemplate.update(
-                "DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002')");
-        jdbcTemplate.update("DELETE FROM commerce.shipments WHERE order_id IN ('order-001', 'order-002')");
-        jdbcTemplate.update("DELETE FROM commerce.order_items WHERE order_id IN ('order-001', 'order-002')");
-        jdbcTemplate.update("DELETE FROM commerce.orders WHERE id IN ('order-001', 'order-002')");
-        jdbcTemplate.update("DELETE FROM commerce.after_sales_rules WHERE rule_code = 'LOGISTICS_STALLED_REFUND'");
+                "DELETE FROM commerce.return_requests WHERE order_id IN ('order-001', 'order-002', 'order-003')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002', 'shipment-003')");
+        jdbcTemplate.update("DELETE FROM commerce.shipments WHERE order_id IN ('order-001', 'order-002', 'order-003')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.order_items WHERE order_id IN ('order-001', 'order-002', 'order-003')");
+        jdbcTemplate.update("DELETE FROM commerce.orders WHERE id IN ('order-001', 'order-002', 'order-003')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.after_sales_rules WHERE rule_code IN ('LOGISTICS_STALLED_REFUND', 'RETURN_DELIVERED_WINDOW')");
         jdbcTemplate.update("DELETE FROM commerce.users WHERE id IN ('customer-001', 'customer-002', 'approver-001')");
     }
 
@@ -115,6 +142,29 @@ public class FixtureLoader {
                 """, id, username, role, Timestamp.from(FIXTURE_CREATED_AT));
     }
 
+    /**
+     * T042: the world US2's eval case needs -- delivered, and *inside* the return window.
+     *
+     * <p>The signing timestamp is derived from the injected {@link Clock}, not written as a literal.
+     * That is the whole point: the window is relative by nature ("within N days of signing"), so a
+     * fixture that pins an absolute timestamp is only accidentally inside it, and stops being so once
+     * the calendar moves. Deriving it means the case asks the same question in 2026 and in 2036.
+     */
+    private void seedDeliveredReturnCase() {
+        Instant signedAt = clock.instant().minus(SIGNED_AGO);
+        upsertOrder(RETURN_DELIVERED_ORDER_ID, "customer-001", "DELIVERED", "120.00", signedAt);
+        upsertOrderItem("item-003", RETURN_DELIVERED_ORDER_ID, "product-003", "Linen Shirt", "APPAREL", "120.00");
+        upsertShipmentSignedAt(
+                RETURN_DELIVERED_SHIPMENT_ID,
+                RETURN_DELIVERED_ORDER_ID,
+                "SYNTHETIC",
+                "TRACK-003",
+                "DELIVERED",
+                signedAt);
+        ensureLogisticsEvent(RETURN_DELIVERED_SHIPMENT_ID, "DELIVERED", "Synthetic signed delivery event", signedAt);
+        upsertReturnRule();
+    }
+
     private void seedRefundLogisticsCase() {
         upsertOrder("order-001", "customer-001", "SHIPPED", "199.00");
         upsertOrder("order-002", "customer-002", "DELIVERED", "89.00");
@@ -133,6 +183,10 @@ public class FixtureLoader {
     }
 
     private void upsertOrder(String id, String userId, String status, String totalAmount) {
+        upsertOrder(id, userId, status, totalAmount, LEGACY_DELIVERED_AT);
+    }
+
+    private void upsertOrder(String id, String userId, String status, String totalAmount, Instant deliveredAt) {
         jdbcTemplate.update(
                 """
                 INSERT INTO commerce.orders
@@ -154,7 +208,7 @@ public class FixtureLoader {
                 totalAmount,
                 Timestamp.from(FIXTURE_CREATED_AT),
                 Timestamp.from(ORDER_SHIPPED_AT),
-                "DELIVERED".equals(status) ? Timestamp.from(Instant.parse("2026-09-12T10:00:00Z")) : null);
+                "DELIVERED".equals(status) ? Timestamp.from(deliveredAt) : null);
     }
 
     private void upsertOrderItem(
@@ -174,8 +228,16 @@ public class FixtureLoader {
     }
 
     private void upsertShipment(String id, String orderId, String carrier, String trackingNumber, String status) {
-        Instant eventTime =
-                "DELIVERED".equals(status) ? Instant.parse("2026-09-12T10:00:00Z") : LAST_LOGISTICS_EVENT_AT;
+        upsertShipmentSignedAt(id, orderId, carrier, trackingNumber, status, LEGACY_DELIVERED_AT);
+    }
+
+    /**
+     * The signing time is a parameter (T042) so a case can say "signed three days ago" instead of
+     * inheriting whatever the calendar has done to a literal.
+     */
+    private void upsertShipmentSignedAt(
+            String id, String orderId, String carrier, String trackingNumber, String status, Instant deliveredAt) {
+        Instant eventTime = "DELIVERED".equals(status) ? deliveredAt : LAST_LOGISTICS_EVENT_AT;
         Instant signedAt = "DELIVERED".equals(status) ? eventTime : null;
         jdbcTemplate.update(
                 """
@@ -232,5 +294,25 @@ public class FixtureLoader {
                 ON CONFLICT (rule_code, version) DO UPDATE
                 SET active = TRUE
                 """, Timestamp.from(FIXTURE_CREATED_AT));
+    }
+
+    /**
+     * The rule T042's case runs against: a delivered order may be *returned* inside a window.
+     *
+     * <p>{@code logistics_stalled_hours} is NULL on purpose. A return rule that declared a stall
+     * threshold would make a signed shipment trip the stall branch's conflict check
+     * ({@code LOGISTICS_CONFLICTS_WITH_ORDER}) and send every legitimate return to manual review --
+     * the trap T039 recorded and pinned with a test of its own.
+     */
+    private void upsertReturnRule() {
+        jdbcTemplate.update("""
+                INSERT INTO commerce.after_sales_rules
+                    (rule_code, version, product_category, required_order_status,
+                     logistics_stalled_hours, return_window_days, max_refund_amount,
+                     approval_threshold, allowed_action, active, effective_from, effective_to)
+                VALUES (?, 1, 'APPAREL', 'DELIVERED', NULL, ?, 500.00, 1000.00, 'RETURN_REFUND', TRUE, ?, NULL)
+                ON CONFLICT (rule_code, version) DO UPDATE
+                SET active = TRUE, return_window_days = EXCLUDED.return_window_days
+                """, RETURN_DELIVERED_RULE_CODE, RETURN_WINDOW_DAYS, Timestamp.from(FIXTURE_CREATED_AT));
     }
 }

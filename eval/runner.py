@@ -205,6 +205,10 @@ def recovery_read_happened(run_id: str) -> bool:
 
 
 def run_case(case: dict[str, Any], order_id: str) -> Outcome:
+    # T042: a case may name its own order. The eval world is no longer a single order -- a delivered
+    # case and a shipped case cannot share one -- and the alternative (one CLI flag for the whole
+    # dataset) would make the dataset unrunnable as soon as it holds two worlds.
+    order_id = case.get("orderId") or order_id
     expect = case.get("expect") or {}
     with httpx.Client(timeout=300.0, trust_env=False) as client:
         problem = reset_case(client, case)
