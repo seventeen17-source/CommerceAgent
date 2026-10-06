@@ -14,7 +14,7 @@
   - **环境事实（会改变上面的测试数字，不是代码问题）**：PostgreSQL 跑在 `infra/docker-compose.yml` 的 `postgres` 容器里。**Docker Desktop 没启动时，集成用例按设计 skip（约 49 个），而不是 fail**——`tests/conftest.py` 的既定取舍："缺本地数据库是环境事实，为它变红的套件会训练人忽略红"。此时 `pytest -q` 约为 **402 passed, 55 skipped**。要跑真库验收：`cd infra; docker compose up -d postgres`。
   - **T040 退货写 API（2026-10-06）**：`POST /api/v1/returns` 已按契约交付 —— 写前重校验（`EligibilityService.evaluate`）+ 订单行锁与锁后复查 + V004 两条唯一约束按约束名兜底 + 订单投影 `RETURN_REQUESTED` 与审计同事务；`V005` 增 `return_deadline`（**受理时冻结**，与决策层共用同一处窗口算术）与 `return_method`（参与幂等指纹，故必须落库）。**本次只创建退货行**：`RETURN_REFUND` 的退款那一半另行授权，`RefundService` 的 US2 守卫一行未动。顺带修掉 **T039 遗留的真实缺陷**：纯 `RETURN` 规则一旦判定成功就抛 500（`decide` 无条件把金额塞进决策，违反 `EligibilityDecision` 不变量；演示数据 `DEMO_HOME_30D_RETURN` 正是这种规则）。契约升 **0.2.6**（`/returns` 补 `400/404/503` 与字段语义）。证据见 `tasks.md` 的 T040 条目与 `docs/devlog/2026-10-06.md`。
   - **T041 + T037 退货路径（2026-10-06）**：Agent 侧最后两环接通 —— `Node.RETURN_WRITE`（`REFUND_PERMITTING_ACTIONS` 收窄为 `{REFUND_ONLY}`、新增 `RETURN_PERMITTING_ACTIONS`）+ `execute_return_write`（同一套 write-ahead intent 与"未知结果先读权威"，**核对 `returns[]`**）+ `verify_return_business_state`；**T037** 的分支测试用假 Java 断言**退款端点从未被调用**。证据见 `tasks.md` 的 T041/T037 条目与 `docs/devlog/2026-10-06.md`。
-  - 分支：US2 的 checkpoint 是 `feat/us2-return-integration`（从最新 dev 派生）；**2026-10-06 经本机 `mvnw.cmd clean verify` 绿后 fast-forward 合入 `dev`**。T036 守卫补修的 checkpoint 是 `feat/us2-delivered-refund-guard`（同一天从 dev 派生、`clean verify` 绿后 fast-forward 合入）。T040 的 checkpoint 是 `feat/us2-return-write-api`（同一天从 dev 派生，`clean verify` 绿后 fast-forward 合入）。T041/T037 的 checkpoint 是 `feat/us2-return-path`（同一天从 dev 派生，四条 Python 门禁全绿后**待合入**）。feature 分支都保留为 checkpoint。下一个功能（T042）必须**从更新后的 dev 新建** `feat/...`，禁止从任何一个 feature 分支继续派生。
+  - 分支：US2 的 checkpoint 是 `feat/us2-return-integration`（从最新 dev 派生）；**2026-10-06 经本机 `mvnw.cmd clean verify` 绿后 fast-forward 合入 `dev`**。T036 守卫补修的 checkpoint 是 `feat/us2-delivered-refund-guard`（同一天从 dev 派生、`clean verify` 绿后 fast-forward 合入）。T040 的 checkpoint 是 `feat/us2-return-write-api`（同一天从 dev 派生，`clean verify` 绿后 fast-forward 合入）。T041/T037 的 checkpoint 是 `feat/us2-return-path`（同一天从 dev 派生，四条 Python 门禁全绿后 fast-forward 合入）。feature 分支都保留为 checkpoint。下一个功能（T042）必须**从更新后的 dev 新建** `feat/...`，禁止从任何一个 feature 分支继续派生。
   - **T036 守卫补修（2026-10-06）**：`EligibilityService` 新增 US2 不变量守卫 —— **已签收订单不会再被任何规则配置授予直接退款**（`DENY` + `DELIVERED_ORDER_IS_RETURN_ONLY`），判据由外壳与决策层共用、只此一处；同时修正 T036 负例的夹具（原来"已有售后动作"让断言因**错误的理由**变绿，改对之后才暴露这条放行路径）。证据见 `tasks.md` 的 T036 条目与 `docs/devlog/2026-10-06.md`。
 - **仓库换行策略根治（工程 / 可复现性，2026-09-29）**：`.gitattributes` 增加 `* text=auto eol=lf`，让 LF 成为**全仓库默认**，取代原先"按路径逐个钉"的做法（`*.sh` / `.env` / `Dockerfile` / `*.sql` ✓ 但漏了 `*.java` ✗）。根因是系统级 `core.autocrlf=true` 在 checkout 时把工作区文件改成 CRLF，而 Spotless / Palantir 要求 LF → **没改过的文件也报格式错误** ✓。`.gitattributes` 优先级高于 `core.autocrlf`，因此克隆者无需改本机设置 ✓。`git add --renormalize .` 仅影响 2 个文件，反证仓库内本就存 LF ✓。提交 `156d5c4` ✓。详见 `docs/devlog/2026-09-29.md`。**未立 T 编号**（任务号归 `plan.md` / `tasks.md`，若要进 Phase 9 由用户决定 ✓）。
 - **T033 — Agent Run Response Serialization（已完成并验收，2026-09-29）**：`api/runs.py` 的 `AgentRunView` 现在**只报告权威确认过的事实**——补齐契约已发布但服务从未返回的 `finalMessage` / `approvalRequestId`，新增 `verificationStatus`（权威确认了什么）、`verifiedRefundRequestId`（**只在 `VERIFIED_SUCCESS` 时非空**）、`version`（CAS 重试要传回的值）与 `checkpointCompactedAt`（区分"没有校验过"与"payload 已被保留策略回收"），并把后三项补进 `contracts/agent-api.openapi.yaml`。`finalMessage` 由**终态 + 校验结果确定性推导**，没有任何分支复述模型的话。测试：`tests/unit/test_run_view.py` 11 条 + `test_run_api.py` 响应形状用例；真库集成 **68 passed**；四条门禁 `ruff` / `format` **86 files** / `mypy` **48 files** / `pytest` **475 passed, 6 skipped**。
@@ -105,7 +105,7 @@ T025 已从**最新 dev**创建独立分支 `feat/us1-eligibility-http-api` 并�
 当前分支线实况（2026-10-06，以 `origin/dev` 为基准）：
 
 ```text
-origin/dev/002-commerce-after-sales-mvp  ← US1（T028–T033）· US2（T036/T038/T039/T040）· T036 守卫补修 均已 fast-forward 合入
+origin/dev/002-commerce-after-sales-mvp  ← US1（T028–T033）· US2（T036–T041）· T036 守卫补修 均已 fast-forward 合入
    ├─ feat/us1-refund-http-api        ← T028 checkpoint（已验收）
    ├─ feat/us1-typed-tools            ← T029 checkpoint（已验收）
    ├─ feat/us1-agent-evidence-routing ← T030 checkpoint（已验收）
@@ -114,7 +114,7 @@ origin/dev/002-commerce-after-sales-mvp  ← US1（T028–T033）· US2（T036/T
    ├─ feat/us2-return-integration     ← US2 checkpoint（已合入 dev：T036/T038/T039 + 文档收口）
    ├─ feat/us2-delivered-refund-guard ← T036 守卫 checkpoint（已合入 dev）
    ├─ feat/us2-return-write-api       ← T040 checkpoint（已合入 dev：受保护退货写 API + V005 + 契约 0.2.6）
-   └─ feat/us2-return-path            ← T041/T037 checkpoint（**待合入**：退货 Tool + `RETURN_WRITE` 节点 + 分支测试）
+   └─ feat/us2-return-path            ← T041/T037 checkpoint（已合入 dev：退货 Tool + `RETURN_WRITE` 节点 + 分支测试）
 ```
 
 T031 已收口：交付物（`execute_write.py` / `verify_business_state.py` / CAS `checkpoint_state` / dev-only live harness）齐备，收口时修掉 9 个远端提交带进来的 lint/format 债后，四条 Python 门禁全绿。**T032 必须从最新 dev 新建** `feat/us1-langgraph-assembly` 之类的分支，**禁止从这个 T031 feature 分支继续派生**。
