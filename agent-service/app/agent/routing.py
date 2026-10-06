@@ -37,8 +37,10 @@ from app.agent.request_understanding import RequestIntent
 from app.agent.state import AgentState, RunStatus, VerificationStatus, WriteStatus
 
 __all__ = [
-    "NON_REFUND_ACTIONS",
+    "MONEY_GRANTING_ACTIONS",
+    "NON_WRITE_ACTIONS",
     "REFUND_PERMITTING_ACTIONS",
+    "RETURN_PERMITTING_ACTIONS",
     "Decision",
     "HandoffReason",
     "Node",
@@ -67,6 +69,7 @@ class Node(StrEnum):
     EXECUTE_EVIDENCE = "execute_evidence"
     CHECK_ELIGIBILITY = "check_eligibility"
     REFUND_WRITE = "refund_write"
+    RETURN_WRITE = "return_write"
     VERIFY = "verify"
     FINALIZE = "finalize"
     WAITING_USER = "waiting_user"
@@ -92,8 +95,20 @@ class SafeStopReason(StrEnum):
 #: Java ``AllowedAction`` values (mirrors the V001 CHECK constraint). The wire value is an open
 #: string on purpose - see the cross-service value policy in ``state.py`` - so a value we do not
 #: recognise must safe-stop rather than be coerced into a known one.
-REFUND_PERMITTING_ACTIONS: Final[frozenset[str]] = frozenset({"REFUND_ONLY", "RETURN_REFUND"})
-NON_REFUND_ACTIONS: Final[frozenset[str]] = frozenset({"RETURN", "MANUAL_REVIEW", "DENY"})
+#:
+#: T041 moved ``RETURN_REFUND`` out of this set. "Return and refund" is no longer authorised by one
+#: Java decision: ``POST /returns`` creates the return row, and moving money needs its own
+#: authorisation (the refund write path only accepts ``REFUND_ONLY``). Treating it as
+#: refund-permitting would keep routing it at a write Java refuses -- the "safe but impossible"
+#: state US2 exists to remove.
+REFUND_PERMITTING_ACTIONS: Final[frozenset[str]] = frozenset({"REFUND_ONLY"})
+#: Actions the Agent executes on the **return** path (T041).
+RETURN_PERMITTING_ACTIONS: Final[frozenset[str]] = frozenset({"RETURN", "RETURN_REFUND"})
+#: Recognised actions that authorise no write at all.
+NON_WRITE_ACTIONS: Final[frozenset[str]] = frozenset({"MANUAL_REVIEW", "DENY"})
+#: Actions whose execution moves money. Only these require an authoritative amount bound: a pure
+#: return carries no amount by contract, so a null one there is the normal shape, not a gap.
+MONEY_GRANTING_ACTIONS: Final[frozenset[str]] = frozenset({"REFUND_ONLY", "RETURN_REFUND"})
 
 
 class Decision(BaseModel):
@@ -234,16 +249,20 @@ def safe_stop_reason_for(
     snapshot = state.eligibility
     if snapshot is not None:
         action = snapshot.allowed_action
-        if action not in REFUND_PERMITTING_ACTIONS and action not in NON_REFUND_ACTIONS:
+        if (
+            action not in REFUND_PERMITTING_ACTIONS
+            and action not in RETURN_PERMITTING_ACTIONS
+            and action not in NON_WRITE_ACTIONS
+        ):
             return SafeStopReason.ELIGIBILITY_UNKNOWN_ACTION
-        if snapshot.eligible and action not in REFUND_PERMITTING_ACTIONS:
+        if snapshot.eligible and action in NON_WRITE_ACTIONS:
             return SafeStopReason.ELIGIBILITY_INCONSISTENT
-        if snapshot.eligible and action in REFUND_PERMITTING_ACTIONS:
+        if snapshot.eligible:
             if snapshot.approval_required:
-                # US1 has no HITL wiring yet (T049). Refusing is the only safe reading of
-                # "approval required": the alternative is moving money without the approval.
+                # No HITL wiring yet (T049). Refusing is the only safe reading of "approval
+                # required": the alternative is moving money without the approval.
                 return SafeStopReason.ELIGIBILITY_APPROVAL_REQUIRED
-            if snapshot.max_refund_amount is None:
+            if action in MONEY_GRANTING_ACTIONS and snapshot.max_refund_amount is None:
                 # Java is the money authority and it did not bound the amount. An unbounded write
                 # is not something the Agent may decide for itself.
                 return SafeStopReason.ELIGIBILITY_AMOUNT_UNBOUNDED
@@ -342,6 +361,11 @@ def route_after_eligibility(state: AgentState, decision: Decision | None = None)
         return Node.SAFE_STOP
     if snapshot.eligible and snapshot.allowed_action in REFUND_PERMITTING_ACTIONS:
         return Node.REFUND_WRITE
+    if snapshot.eligible and snapshot.allowed_action in RETURN_PERMITTING_ACTIONS:
+        # T041: a delivered order inside its window is executed on the return path. Routing
+        # ``RETURN_REFUND`` here rather than to the refund write is the whole point of US2: the two
+        # halves of "return and refund" are separate authorised writes.
+        return Node.RETURN_WRITE
     return Node.FINALIZE
 
 

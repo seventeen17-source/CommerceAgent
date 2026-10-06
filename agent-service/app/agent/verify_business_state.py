@@ -15,7 +15,11 @@ from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.clients.models import AfterSalesStatus
 from app.tools.models import ToolEnvelope
 
-__all__ = ["AfterSalesReadTools", "verify_refund_business_state"]
+__all__ = [
+    "AfterSalesReadTools",
+    "verify_refund_business_state",
+    "verify_return_business_state",
+]
 
 
 class AfterSalesReadTools(Protocol):
@@ -110,5 +114,90 @@ async def verify_refund_business_state(
         details={
             "refundStatus": refund.status,
             "acceptedAmount": str(refund.accepted_amount),
+        },
+    )
+
+
+async def verify_return_business_state(
+    *,
+    tools: AfterSalesReadTools,
+    order_id: str,
+    idempotency_key: str,
+    step_index: int = 0,
+    expected_return_request_id: str | None = None,
+    record_trace: TraceSink | None = None,
+) -> VerificationOutcome:
+    """Verify one logical return by reading authority, never by trusting the write response alone.
+
+    Deliberately the same shape as the refund verification -- same read, same scoping by the durable
+    idempotency key, same "empty is a known negative fact, failed read is UNKNOWN" rule -- but it
+    reads the ``returns`` half of the aggregate. The two halves must not be collapsed: "no refund
+    exists for this key" says nothing about whether the return row was written, and a verification
+    that answered the wrong question would be worse than no verification at all.
+
+    What differs in *meaning*, and therefore in the vocabulary below: an unknown outcome here means
+    a return row may exist, not that money may have moved. The reason codes say so explicitly.
+    """
+    result = await tools.get_after_sales_status(
+        order_id,
+        idempotency_key=idempotency_key,
+    )
+    report_tool_call(
+        record_trace,
+        step_index=step_index,
+        tool_name="get_after_sales_status",
+        envelope=result,
+        input_summary={"orderId": order_id},
+    )
+    if not result.success:
+        return VerificationOutcome(
+            status=VerificationStatus.UNKNOWN,
+            details={
+                "errorCode": result.error_code or "AFTER_SALES_READ_FAILED",
+                "retryable": result.retryable,
+                "traceId": result.trace_id,
+            },
+        )
+
+    authoritative = result.data
+    if authoritative is None:
+        raise ValueError("successful after-sales Tool result is missing data")
+
+    if not authoritative.returns:
+        return VerificationOutcome(
+            status=VerificationStatus.VERIFIED_FAILURE,
+            details={"reasonCode": "RETURN_NOT_FOUND_FOR_IDEMPOTENCY_KEY"},
+        )
+
+    if len(authoritative.returns) != 1:
+        return VerificationOutcome(
+            status=VerificationStatus.UNKNOWN,
+            details={
+                "reasonCode": "MULTIPLE_RETURNS_FOR_IDEMPOTENCY_KEY",
+                "returnCount": len(authoritative.returns),
+            },
+        )
+
+    return_row = authoritative.returns[0]
+    if (
+        expected_return_request_id is not None
+        and return_row.return_request_id != expected_return_request_id
+    ):
+        return VerificationOutcome(
+            status=VerificationStatus.UNKNOWN,
+            details={
+                "reasonCode": "RETURN_ID_MISMATCH",
+                "expectedReturnRequestId": expected_return_request_id,
+                "authoritativeReturnRequestId": return_row.return_request_id,
+            },
+        )
+
+    deadline = return_row.return_deadline
+    return VerificationOutcome(
+        status=VerificationStatus.VERIFIED_SUCCESS,
+        resource_id=return_row.return_request_id,
+        details={
+            "returnStatus": return_row.status,
+            "returnDeadline": None if deadline is None else deadline.isoformat(),
         },
     )

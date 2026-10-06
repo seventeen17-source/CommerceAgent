@@ -78,6 +78,7 @@ _ROUTERS: Final[dict[Node, Callable[[AgentState, Decision | None], Node]]] = {
     Node.EXECUTE_EVIDENCE: route_after_execute,
     Node.CHECK_ELIGIBILITY: route_after_eligibility,
     Node.REFUND_WRITE: route_after_write,
+    Node.RETURN_WRITE: route_after_write,
 }
 
 #: Allowed targets per conditional edge. Declared explicitly rather than derived, so the topology is
@@ -95,9 +96,19 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
     ),
     Node.EXECUTE_EVIDENCE: frozenset({Node.DECIDE_EVIDENCE, Node.EXECUTE_EVIDENCE, Node.SAFE_STOP}),
     Node.CHECK_ELIGIBILITY: frozenset(
-        {Node.REFUND_WRITE, Node.CHECK_ELIGIBILITY, Node.FINALIZE, Node.SAFE_STOP}
+        {
+            Node.REFUND_WRITE,
+            Node.RETURN_WRITE,
+            Node.CHECK_ELIGIBILITY,
+            Node.FINALIZE,
+            Node.SAFE_STOP,
+        }
     ),
     Node.REFUND_WRITE: frozenset({Node.VERIFY, Node.FINALIZE, Node.SAFE_STOP}),
+    # T041: the return write leaves through the same doors as the refund write -- verification, a
+    # quiet finish, or a refusal. It has no money to lose, but it still must never finish on the
+    # strength of its own response alone, so VERIFY is on the edge list for exactly the same reason.
+    Node.RETURN_WRITE: frozenset({Node.VERIFY, Node.FINALIZE, Node.SAFE_STOP}),
 }
 
 #: Nodes that end one invocation of the graph. ``waiting_user`` and ``safe_stop`` also end it: a

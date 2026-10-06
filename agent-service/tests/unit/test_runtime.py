@@ -132,6 +132,7 @@ def two_step_graph() -> CompiledGraph:
         Node.EXECUTE_EVIDENCE: stand_in("execute_evidence"),
         Node.CHECK_ELIGIBILITY: stand_in("check_eligibility"),
         Node.REFUND_WRITE: stand_in("refund_write"),
+        Node.RETURN_WRITE: stand_in("return_write"),
         Node.VERIFY: stand_in("verify"),
         **build_lifecycle_nodes(),
     }

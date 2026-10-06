@@ -16,7 +16,9 @@ precisely what stops two executors from overwriting each other's work.
 from __future__ import annotations
 
 import logging
+from typing import Final
 
+from app.agent.execute_write import CREATE_REFUND_ACTION, CREATE_RETURN_ACTION
 from app.agent.graph import CompiledGraph, GraphState
 from app.agent.routing import Decision, Node, TerminalDecision
 from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, advance
@@ -34,6 +36,26 @@ logger = logging.getLogger(__name__)
 #: intent that could not be persisted, because both say the same thing: our side broke, so the run's
 #: outcome is unknown rather than negative - and neither may be reported as a business answer.
 FAILED_RUN_ERROR_CODE = "INTERNAL_ERROR"
+
+#: Which write node owns each durable action name. Derived from the intent rather than passed in by
+#: the caller: the intent *is* the durable fact about which logical write this is, so the checkpoint
+#: cannot disagree with it -- and a return write can never be recorded on ``refund_write``.
+_WRITE_NODE_FOR_ACTION: Final[dict[str, str]] = {
+    CREATE_REFUND_ACTION: Node.REFUND_WRITE.value,
+    CREATE_RETURN_ACTION: Node.RETURN_WRITE.value,
+}
+
+
+def write_node_for(intent: WriteIntent) -> str:
+    """The node name a write intent belongs to, failing closed on an unknown action.
+
+    Raising here is deliberate and not expensive: the executor treats a raise from the persist
+    callback as "the key could not be made durable", so an unrecognised action sends nothing at all.
+    """
+    try:
+        return _WRITE_NODE_FOR_ACTION[intent.action]
+    except KeyError as exc:
+        raise ValueError(f"unknown write action: {intent.action}") from exc
 
 
 class RunSession:
@@ -88,14 +110,14 @@ class RunSession:
         intent: WriteIntent,
         outcome: WriteOutcome,
     ) -> AgentState:
-        """The callback T031 invokes before its first Tool call.
+        """The callback the write executor invokes before its first Tool call.
 
         It advances the payload and checkpoints it in the same breath, because the entire point of
         the seam is that the key is durable *before* the request is. Raising here is the designed
-        failure: T031 then sends nothing at all.
+        failure: the executor then sends nothing at all.
         """
         moved = advance(state, write_intent=intent, write=outcome)
-        return self.checkpoint(state=moved, current_node=Node.REFUND_WRITE.value)
+        return self.checkpoint(state=moved, current_node=write_node_for(intent))
 
     def record_trace(self, facts: ToolCallFacts, risk: ToolRisk | None) -> None:
         """Write one Tool call to the cross-service evidence table.

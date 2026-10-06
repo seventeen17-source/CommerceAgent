@@ -316,10 +316,21 @@ class TestEligibilityHandoffToken:
 
 
 class TestRouteAfterEligibility:
-    @pytest.mark.parametrize("action", ["REFUND_ONLY", "RETURN_REFUND"])
-    def test_refund_permitting_actions_reach_the_write_node(self, action: str) -> None:
-        state = make_state(eligibility=make_eligibility(allowed_action=action))
+    def test_the_refund_only_action_reaches_the_refund_write_node(self) -> None:
+        state = make_state(eligibility=make_eligibility(allowed_action="REFUND_ONLY"))
         assert route_after_eligibility(state) is Node.REFUND_WRITE
+
+    @pytest.mark.parametrize("action", ["RETURN", "RETURN_REFUND"])
+    def test_return_actions_reach_the_return_write_node(self, action: str) -> None:
+        """T041: the US2 split, stated as routing rather than as prose.
+
+        ``RETURN_REFUND`` used to reach the *refund* write node and be refused by Java (a delivered
+        order is never granted a direct refund). The two halves of "return and refund" are separate,
+        separately authorised writes now: the return goes here, and moving money needs its own
+        authorisation. This assertion is the executable form of that change.
+        """
+        state = make_state(eligibility=make_eligibility(allowed_action=action))
+        assert route_after_eligibility(state) is Node.RETURN_WRITE
 
     def test_a_retry_request_re_enters_eligibility_instead_of_finishing(self) -> None:
         """Without this the run would finish as COMPLETED on "Java could not answer"."""
@@ -327,8 +338,8 @@ class TestRouteAfterEligibility:
         decision = Decision(retry_current_stage=True)
         assert route_after_eligibility(state, decision) is Node.CHECK_ELIGIBILITY
 
-    @pytest.mark.parametrize("action", ["RETURN", "MANUAL_REVIEW", "DENY"])
-    def test_non_refund_actions_finish_without_writing(self, action: str) -> None:
+    @pytest.mark.parametrize("action", ["MANUAL_REVIEW", "DENY"])
+    def test_non_write_actions_finish_without_writing(self, action: str) -> None:
         state = make_state(eligibility=make_eligibility(eligible=False, allowed_action=action))
         assert route_after_eligibility(state) is Node.FINALIZE
 
@@ -337,7 +348,7 @@ class TestRouteAfterEligibility:
         assert route_after_eligibility(state) is Node.SAFE_STOP
         assert safe_stop_reason_for(state) is SafeStopReason.ELIGIBILITY_UNKNOWN_ACTION
 
-    def test_eligible_with_a_non_refund_action_is_treated_as_a_corrupt_decision(self) -> None:
+    def test_eligible_with_a_non_write_action_is_treated_as_a_corrupt_decision(self) -> None:
         state = make_state(eligibility=make_eligibility(allowed_action="MANUAL_REVIEW"))
         assert route_after_eligibility(state) is Node.SAFE_STOP
         assert safe_stop_reason_for(state) is SafeStopReason.ELIGIBILITY_INCONSISTENT
@@ -351,6 +362,18 @@ class TestRouteAfterEligibility:
         state = make_state(eligibility=make_eligibility(max_refund_amount=None))
         assert route_after_eligibility(state) is Node.SAFE_STOP
         assert safe_stop_reason_for(state) is SafeStopReason.ELIGIBILITY_AMOUNT_UNBOUNDED
+
+    def test_a_pure_return_without_an_amount_is_not_an_unbounded_write(self) -> None:
+        """A pure return carries no amount by contract, so "no amount" must not read as a gap.
+
+        Getting this wrong would refuse every legitimate return with AMOUNT_UNBOUNDED -- a money
+        rule applied to an action that never moves money.
+        """
+        state = make_state(
+            eligibility=make_eligibility(allowed_action="RETURN", max_refund_amount=None)
+        )
+        assert route_after_eligibility(state) is Node.RETURN_WRITE
+        assert safe_stop_reason_for(state) is None
 
 
 class TestRouteAfterWrite:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from app.agent.eligibility_execution import (
     US1_ELIGIBILITY_REASON_CODE,
@@ -29,16 +30,21 @@ from app.agent.evidence_routing import (
     guard_evidence_proposal,
 )
 from app.agent.execute_write import (
+    CREATE_RETURN_ACTION,
     INTENT_NOT_DURABLE_ERROR_CODE,
     RefundWriteTools,
+    ReturnWriteTools,
     execute_refund_write,
+    execute_return_write,
     refund_write_intent,
+    return_write_intent,
     write_may_already_have_committed,
 )
 from app.agent.graph import GraphNode, GraphState, GraphUpdate
 from app.agent.order_resolution import OrderReadTools, resolve_single_order
 from app.agent.request_understanding import RequestUnderstandingModel, understand_request
 from app.agent.routing import (
+    RETURN_PERMITTING_ACTIONS,
     Decision,
     Node,
     SafeStopReason,
@@ -49,7 +55,11 @@ from app.agent.routing import (
 )
 from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, advance
 from app.agent.tool_tracing import TraceSink
-from app.agent.verify_business_state import AfterSalesReadTools, verify_refund_business_state
+from app.agent.verify_business_state import (
+    AfterSalesReadTools,
+    verify_refund_business_state,
+    verify_return_business_state,
+)
 from app.tools.registry import ToolRegistry
 
 __all__ = [
@@ -68,6 +78,16 @@ __all__ = [
 type PersistWriteIntent = Callable[[AgentState, WriteIntent, WriteOutcome], Awaitable[AgentState]]
 
 
+class WriteTools(RefundWriteTools, ReturnWriteTools, Protocol):
+    """Both write capabilities, satisfied by the one authenticated Tool object.
+
+    Kept as a single dependency rather than two fields because in production it *is* one object
+    (``CommerceTools``): splitting it would invite a second place for the credential to be bound and
+    a second place for it to drift. Each write node still calls only its own tool, so the reach
+    stays visible exactly where it matters.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class GraphDeps:
     """Everything a read-stage node may call.
@@ -82,7 +102,7 @@ class GraphDeps:
     evidence: EvidenceReadTools
     registry: ToolRegistry
     eligibility: EligibilityTools
-    writes: RefundWriteTools
+    writes: WriteTools
     after_sales: AfterSalesReadTools
     persist_intent: PersistWriteIntent
     #: Where a finished Tool call is reported. Optional so the dev harnesses and unit tests can
@@ -361,6 +381,63 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             )
         return GraphUpdate(state=moved, decision=Decision())
 
+    async def return_write(graph: GraphState) -> GraphUpdate:
+        """Attempt one logical return exactly once, and let the executor own every retry decision.
+
+        Mirrors the refund node, with one deliberate difference in what it demands: a *pure* return
+        (``RETURN``) carries no amount by contract, so this node must never require one -- the
+        amount check stays where money actually moves. What it does require is an eligible snapshot
+        whose action authorises a return at all; the router only sends ``RETURN``/``RETURN_REFUND``
+        here, so reaching this branch without one means the routing table is incomplete -- and
+        refusing beats writing something nobody authorised.
+        """
+        state = spend_one_step(graph["state"])
+        snapshot = state.eligibility
+        if (
+            state.resolved_order_id is None
+            or snapshot is None
+            or not snapshot.eligible
+            or snapshot.allowed_action not in RETURN_PERMITTING_ACTIONS
+        ):
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.ELIGIBILITY_INCONSISTENT),
+            )
+
+        intent = return_write_intent(
+            state,
+            order_id=state.resolved_order_id,
+            reason_code=US1_ELIGIBILITY_REASON_CODE,
+        )
+
+        persisted = state
+
+        async def persist(intent_record: WriteIntent, pending: WriteOutcome) -> None:
+            nonlocal persisted
+            persisted = await deps.persist_intent(persisted, intent_record, pending)
+
+        execution = await execute_return_write(
+            tools=deps.writes,
+            intent=intent,
+            persist_intent=persist,
+            record_trace=deps.record_trace,
+            may_already_have_committed=write_may_already_have_committed(state),
+            start_step_index=state.step_count,
+        )
+        outcome = execution.outcome
+        moved = advance(
+            persisted,
+            write=outcome.to_state_outcome(),
+            tool_history=[*persisted.tool_history, *execution.history],
+        )
+        if outcome.error_code == INTENT_NOT_DURABLE_ERROR_CODE:
+            # Same reading as the refund path: nothing was sent, and that was right.
+            return GraphUpdate(
+                state=moved,
+                decision=Decision(safe_stop_reason=SafeStopReason.WRITE_INTENT_NOT_DURABLE),
+            )
+        return GraphUpdate(state=moved, decision=Decision())
+
     async def verify(graph: GraphState) -> GraphUpdate:
         """Read the authoritative after-sales state back, scoped by the same key, and never retry.
 
@@ -377,13 +454,24 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
                 decision=Decision(safe_stop_reason=SafeStopReason.WRITE_INTENT_NOT_DURABLE),
             )
 
-        verification = await verify_refund_business_state(
-            tools=deps.after_sales,
-            order_id=state.resolved_order_id,
-            idempotency_key=intent.idempotency_key,
-            step_index=state.step_count,
-            expected_refund_request_id=state.write.resource_id,
-            record_trace=deps.record_trace,
+        verification = (
+            await verify_return_business_state(
+                tools=deps.after_sales,
+                order_id=state.resolved_order_id,
+                idempotency_key=intent.idempotency_key,
+                step_index=state.step_count,
+                expected_return_request_id=state.write.resource_id,
+                record_trace=deps.record_trace,
+            )
+            if intent.action == CREATE_RETURN_ACTION
+            else await verify_refund_business_state(
+                tools=deps.after_sales,
+                order_id=state.resolved_order_id,
+                idempotency_key=intent.idempotency_key,
+                step_index=state.step_count,
+                expected_refund_request_id=state.write.resource_id,
+                record_trace=deps.record_trace,
+            )
         )
         moved = advance(state, verification=verification)
         return GraphUpdate(state=moved, decision=Decision())
@@ -391,6 +479,7 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
     return {
         Node.CHECK_ELIGIBILITY: check_eligibility,
         Node.REFUND_WRITE: refund_write,
+        Node.RETURN_WRITE: return_write,
         Node.VERIFY: verify,
     }
 

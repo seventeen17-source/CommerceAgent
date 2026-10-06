@@ -51,12 +51,13 @@ from app.agent.state import AgentState, ToolHistoryEntry, WriteIntent, WriteOutc
 from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.clients.auth import AuthContext
 from app.clients.commerce_client import CommerceClient
-from app.clients.models import AfterSalesStatus, RefundResult
+from app.clients.models import AfterSalesStatus, RefundResult, ReturnResult
 from app.tools.commerce_tools import CommerceTools
 from app.tools.models import ToolEnvelope
 
 __all__ = [
     "CREATE_REFUND_ACTION",
+    "CREATE_RETURN_ACTION",
     "DEFAULT_MAX_ATTEMPTS",
     "INTENT_NOT_DURABLE_ERROR_CODE",
     "UNKNOWN_OUTCOME_ERROR_CODE",
@@ -64,10 +65,16 @@ __all__ = [
     "RefundWriteIntent",
     "RefundWriteOutcome",
     "RefundWriteTools",
+    "ReturnWriteExecutionResult",
+    "ReturnWriteIntent",
+    "ReturnWriteOutcome",
+    "ReturnWriteTools",
     "WriteIntentConflictError",
     "create_refund",
     "execute_refund_write",
+    "execute_return_write",
     "refund_write_intent",
+    "return_write_intent",
     "write_may_already_have_committed",
 ]
 
@@ -75,6 +82,11 @@ logger = logging.getLogger(__name__)
 
 #: Action name recorded in the write intent and in ``WriteOutcome.action``.
 CREATE_REFUND_ACTION = "CREATE_REFUND_REQUEST"
+
+#: T041: the return write's action name. Distinct from the refund action on purpose -- the durable
+#: intent is what tells a resumed run which logical write it is resuming, and collapsing the two
+#: would let a return resume mint a key for a refund.
+CREATE_RETURN_ACTION = "CREATE_RETURN_REQUEST"
 
 #: One attempt plus one same-key retry. A budget, not a loop: every extra attempt is another chance
 #: to be wrong about what already happened.
@@ -538,6 +550,398 @@ def _recovered(
         attempts=attempts,
         idempotency_key=intent.idempotency_key,
         resource_id=refund.refund_request_id,
+        recovered=True,
+        trace_ids=tuple(trace_ids),
+    )
+
+
+# ======================================================================================
+# T041: the return write path
+# --------------------------------------------------------------------------------------
+# Same policy, different object. The retry/recovery rules are mirrored rather than shared through a
+# generic engine because the two paths must stay independently readable: one can lose money, the
+# other can only create a return row, and a future change to either must not silently alter the
+# other's guarantees. What *is* shared: the budget constants, the unknown-outcome code, the trace
+# sink, the history entry shape, and ``WriteIntent`` itself.
+#
+# The one sentence that must never be copied without thinking: an unknown return outcome means "a
+# return row may exist", not "money may have moved". Same discipline, smaller blast radius -- and
+# the reason codes below say exactly that.
+# ======================================================================================
+
+
+def _return_request_fingerprint(
+    *,
+    order_id: str,
+    reason_code: str,
+    return_method: str | None,
+) -> str:
+    """SHA-256 of the V1 logical return payload, excluding run id and idempotency key.
+
+    ``returnMethod`` participates because Java's own idempotency fingerprint includes it: a replay
+    that changed the method is a *different* logical request and Java answers 409. Detecting that
+    locally, before any call, keeps the two services' notion of "the same request" identical.
+    """
+    payload = {
+        "action": CREATE_RETURN_ACTION,
+        "orderId": order_id,
+        "reasonCode": reason_code,
+        "returnMethod": return_method,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
+class ReturnWriteIntent:
+    """One logical return, identified by a key that survives retries and process restarts."""
+
+    run_id: str
+    order_id: str
+    reason_code: str
+    idempotency_key: str
+    return_method: str | None = None
+
+    def to_state_intent(self) -> WriteIntent:
+        """The persistable form. Written *before* the request is sent."""
+        return WriteIntent(
+            action=CREATE_RETURN_ACTION,
+            target_id=self.order_id,
+            idempotency_key=self.idempotency_key,
+            request_fingerprint=_return_request_fingerprint(
+                order_id=self.order_id,
+                reason_code=self.reason_code,
+                return_method=self.return_method,
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class ReturnWriteOutcome:
+    """What the return write attempt(s) established -- and what they did not."""
+
+    write_status: WriteStatus
+    attempts: int
+    idempotency_key: str
+    resource_id: str | None = None
+    error_code: str | None = None
+    recovered: bool = False
+    trace_ids: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def succeeded(self) -> bool:
+        return self.write_status is WriteStatus.SUCCEEDED
+
+    def to_state_outcome(self) -> WriteOutcome:
+        """The persistable outcome; written after the attempt settles."""
+        return WriteOutcome(
+            status=self.write_status,
+            action=CREATE_RETURN_ACTION,
+            resource_id=self.resource_id,
+            error_code=self.error_code,
+        )
+
+
+class ReturnWriteTools(Protocol):
+    """Tool capabilities required by the T041 return write executor."""
+
+    async def create_return_request(
+        self,
+        *,
+        order_id: str,
+        reason_code: str,
+        idempotency_key: str,
+        run_id: str,
+        return_method: str | None = None,
+        approval_request_id: str | None = None,
+    ) -> ToolEnvelope[ReturnResult]:
+        """Attempt one protected return write without blind retry."""
+        ...
+
+    async def get_after_sales_status(
+        self,
+        order_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> ToolEnvelope[AfterSalesStatus]:
+        """Read authoritative after-sales state for recovery."""
+        ...
+
+
+@dataclass(frozen=True)
+class ReturnWriteExecutionResult:
+    """One return write execution plus every Tool call needed to establish its outcome."""
+
+    outcome: ReturnWriteOutcome
+    history: tuple[ToolHistoryEntry, ...] = field(default_factory=tuple)
+
+
+def return_write_intent(
+    state: AgentState,
+    *,
+    order_id: str,
+    reason_code: str,
+    return_method: str | None = None,
+) -> ReturnWriteIntent:
+    """Build this run's return intent, **reusing a persisted key** for the same target.
+
+    Reuse is keyed on (action, target), exactly as for refunds: a resumed attempt at the same order
+    must keep the original key, while a different order is a different logical write. The action is
+    part of that key on purpose -- a run that already holds a *refund* intent must not have it
+    silently reused for a return.
+    """
+    persisted = state.write_intent
+    proposed_fingerprint = _return_request_fingerprint(
+        order_id=order_id,
+        reason_code=reason_code,
+        return_method=return_method,
+    )
+    if (
+        persisted is not None
+        and persisted.action == CREATE_RETURN_ACTION
+        and persisted.target_id == order_id
+    ):
+        if persisted.request_fingerprint != proposed_fingerprint:
+            raise WriteIntentConflictError(
+                "the resumed return payload does not match the durable write intent"
+            )
+        return ReturnWriteIntent(
+            run_id=str(state.run_id),
+            order_id=order_id,
+            reason_code=reason_code,
+            idempotency_key=persisted.idempotency_key,
+            return_method=return_method,
+        )
+    return ReturnWriteIntent(
+        run_id=str(state.run_id),
+        order_id=order_id,
+        reason_code=reason_code,
+        idempotency_key=uuid4().hex,
+        return_method=return_method,
+    )
+
+
+async def execute_return_write(
+    *,
+    tools: ReturnWriteTools,
+    intent: ReturnWriteIntent,
+    persist_intent: Callable[[WriteIntent, WriteOutcome], Awaitable[None]],
+    record_trace: TraceSink | None = None,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    may_already_have_committed: bool = False,
+    start_step_index: int = 1,
+) -> ReturnWriteExecutionResult:
+    """Execute one logical return with bounded unknown-result recovery.
+
+    The durable intent is persisted before the first Tool call. A ``WRITE_TIMEOUT_UNKNOWN`` never
+    licenses a blind retry: the executor first reads authoritative after-sales state with the same
+    key. Only an authoritative empty ``returns`` list may lead to another attempt, and every attempt
+    reuses the original key.
+    """
+    if not 1 <= max_attempts <= MAX_ATTEMPTS_LIMIT:
+        raise ValueError(f"max_attempts must be between 1 and {MAX_ATTEMPTS_LIMIT}")
+    if start_step_index < 0:
+        raise ValueError("start_step_index must be non-negative")
+
+    pending = WriteOutcome(status=WriteStatus.PENDING, action=CREATE_RETURN_ACTION)
+    try:
+        await persist_intent(intent.to_state_intent(), pending)
+    except Exception as exc:
+        logger.error(
+            "refusing to send a return whose idempotency intent could not be persisted: %s",
+            type(exc).__name__,
+        )
+        return ReturnWriteExecutionResult(
+            outcome=ReturnWriteOutcome(
+                write_status=WriteStatus.FAILED,
+                attempts=0,
+                idempotency_key=intent.idempotency_key,
+                error_code=INTENT_NOT_DURABLE_ERROR_CODE,
+            )
+        )
+
+    history: list[ToolHistoryEntry] = []
+    trace_ids: list[str] = []
+    next_step_index = start_step_index
+
+    if may_already_have_committed:
+        confirmed, entry = await _tool_confirmed_returns(
+            tools,
+            order_id=intent.order_id,
+            idempotency_key=intent.idempotency_key,
+            step_index=next_step_index,
+        )
+        history.append(entry)
+        next_step_index += 1
+        if confirmed is None or len(confirmed) > 1:
+            return ReturnWriteExecutionResult(
+                outcome=_unknown_return(attempts=0, intent=intent, trace_ids=trace_ids),
+                history=tuple(history),
+            )
+        if confirmed:
+            return ReturnWriteExecutionResult(
+                outcome=_recovered_return(
+                    confirmed[0], attempts=0, intent=intent, trace_ids=trace_ids
+                ),
+                history=tuple(history),
+            )
+
+    attempts = 0
+    while attempts < max_attempts:
+        attempts += 1
+        result = await tools.create_return_request(
+            order_id=intent.order_id,
+            reason_code=intent.reason_code,
+            idempotency_key=intent.idempotency_key,
+            run_id=intent.run_id,
+            return_method=intent.return_method,
+        )
+        history.append(
+            _history_entry(
+                step_index=next_step_index,
+                tool_name="create_return_request",
+                result=result,
+            )
+        )
+        report_tool_call(
+            record_trace,
+            step_index=next_step_index,
+            tool_name="create_return_request",
+            envelope=result,
+            input_summary={"orderId": intent.order_id, "reasonCode": intent.reason_code},
+        )
+        next_step_index += 1
+
+        if result.trace_id is not None:
+            trace_ids.append(result.trace_id)
+
+        if result.success:
+            authoritative_write = result.data
+            if authoritative_write is None:
+                raise ValueError("successful return Tool result is missing data")
+            return ReturnWriteExecutionResult(
+                outcome=ReturnWriteOutcome(
+                    write_status=WriteStatus.SUCCEEDED,
+                    attempts=attempts,
+                    idempotency_key=intent.idempotency_key,
+                    resource_id=authoritative_write.return_request_id,
+                    trace_ids=tuple(trace_ids),
+                ),
+                history=tuple(history),
+            )
+
+        if result.error_code == UNKNOWN_OUTCOME_ERROR_CODE:
+            confirmed, entry = await _tool_confirmed_returns(
+                tools,
+                order_id=intent.order_id,
+                idempotency_key=intent.idempotency_key,
+                step_index=next_step_index,
+                record_trace=record_trace,
+            )
+            history.append(entry)
+            next_step_index += 1
+
+            if confirmed is None or len(confirmed) > 1:
+                return ReturnWriteExecutionResult(
+                    outcome=_unknown_return(attempts=attempts, intent=intent, trace_ids=trace_ids),
+                    history=tuple(history),
+                )
+            if confirmed:
+                return ReturnWriteExecutionResult(
+                    outcome=_recovered_return(
+                        confirmed[0],
+                        attempts=attempts,
+                        intent=intent,
+                        trace_ids=trace_ids,
+                    ),
+                    history=tuple(history),
+                )
+
+            # The authority answered and found no return for this key *yet*. The same key is the
+            # safe retry identity; exhausting the budget stays UNKNOWN because the timed-out request
+            # may still finish later.
+            continue
+
+        if result.retryable and attempts < max_attempts:
+            continue
+
+        return ReturnWriteExecutionResult(
+            outcome=ReturnWriteOutcome(
+                write_status=WriteStatus.FAILED,
+                attempts=attempts,
+                idempotency_key=intent.idempotency_key,
+                error_code=result.error_code,
+                trace_ids=tuple(trace_ids),
+            ),
+            history=tuple(history),
+        )
+
+    return ReturnWriteExecutionResult(
+        outcome=_unknown_return(attempts=attempts, intent=intent, trace_ids=trace_ids),
+        history=tuple(history),
+    )
+
+
+async def _tool_confirmed_returns(
+    tools: ReturnWriteTools,
+    *,
+    order_id: str,
+    idempotency_key: str,
+    step_index: int,
+    record_trace: TraceSink | None = None,
+) -> tuple[list[ReturnResult] | None, ToolHistoryEntry]:
+    """Return key-scoped returns, preserving failed-read versus authoritative-empty semantics."""
+    result = await tools.get_after_sales_status(
+        order_id,
+        idempotency_key=idempotency_key,
+    )
+    history = _history_entry(
+        step_index=step_index,
+        tool_name="get_after_sales_status",
+        result=result,
+    )
+    report_tool_call(
+        record_trace,
+        step_index=step_index,
+        tool_name="get_after_sales_status",
+        envelope=result,
+        input_summary={"orderId": order_id},
+    )
+    if not result.success:
+        return None, history
+
+    authoritative = result.data
+    if authoritative is None:
+        raise ValueError("successful after-sales Tool result is missing data")
+    return authoritative.returns, history
+
+
+def _unknown_return(
+    *, attempts: int, intent: ReturnWriteIntent, trace_ids: list[str]
+) -> ReturnWriteOutcome:
+    return ReturnWriteOutcome(
+        write_status=WriteStatus.UNKNOWN,
+        attempts=attempts,
+        idempotency_key=intent.idempotency_key,
+        error_code=UNKNOWN_OUTCOME_ERROR_CODE,
+        trace_ids=tuple(trace_ids),
+    )
+
+
+def _recovered_return(
+    return_request: ReturnResult,
+    *,
+    attempts: int,
+    intent: ReturnWriteIntent,
+    trace_ids: list[str],
+) -> ReturnWriteOutcome:
+    return ReturnWriteOutcome(
+        write_status=WriteStatus.SUCCEEDED,
+        attempts=attempts,
+        idempotency_key=intent.idempotency_key,
+        resource_id=return_request.return_request_id,
         recovered=True,
         trace_ids=tuple(trace_ids),
     )
