@@ -4,15 +4,15 @@
 
 ## 当前状态
 
-- **当前 Phase**：Phase 3 — US1 MVP
-- **当前 Tasks**：**Phase 4 — US2 已签收商品改走退货**；Current Task：**T036**（退货的 Java 集成测试）。US1 已收口：T019–T035 完成 ✅，其中 T034 经**用户浏览器验收** ✅、T035 的 Eval 首次真实结果为 **2 pass / 1 预期内 fail**（`us1-unknown-write-timeout` 的 fail 是因为**故障注入尚不存在**，不伪造 pass ✓）。**明确延期的债**：T027 的 approval binding（US4/T049）· `eval` profile 缺配置（T071 前置）· Agent API `ErrorResponse` 与契约不一致（`{"detail": ...}`，记为 contract-hardening debt）· `web/` 无前端测试设施 · `/events` 仍返回 JSON 而契约写 `text/event-stream`（见下）。
+- **当前 Phase**：**Phase 4 — Agent Value（US2：已签收商品改走退货）**。Phase 3（US1 MVP，T019–T035）已收口 ✅。
+- **当前 Tasks**：**US2**；Current Task：**T040**（受保护退货写 API）。已完成 **T036 / T038 / T039**（退货资格集成测试 · `commerce.return_requests` 数据层 · 退货窗口决策），验收证据见 `tasks.md` 对应条目；**T037 有意后置到 T041 之后**（它要证明"退货证据把退款路径改成退货路径"，而退货路径由 T041 提供，现在写只能是红用例或 `@Disabled` 占位 —— 理由见 `tasks.md` 的 T037 条目）。US1 已收口：T019–T035 完成 ✅，其中 T034 经**用户浏览器验收** ✅、T035 的 Eval 首次真实结果为 **2 pass / 1 预期内 fail**（`us1-unknown-write-timeout` 的 fail 是因为**故障注入尚不存在**，不伪造 pass ✓）。**明确延期的债**：T027 的 approval binding（US4/T049）· `eval` profile 缺配置（T071 前置）· Agent API `ErrorResponse` 与契约不一致（`{"detail": ...}`，记为 contract-hardening debt）· `web/` 无前端测试设施。**已关闭的债**：`/events` 不再返回 JSON —— 它现在真的以 `text/event-stream` 逐帧回放已持久化的事件（与「T018 验收证据」里那条历史记录不冲突：那条记的是当时的事实）。
   - **已完成**：`state.advance()` 作为唯一校验变更入口；全部条件边的路由规则与 step/retry 预算；图的装配与拓扑校验（去向显式声明、缺节点启动即报错）；**10 / 10 个节点**；**持久化接缝**（`runtime.py` 的 `RunSession`：`checkpoint_state` / `persist_intent` / `transition` 三个 seam + 版本跟踪，边界写延迟一步使 `next_action` 是事实而非猜测）；**失败收尸**（非终态出口一律先落 `FAILED` 再原样抛出；版本冲突与已终态两种预期拒绝静默）；**生产接线**（`wiring.py` 是 10 节点 + 9 依赖的唯一组装点；`POST /runs`、`/input`、`/resume` 三个入口都会组装图并驱动 run）；**工具 trace 接线**（主链上五条碰 Java 的路径全部上报到 `agent.tool_executions`：证据在产生点生成而不到事后反推、缺 `trace_id` 用本地 id 并标 `traceIdSource: LOCAL`、`risk_level` 在 registry 处绑定且未注册工具名归 HIGH 但照样记录）。
   - **`POST /runs` 是第一次 invocation 的唯一入口**：契约没有 execute 端点，而 `/input` 与 `/resume` 都要求 run 处于 `WAITING_*`，所以创建时不驱动就等于"永远不动"。驱动做成了可注入的 `RunDriver` 接缝（`check` + `run` 两个方法）：**`check` 在写任何东西之前**回答"现在能不能跑"，没配模型 → 503 且库中不留任何东西——否则会留下一个没人能推进的 `RUNNING` run，而 `RUNNING` 刻意不可 resume。
   - **未完成**：**5173 live 验收**、**`/input` 与 `/resume` 的 HTTP happy-path 用例**（`POST /runs` 已有：断言它确实调用了 driver；这两个入口目前只有单元测试覆盖文本规则与组装）。
   - **真库 E2E 已在本机跑通**：`tests/integration/test_runtime_seam.py` 6 个用例打在**真实 PostgreSQL** 上（版本递增与行同步、payload 快照不得改 status、过期版本被拒且败者什么都没改、intent 回调后可从行读回、驱动走完由 `transition` 落终态、失败走路留下 FAILED 行）。**集成套件共 65 passed**（含 T017/T018 既有用例）。
   - **门禁（2026-09-29 最后一次全绿，Docker 运行时）**：`ruff check --no-cache` All checks passed / `ruff format --check` **83 files** / `mypy app` **Success: 47 source files** / `pytest -q` **451 passed, 6 skipped**（6 个 skip 全部来自 `test_state_secret_guard.py` 的"该字段类型装不下凭据"参数化，与数据库无关 —— 曾误判为"需要 DATABASE_URL"，见 devlog 的更正）。
   - **环境事实（会改变上面的测试数字，不是代码问题）**：PostgreSQL 跑在 `infra/docker-compose.yml` 的 `postgres` 容器里。**Docker Desktop 没启动时，集成用例按设计 skip（约 49 个），而不是 fail**——`tests/conftest.py` 的既定取舍："缺本地数据库是环境事实，为它变红的套件会训练人忽略红"。此时 `pytest -q` 约为 **402 passed, 55 skipped**。要跑真库验收：`cd infra; docker compose up -d postgres`。
-  - 分支：`feat/us1-langgraph-assembly`（从最新 dev 派生；**0 提交待推送**，与 origin 一致）。
+  - 分支：US2 的 checkpoint 是 `feat/us2-return-integration`（从最新 dev 派生，与 `origin` 同名分支一致；待本机 Java `clean verify` 通过后快进合入 `dev`）。
 - **仓库换行策略根治（工程 / 可复现性，2026-09-29）**：`.gitattributes` 增加 `* text=auto eol=lf`，让 LF 成为**全仓库默认**，取代原先"按路径逐个钉"的做法（`*.sh` / `.env` / `Dockerfile` / `*.sql` ✓ 但漏了 `*.java` ✗）。根因是系统级 `core.autocrlf=true` 在 checkout 时把工作区文件改成 CRLF，而 Spotless / Palantir 要求 LF → **没改过的文件也报格式错误** ✓。`.gitattributes` 优先级高于 `core.autocrlf`，因此克隆者无需改本机设置 ✓。`git add --renormalize .` 仅影响 2 个文件，反证仓库内本就存 LF ✓。提交 `156d5c4` ✓。详见 `docs/devlog/2026-09-29.md`。**未立 T 编号**（任务号归 `plan.md` / `tasks.md`，若要进 Phase 9 由用户决定 ✓）。
 - **T033 — Agent Run Response Serialization（已完成并验收，2026-09-29）**：`api/runs.py` 的 `AgentRunView` 现在**只报告权威确认过的事实**——补齐契约已发布但服务从未返回的 `finalMessage` / `approvalRequestId`，新增 `verificationStatus`（权威确认了什么）、`verifiedRefundRequestId`（**只在 `VERIFIED_SUCCESS` 时非空**）、`version`（CAS 重试要传回的值）与 `checkpointCompactedAt`（区分"没有校验过"与"payload 已被保留策略回收"），并把后三项补进 `contracts/agent-api.openapi.yaml`。`finalMessage` 由**终态 + 校验结果确定性推导**，没有任何分支复述模型的话。测试：`tests/unit/test_run_view.py` 11 条 + `test_run_api.py` 响应形状用例；真库集成 **68 passed**；四条门禁 `ruff` / `format` **86 files** / `mypy` **48 files** / `pytest` **475 passed, 6 skipped**。
   - **边界**：Create / Execute 的接线属 T032（`POST /runs` 创建即驱动），T033 只负责序列化。
@@ -44,10 +44,10 @@
 - **T029 — Typed Tools 正式验收完成**：新增 `app/tools/models.py` / `registry.py` / `commerce_tools.py`，实现六个 US1 typed tools、统一 Tool Envelope、risk metadata、显式 allowlist 与 name→bound implementation 映射；Registry 只负责 capability allowlist/metadata/binding，不承担 AgentState routing guard。退款写 transport failure 归一为 `WRITE_TIMEOUT_UNKNOWN` 且 `retryable=false`，恢复必须先走 `get_after_sales_status`。为满足“每个 T 可运行、可观察”的验收口径，补充 dev/test-only `/api/v1/agent/dev/tools/execute` 与 `T029 · LIVE TOOL` Flow Playground（刻意不暴露 high-write Tool）。5173 实测 `get_order`、`get_logistics`（`order-001` 的 `stalledHours=384`）、`check_after_sales_eligibility`（eligible + REFUND_ONLY + maxRefundAmount 199.0）、`get_after_sales_status`（同 key 找到真实 CREATED refund；不存在 key 返回 `refunds=[]`），并验证 cross-owner `order-002` 与真实 missing `order-999` 对 Agent 均为 `ORDER_NOT_FOUND`。最终 Python ruff/format/mypy 全绿，`pytest` **285 passed, 6 skipped, 6 warnings**；Web build/lint 全绿。
 - **T030 — Agent 证据收集与受限 capability 决策正式验收完成**：新增真实 OpenAI-compatible request understanding 与 next-evidence adapter；`mentionedOrderId` 仅作线索，只有 Java ownership-confirmed `get_order` 成功才写入 `resolved_order_id`；模型 evidence 输出被收窄为 `get_logistics` / `READY_FOR_ELIGIBILITY`，再由确定性 guard 检查 registry risk、resolved order、重复证据与阶段权限；只有成功 Tool 响应进入 `EvidenceItem`，Java 继续权威计算 `stalledHours`；最终 `EligibilitySnapshot` 只复制 Java `EligibilityDecision`，Python/LLM 不计算 eligibility 或金额。新增 dev/test-only `/api/v1/agent/dev/t030/run` 与同一 Flow Playground 的 `T030 · LIVE AGENT`。最终 Python ruff/format/mypy 全绿，`pytest` **333 passed, 6 skipped, 6 warnings**；Web build/lint 全绿；5173 实测 `customer-001 + order-001` → `completed=true`，`customer-001 + order-002` → `ORDER_NOT_FOUND / completed=false`，证明 cross-owner 在 Agent evidence loop 之前停止。
 - **T031 — Write Execution + Verify-after-write Recovery（已完成并验收，2026-09-29）**：Agent 侧写后权威校验与持久化接缝：`app/agent/verify_business_state.py`（按**同一** idempotency key 读 Java 权威 after-sales 状态再产出 `VerificationOutcome`：读失败 → `UNKNOWN`；权威返回空 → `VERIFIED_FAILURE`；同 key 多条或 refund id 与直连写响应不符 → `UNKNOWN`。**它自己不重试**，重试策略归 `execute_write.py`、路由归 T032）；`execute_write.py` 从直连 `CommerceClient` **改写为经 T029 typed tools 执行与恢复**（`RefundWriteTools` 协议）；`PostgresRunStore.checkpoint_state()` 新增 **CAS 全量状态快照**（`expected_version` + 行锁，同状态才可写、拒绝借它改 status、payload 的 principal 必须等于 run owner，让 `write_intent` / `write` / `verification` 这些非行投影字段可落盘）；`app/api/dev_t031.py`（**dev-only** `POST /api/v1/agent/dev/t031/run`）按「先 checkpoint intent → 再发钱移动的 Tool → 最后读回 Java 权威」顺序提供 live harness；Flow Playground 在同一页面追加 safe write verification 步骤。**本地实测（2026-09-28，真实 PostgreSQL）**：`tests/integration/test_trace_store.py` **23 passed**（含并发 resume 用例）、`tests/integration/test_run_api.py` **18 passed**、`tests/unit/test_execute_write_tools.py` + `tests/unit/test_verify_business_state.py` **9 passed**。**2026-09-29 收口**：这 9 个远端提交当时**并未跑过 Python 门禁**，收口时查出 5 处 `ruff check` 违规（`execute_write.py` import 未排序 + 超长行、`verify_business_state.py` 超长行、`dev_t031.py` 未使用导入、`store.py` 无用 `noqa`）与 4 个待格式化文件，全部修掉后四条门禁全绿：`ruff check .` **All checks passed**、`ruff format --check .` **73 files already formatted**、`mypy app` **Success: 42 source files**、`pytest -q` **344 passed, 6 skipped, 6 warnings**。**仍存在的事实**：`verify_business_state.py` 的非测试调用方只有 dev-only `app/api/dev_t031.py`，端到端 Gate 未跑通 —— 这不算 T031 未完成，它是 **T032 的前置**。**Java 侧未验收**：`commerce-backend/.../RefundHttpIntegrationTest.java`（T028 的测试文件）仍有未提交的纯格式改动；本沙箱下 Testcontainers 需要 Docker 命名管道，`clean verify` 无法执行，按 `AGENTS.md` §9 规则 6 以你本地构建为准。
-- **当前优先任务**：**T034 — 可信客户界面**（`web/src/features/chat/CustomerConsole.tsx`）：聊天为主 + 订单卡片为辅，只呈现客户能理解的结论（我发了什么 / 是否还在处理 / 最终结果 / 需要我补什么）；`currentNode` / `stepCount` / `version` / `verificationStatus` / `write.status` 留在 Flow Playground。契约已为它增加客户安全的澄清通道（`clarification.kind` + `candidateOrderIds`）。其后是 **T035**（US1 Eval 数据 + runner；判分器 `eval/scorers/business_state.py` 已落地并有用例）。
+- **当前优先任务（US2 顺序）**：**T040**（受保护退货写 API）→ **T041**（`create_return_request` Tool + graph/routing 走退货路径）→ **T037**（与 T041 配对的 Python 分支测试）→ **T042**（Delivered/Return Eval case + forbidden-direct-refund 断言）。T034/T035 已于 Phase 3 收口，其证据在 `tasks.md`，本文件不复制。
 - **进度判定口径（本文件不自我认证）**：本文件、`tasks.md` 与 devlog 的标记只用于**定位阶段**，不作为完成依据。判定一个 T 必须回到代码，按 生产实现 → 测试验证 → API/DTO/Schema → **生产调用链** → 持久化与工程接入 依次确认；类/接口/测试齐备但只被 dev-only 路由或测试调用时，只能记为「能力层闭环、产品层未接线」。文档写了完成而代码无生产调用链 → 「文档完成，代码未验证」；代码已实现而文档未更新 → **以代码事实为准**。审计前先固定 ref：`git fetch --all --prune` 后记录 `git branch --show-current` 与 `git rev-parse HEAD`，否则"以代码为准"会退化成"以手上那份过期代码为准"（参见下方「进度比较基准」）。
 - **任务勾选口径说明（T021/T022/T031）**：T026 已随 T021 **全部交付**（migration / Entity / Repository / fixture reset 清理，编号修正为 `V003`）；T027 **部分交付**（ownership / state / eligibility / amount 写前重校验、幂等、行锁、审计、状态读面已完成），**仍缺**权威 `approvalRequestId` 绑定（US4/T049）；T029 **已完整交付并完成 5173 live 验收**；T031 **已勾选**（2026-09-29）：其 `tasks.md` 交付物文本就是 `execute_write.py` + `verify_business_state.py` 两个模块，二者已交付、有测试、且四条门禁全绿；graph 接线明确属 T032，所以「无生产调用方」记为 **T032 的前置事实**，而不是 T031 未完成的理由。**口径修订**：此前一度按「有没有生产调用链」判定 T031 不勾选，那是把 T032 的验收标准上移到了 T031，现已纠正。
-- **下一 Gate**：T019–T035 打通 Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace。**当前 Gate 的下一块砖就是 T032**：没有 graph 接线，T019–T031 的能力只被 dev harness 与测试调用，端到端不可能真的跑通。
+- **下一 Gate**：**US2 真实端到端 —— 已签收订单的证据必须走退货路径**，在 `commerce.return_requests` 里留下恰好一行，而不是被当成直接退款。US1 的 Gate（Web → Agent → Java → DB → exactly one RefundRequest → verified result → structured trace）已由 T032 的 graph 接线打通并完成用户 live 验收。当前缺口是 **T040 的受保护退货写 API** 与 **T041 的 Tool + graph 分支**：在它们之前，窗口内的退货请求会落到退款写路径、被 Java 以"非 `REFUND_ONLY`"拒绝（**安全但走不通**），退货表因此仍是 0 行。
 - **当前 Blocker**：无（T016 前置 contract hardening 已复验通过，证据见「T016 验收证据」）
 - **环境事实（重要）**：
   - **进度比较基准**：集成线一律以 `origin/dev/002-commerce-after-sales-mvp` 为准，**不要用本地同名分支判断领先/落后**。本地 `dev/002-commerce-after-sales-mvp` 曾指向 2026-09-15 的旧归档线（`011daf8`），已于 2026-09-28 改名 `archive/dev-002-commerce-after-sales-mvp-20260915`（挂到同名远端归档分支）并从 `origin/dev` 重建。在一个 stale ref 上做代码审计，会得出「有 T015、有 T016、没有 T017」这类假结论（能力落地时间：T015 = 09-18、T016 = 09-20、T017 = 09-21）
@@ -71,7 +71,7 @@
 - **Skill 规则**：`main` / 功能分支保留 Spec Kit 初始化生成的 `.agents/skills/speckit-*`；`project-coding-tutor` 等自定义 Skill 源码统一维护在 `skills_` 分支或安装为本地/全局 Skill
 - **明确延期**：US6 Policy/RAG、独立 Eval Dashboard、MCP、Multi-Agent、Kafka、Kubernetes、花哨 UI
 
-## 当前 US1 分支策略（一个功能一个分支）
+## 当前分支策略（一个功能一个分支）
 
 从现在起，US1 使用 **dev 集成线 + 独立 feature checkpoint**，不再使用 feature→feature 的线性套娃。
 
@@ -98,14 +98,16 @@ main
 
 T025 已从**最新 dev**创建独立分支 `feat/us1-eligibility-http-api` 并于 2026-09-25 完成验收；该分支继续保留为 T025 checkpoint。旧 `feat/us1-eligibility-decision` 保留为历史 T020 checkpoint，不删除、不重写。T025 合入 `dev/002-commerce-after-sales-mvp` 后，T028 必须重新从最新 dev 创建独立分支 `feat/us1-refund-http-api`，禁止从 T025 feature 继续线性派生。
 
-当前分支线实况（2026-09-29，以 `origin/dev` 为基准）：
+当前分支线实况（2026-10-06，以 `origin/dev` 为基准）：
 
 ```text
-origin/dev/002-commerce-after-sales-mvp  ← T031 已从 feat/us1-write-verify-recovery fast-forward 合入
+origin/dev/002-commerce-after-sales-mvp  ← US1 的 T028–T033 已 fast-forward 合入
    ├─ feat/us1-refund-http-api        ← T028 checkpoint（已验收）
    ├─ feat/us1-typed-tools            ← T029 checkpoint（已验收）
    ├─ feat/us1-agent-evidence-routing ← T030 checkpoint（已验收）
-   └─ feat/us1-write-verify-recovery  ← T031 checkpoint（**已验收**：交付物齐备 + 四条 Python 门禁全绿）
+   ├─ feat/us1-write-verify-recovery  ← T031 checkpoint（已验收）
+   ├─ feat/us1-langgraph-assembly     ← T032/T033 checkpoint（已验收，US1 收口）
+   └─ feat/us2-return-integration     ← US2 checkpoint（**待合入**：T036/T038/T039 已交付，等待本机 `clean verify`）
 ```
 
 T031 已收口：交付物（`execute_write.py` / `verify_business_state.py` / CAS `checkpoint_state` / dev-only live harness）齐备，收口时修掉 9 个远端提交带进来的 lint/format 债后，四条 Python 门禁全绿。**T032 必须从最新 dev 新建** `feat/us1-langgraph-assembly` 之类的分支，**禁止从这个 T031 feature 分支继续派生**。
@@ -117,8 +119,8 @@ T031 已收口：交付物（`execute_write.py` / `verify_business_state.py` / C
 | 0 | 设计冻结 | — | 002 Spec / Plan / Tasks / Contracts 已对齐 | ✅ Complete |
 | 1 | 官方项目脚手架 | T001–T007 | Java / Python / Web 可启动，PostgreSQL 基础配置就绪 | ✅ Complete（T001–T007 ✅） |
 | 2 | Foundation | T008–T018 | AgentRun / Auth / DB boundary / Trace 基础能力可用 | ✅ Complete（T008–T018 ✅） |
-| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | 👉 Current（T019–T031 已验收；T027 approval binding 留 US4；**T032 graph 接线是当前唯一缺口，E2E 尚未跑通**） |
-| 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | ⬜ |
+| 3 | US1 MVP | T019–T035 | 物流异常 → eligibility → refund → verification 真实 E2E 跑通 | ✅ Complete（T019–T035 收口；T027 approval binding 留 US4） |
+| 4 | Agent Value | T036–T048 | 同类请求可因证据走退货 / 澄清等不同路径 | 👉 Current（US2：T036/T038/T039 已交付；T037 后置到 T041 之后；缺口 = T040 退货写 API、T041 Tool + routing） |
 | 5 | HITL | T049–T056 | 高风险动作等待权威审批并可恢复执行 | ⬜ |
 | 6 | 安全降级 | T057–T063 | 依赖失败 / 规则冲突时 Safe Stop 或转人工 | ⬜ |
 | 7 | Policy / RAG | T064–T070 | 政策证据可检索引用，但不掌握资金授权 | ⬜ Optional/P2 |
@@ -169,7 +171,7 @@ T031 已收口：交付物（`execute_write.py` / `verify_business_state.py` / C
 9. ✅ T016：类型化 Java API Client（Java `mvnw.cmd verify` → **BUILD SUCCESS**，Tests run: 52；Python 四条门禁全绿 → 86 passed）
 10. ✅ T017：Run/Checkpoint/Tool Trace 持久化（Java **BUILD SUCCESS** 61 tests；Python 四条门禁全绿 → 195 passed / 13 skipped，含 21 个真实数据库集成用例）
 11. ✅ T018：FastAPI 认证 / principal / run ownership / run 骨架接口（Python 四条门禁全绿 → 234 passed；Web build + lint 通过；**5173 端到端流转实测通过**）—— Phase 2 收口
-12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径；T020 ✅ 资格决策；T021 ✅ 退款写入与幂等/并发测试；T022 ✅ Agent 侧 unknown-write recovery；T023 ✅ Order HTTP；T024 ✅ Logistics HTTP；T025 ✅ Eligibility HTTP；T026 ✅ Refund persistence；T027 核心写路径已提前交付、approval binding 留 US4；T028 ✅ Refund / After-sales Status HTTP；T029 ✅ Typed Tools；T030 ✅ Agent 证据收集与受限 capability 决策；T031 ✅ 写执行 + 写后权威校验（四条 Python 门禁全绿）；**当前 T032 LangGraph 装配**）
+12. 👉 T019–T035：US1 物流异常退款 MVP（T019 ✅ 读面与停滞口径；T020 ✅ 资格决策；T021 ✅ 退款写入与幂等/并发测试；T022 ✅ Agent 侧 unknown-write recovery；T023 ✅ Order HTTP；T024 ✅ Logistics HTTP；T025 ✅ Eligibility HTTP；T026 ✅ Refund persistence；T027 核心写路径已提前交付、approval binding 留 US4；T028 ✅ Refund / After-sales Status HTTP；T029 ✅ Typed Tools；T030 ✅ Agent 证据收集与受限 capability 决策；T031 ✅ 写执行 + 写后权威校验（四条 Python 门禁全绿）；**T032 LangGraph 装配 ✅**，US1 由此收口）
 
 ### T008 验收证据
 
