@@ -73,9 +73,15 @@ public class FixtureLoader {
         try {
             clearFixtureState();
             seedBaseUsers();
-            seedRefundLogisticsCase();
+            // T042: the two cases need *different* worlds, and the difference is not cosmetic. Seeding
+            // both leaves customer-001 holding a shipped order and a delivered one, so the resolver has
+            // two candidates for one request and asks instead of guessing -- correct US3 behaviour, wrong
+            // case: the first real run of this case ended WAITING_USER with no write at all. The return
+            // case therefore seeds only its own world.
             if (RETURN_DELIVERED_CASE.equals(fixtureCase.caseId())) {
                 seedDeliveredReturnCase();
+            } else {
+                seedRefundLogisticsCase();
             }
             return new FixtureResetResponse(
                     fixtureCase.caseId(), fixtureCase.datasetVersion(), fixtureCase.fixtureVersion(), clock.instant());
@@ -120,8 +126,12 @@ public class FixtureLoader {
         jdbcTemplate.update(
                 "DELETE FROM commerce.order_items WHERE order_id IN ('order-001', 'order-002', 'order-003')");
         jdbcTemplate.update("DELETE FROM commerce.orders WHERE id IN ('order-001', 'order-002', 'order-003')");
-        jdbcTemplate.update(
-                "DELETE FROM commerce.after_sales_rules WHERE rule_code IN ('LOGISTICS_STALLED_REFUND', 'RETURN_DELIVERED_WINDOW')");
+        // The eval world must not inherit policy rows it did not choose. Deleting only the two rule codes
+        // this loader creates left the demo seed's rules in place, and a delivered order then matched both
+        // a demo return rule and this case's rule: two distinct ruleCodes matching one order is a
+        // CONFLICTING_RULES refusal by design, so the case graded a *correct* refusal as a failure. Found by
+        // running it -- status COMPLETED, zero return rows, zero Tool calls.
+        jdbcTemplate.update("DELETE FROM commerce.after_sales_rules");
         jdbcTemplate.update("DELETE FROM commerce.users WHERE id IN ('customer-001', 'customer-002', 'approver-001')");
     }
 
