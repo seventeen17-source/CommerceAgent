@@ -4,6 +4,7 @@ import com.seventeen17.commerceagent.logistics.LogisticsService;
 import com.seventeen17.commerceagent.logistics.LogisticsSnapshot;
 import com.seventeen17.commerceagent.order.OrderService;
 import com.seventeen17.commerceagent.order.OrderSnapshot;
+import com.seventeen17.commerceagent.order.OrderStatus;
 import com.seventeen17.commerceagent.security.CommercePrincipal;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -133,6 +134,12 @@ public class EligibilityService {
         if (!selection.isSelected() || order.afterSalesStatus() != null) {
             return false;
         }
+        // 已签收订单不能被授予直接退款（判据与 decide 里那道守卫是同一个函数，见
+        // deliveredOrderCannotTakeADirectRefund）。这条路径因此不需要物流事实：去读一次只会把一次确定性的拒绝
+        // 变成一次依赖故障（503），把客户本来能得到答案的问题变成失败。
+        if (deliveredOrderCannotTakeADirectRefund(order, selection.rule().getAllowedAction())) {
+            return false;
+        }
         // REFUND_ONLY 要的是停滞证据；RETURN / RETURN_REFUND 要的是签收时刻（退货窗口的起算点）。
         // 漏掉后者会让退货永远拿到 null 快照 → 每个退货都变成 RETURN_WINDOW_UNKNOWN：
         // 测试可能全绿，而功能在真实环境里是死的。
@@ -141,6 +148,23 @@ public class EligibilityService {
             case RETURN, RETURN_REFUND -> selection.rule().getReturnWindowDays() != null;
             default -> false;
         };
+    }
+
+    /**
+     * T036 / US2 不变量：一张**已经签收**的订单，不能被授予"直接退款"这个动作。
+     *
+     * <p>规则行是配置，配置可以写错；服务端不能照做。判据因此在代码里，而不是寄托于"seed 数据里没有这种规则"
+     * —— 一条写着 {@code REFUND_ONLY} 且匹配 {@code DELIVERED} 的规则行本身与产品不变量冲突，必须在决策层
+     * 被拦下。
+     *
+     * <p>判据取**订单的生命周期状态**（权威、一定有值），不取运单：这里可能压根没有运单行，而"签收"在本仓库
+     * 别处也是 {@code signedAt != null || status == DELIVERED}（见 {@code LogisticsStallCalculator.isSigned}）。
+     *
+     * <p>它是**唯一判据**，被外壳（要不要读物流）与决策层（产出哪个原因码）共用 —— 两处各写一遍条件迟早会
+     * 漂移，而漂移的后果正是 {@link #needsLogisticsFacts} 注释里警告过的那种断言失败。
+     */
+    static boolean deliveredOrderCannotTakeADirectRefund(OrderSnapshot order, AllowedAction action) {
+        return action == AllowedAction.REFUND_ONLY && order.status() == OrderStatus.DELIVERED;
     }
 
     /**
@@ -192,6 +216,12 @@ public class EligibilityService {
                 // 命中 LOGISTICS_CONFLICTS_WITH_ORDER 而转人工。
             }
             case REFUND_ONLY -> {
+                // US2 守卫必须排在下面的停滞检查之前：对一张已签收的订单，"停滞时长够不够"根本没有意义，
+                // 先回答那个问题只会给出一条误导性的原因码 —— LOGISTICS_CONFLICTS_WITH_ORDER 描述的是
+                // "订单说 SHIPPED、运单说已签收"，而这里的订单自己就说 DELIVERED。
+                if (deliveredOrderCannotTakeADirectRefund(order, rule.getAllowedAction())) {
+                    return denied(rule, EligibilityReasonCode.DELIVERED_ORDER_IS_RETURN_ONLY, now);
+                }
                 // 继续做退款所需的证据与金额校验。
             }
             default -> throw new IllegalStateException("Unhandled allowed action: " + rule.getAllowedAction());

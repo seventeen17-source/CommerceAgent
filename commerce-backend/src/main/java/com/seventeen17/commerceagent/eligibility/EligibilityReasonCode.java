@@ -15,7 +15,8 @@ package com.seventeen17.commerceagent.eligibility;
  *   <li><b>金额段</b>：{@link #APPROVAL_REQUIRED_BY_AMOUNT} / {@link #AMOUNT_EXCEEDS_RULE_LIMIT}；
  *   <li><b>规则段</b>：{@link #NO_APPLICABLE_RULE} / {@link #ORDER_STATE_NOT_ELIGIBLE} /
  *       {@link #CONFLICTING_RULES} / {@link #RULE_ACTION_DENY} / {@link #RULE_ACTION_MANUAL_REVIEW} /
- *       {@link #RULE_ACTION_NOT_SUPPORTED} / {@link #ORDER_ALREADY_HAS_AFTER_SALES}。
+ *       {@link #RULE_ACTION_NOT_SUPPORTED} / {@link #ORDER_ALREADY_HAS_AFTER_SALES} /
+ *       {@link #DELIVERED_ORDER_IS_RETURN_ONLY}。
  * </ul>
  *
  * <p>这些值会进入 Trace 与 Eval failure taxonomy，因此改名等于改对外可查询的事实，不能为了措辞好看而重命名。
@@ -50,5 +51,17 @@ public enum EligibilityReasonCode {
     RETURN_WINDOW_EXPIRED,
     RETURN_WINDOW_UNKNOWN,
     /** 规则要求的动作（退货类）在本版本没有可执行的证据校验，因此 fail closed 为人工复核。 */
-    RULE_ACTION_NOT_SUPPORTED
+    RULE_ACTION_NOT_SUPPORTED,
+    /**
+     * T036（US2 不变量）：订单**已经签收**，因此它只能走退货路径；此刻授予"直接退款"这个动作一律不成立。
+     *
+     * <p>它与 {@link #RULE_ACTION_DENY} 的区别在**责任方**：后者是规则主动说不批，这里规则恰恰说批 —— 是
+     * "规则声明的动作与订单状态不相容"这一配置冲突被服务端拦下。
+     *
+     * <p>结论选 {@code DENY} 而不是 {@code MANUAL_REVIEW} 是有意的：转人工等于把"给已签收订单直接打款"放进
+     * 人工队列，而它正是 US2 存在的全部理由要禁止的事；硬拒绝不动钱，并且给客户一条可执行的出路（走退货），
+     * 不占用人工。反过来，若将来业务确实要支持"已签收且只退款不退货"，那必须先有一个能表达它的动作，
+     * 而不是靠在这里放宽一条不变量。
+     */
+    DELIVERED_ORDER_IS_RETURN_ONLY
 }

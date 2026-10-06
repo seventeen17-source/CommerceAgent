@@ -469,6 +469,53 @@ class EligibilityServiceTest {
         }
     }
 
+    @Test
+    void aDeliveredOrderIsNeverGrantedADirectRefundEvenWhenARuleSaysItIs() {
+        // 规则行可以写错，服务端不能照做。这条规则是"故意配错"的：在 DELIVERED 状态上授予 REFUND_ONLY。
+        AfterSalesRule misconfigured = rule(
+                "T036-DIRECT-REFUND-ON-DELIVERED",
+                1,
+                "ELECTRONICS",
+                OrderStatus.DELIVERED,
+                null,
+                "500.00",
+                "1000.00",
+                AllowedAction.REFUND_ONLY,
+                true,
+                EFFECTIVE_FROM,
+                null);
+
+        EligibilityDecision decision =
+                decide(order(OrderStatus.DELIVERED, "199.00", null, "ELECTRONICS"), misconfigured, null);
+
+        assertFalse(decision.eligible(), "已签收订单不得被 REFUND_ONLY 放行");
+        assertEquals(AllowedAction.DENY, decision.allowedAction());
+        assertFalse(decision.grantsMoneyAction(), "被拦下的决策不能同时是一个资金授权");
+        // 具名原因码，而不是笼统的"不符合"：它一次说清是谁的问题 —— 规则声明的动作与订单状态不相容。
+        assertEquals(List.of(EligibilityReasonCode.DELIVERED_ORDER_IS_RETURN_ONLY), decision.reasonCodes());
+    }
+
+    @Test
+    void aDeliveredOrderDoesNotEvenTriggerALogisticsReadForADirectRefundRule() {
+        AfterSalesRule refundWithStall = rule(
+                "T036-DIRECT-REFUND-WITH-STALL",
+                1,
+                "ELECTRONICS",
+                OrderStatus.DELIVERED,
+                48,
+                "500.00",
+                "300.00",
+                AllowedAction.REFUND_ONLY,
+                true,
+                EFFECTIVE_FROM,
+                null);
+
+        // 外壳与决策层共用同一个判据，所以"要不要读物流"不会与拒绝理由漂移：一次确定性的拒绝不该被一次依赖
+        // 故障变成 503（这也是 needsLogisticsFacts 的既有原则：只收集规则真正需要的证据）。
+        assertFalse(EligibilityService.needsLogisticsFacts(
+                order(OrderStatus.DELIVERED, "199.00", null, "ELECTRONICS"), RuleSelection.selected(refundWithStall)));
+    }
+
     // ------------------------------------------------------------------
     // T039：退货窗口
     // ------------------------------------------------------------------
