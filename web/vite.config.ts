@@ -1,9 +1,17 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+// `vitest/config` re-exports Vite's defineConfig with the `test` block typed; importing from 'vite'
+// here would leave the test config untyped (and silently ignored by tsc).
+import { defineConfig } from 'vitest/config'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  test: {
+    // jsdom because the console is a browser component: anything that touches `document` (a rendered
+    // button, a fetch mock) needs a DOM. Pure-function tests do not care, and cost nothing for it.
+    environment: 'jsdom',
+    include: ['src/**/*.test.{ts,tsx}'],
+  },
   server: {
     port: 5173,
     // Dev-only proxy: the Agent API becomes same-origin from the browser's point of view.
