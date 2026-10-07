@@ -28,10 +28,14 @@ type RunView = {
   resolvedOrderId?: string | null
   errorCode?: string | null
   clarification?: {
-    kind: 'INTENT_UNKNOWN' | 'ORDER_AMBIGUOUS'
+    kind: ClarificationKind
     candidateOrderIds?: string[]
   } | null
 }
+
+/** The three ways a run can stop to ask something. They are not interchangeable: telling a customer
+ *  "several of your orders match" when none of them matched the product they named is simply wrong. */
+type ClarificationKind = 'INTENT_UNKNOWN' | 'ORDER_AMBIGUOUS' | 'ORDER_NO_MATCH'
 
 type Turn =
   | { role: 'customer'; text: string }
@@ -71,6 +75,18 @@ function headlineFor(view: RunView): string {
   return '处理完成'
 }
 
+/** One question per kind, in the customer's words. `ORDER_NO_MATCH` says the *clue* found nothing --
+ *  it is not "several match" and not "I did not understand you", and saying either would be a lie. */
+function clarificationTextFor(kind: ClarificationKind): string {
+  if (kind === 'ORDER_AMBIGUOUS') {
+    return '你名下有好几笔订单，请告诉我是哪一笔。'
+  }
+  if (kind === 'ORDER_NO_MATCH') {
+    return '我没找到你说的那件商品的订单，请确认是下面哪一笔（只列最近几笔）。'
+  }
+  return '我还不太确定你的诉求，能再说明一下吗？'
+}
+
 const card: React.CSSProperties = {
   border: '1px solid #d8dee9',
   borderRadius: 10,
@@ -95,9 +111,7 @@ export function CustomerConsole() {
       {
         role: 'agent',
         text: needsClarification
-          ? view.clarification?.kind === 'ORDER_AMBIGUOUS'
-            ? '你名下有好几笔订单，请告诉我是哪一笔。'
-            : '我还不太确定你的诉求，能再说明一下吗？'
+          ? clarificationTextFor(view.clarification?.kind ?? 'INTENT_UNKNOWN')
           : (view.finalMessage ?? headlineFor(view)),
         orders: view.resolvedOrderId ? [view.resolvedOrderId] : undefined,
         needsClarification,
