@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Agent API
-  version: 0.2.0
+  version: 0.2.1
 servers:
   - url: http://agent-service:8000/api/v1
 paths:
@@ -168,13 +168,16 @@ components:
             What the customer must supply before the run can continue, present only while the run is
             WAITING_USER. A customer-facing channel on purpose: 'waiting for more information' is not
             actionable, and candidateOrderIds are the caller's own orders, so they leak nothing.
+            ORDER_AMBIGUOUS means several orders are plausible; ORDER_NO_MATCH means the product the
+            customer named matched none of them, so the candidates are a fallback list to confirm
+            rather than a filtered answer.
           type: [object, 'null']
           additionalProperties: false
           required: [kind]
           properties:
             kind:
               type: string
-              enum: [INTENT_UNKNOWN, ORDER_AMBIGUOUS]
+              enum: [INTENT_UNKNOWN, ORDER_AMBIGUOUS, ORDER_NO_MATCH]
             candidateOrderIds:
               type: array
               items: { type: string }

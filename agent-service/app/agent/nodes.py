@@ -172,12 +172,16 @@ def build_read_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             moved = advance(
                 state,
                 candidate_order_ids=list(resolution.candidate_order_ids),
+                # The flag travels with the candidates: the router must ask about the clue rather
+                # than count candidates, because a zero match can fall back to a single order.
+                clue_matched_nothing=resolution.clue_matched_nothing,
                 tool_history=history,
             )
         else:
             moved = advance(
                 state,
                 candidate_order_ids=list(resolution.candidate_order_ids),
+                clue_matched_nothing=resolution.clue_matched_nothing,
                 resolved_order_id=resolution.resolved_order_id,
                 tool_history=history,
             )

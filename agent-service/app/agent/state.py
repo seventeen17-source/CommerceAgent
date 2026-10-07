@@ -258,6 +258,10 @@ class AgentState(BaseModel):
 
     intent: str | None = Field(default=None, max_length=100, pattern=_IDENTIFIER_PATTERN)
     candidate_order_ids: list[Identifier] = Field(default_factory=list)
+    #: Whether an informative product clue matched *no* order (T044). Routing has to read this flag
+    #: and not the candidate count: a zero match may fall back to exactly one candidate, so counting
+    #: would make "the clue matched nothing" look like "one order was resolved".
+    clue_matched_nothing: bool = False
     resolved_order_id: Identifier | None = None
 
     evidence: list[EvidenceItem] = Field(default_factory=list)

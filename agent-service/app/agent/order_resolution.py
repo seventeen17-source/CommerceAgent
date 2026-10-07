@@ -33,6 +33,9 @@ class OrderResolutionStatus(StrEnum):
     RESOLVED = "RESOLVED"
     UNRESOLVED = "UNRESOLVED"
     AMBIGUOUS = "AMBIGUOUS"
+    #: An informative clue matched no order at all (T044). Distinct from ``AMBIGUOUS``: there is no
+    #: set of plausible orders to rank here, so the invariant is the flag rather than a count.
+    NO_MATCH = "NO_MATCH"
 
 
 class OrderResolution(BaseModel):
@@ -68,6 +71,10 @@ class OrderResolution(BaseModel):
 
         if self.status is OrderResolutionStatus.AMBIGUOUS and len(self.candidate_order_ids) < 2:
             raise ValueError("AMBIGUOUS requires at least two candidates")
+        if self.status is OrderResolutionStatus.NO_MATCH and not self.clue_matched_nothing:
+            # The count is deliberately *not* checked here: a zero match may fall back to a single
+            # order, and calling that "ambiguous" would tell the customer several orders look alike.
+            raise ValueError("NO_MATCH requires clue_matched_nothing")
         return self
 
 
@@ -130,6 +137,17 @@ async def resolve_single_order(
     candidate_ids = list(selection.candidate_order_ids)
     if not candidate_ids:
         return OrderResolution(status=OrderResolutionStatus.UNRESOLVED, history=[listed_entry])
+    if selection.clue_matched_nothing:
+        # Checked *before* the multiple-candidate branch below, and it must stay that way: a clue
+        # that matched nothing is a question about the clue, not a ranking of the fallback list.
+        # It also covers the single fallback candidate -- resolving that one would mean answering a
+        # question the clue never answered.
+        return OrderResolution(
+            status=OrderResolutionStatus.NO_MATCH,
+            candidate_order_ids=candidate_ids,
+            clue_matched_nothing=True,
+            history=[listed_entry],
+        )
     if len(candidate_ids) > 1:
         return OrderResolution(
             status=OrderResolutionStatus.AMBIGUOUS,

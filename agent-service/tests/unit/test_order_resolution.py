@@ -226,10 +226,13 @@ async def test_a_clue_that_matches_nothing_still_asks_and_says_that_it_did() -> 
 
     result = await resolve_single_order(_understood_with_hint("耳机"), tools=tools)
 
-    assert result.status is OrderResolutionStatus.AMBIGUOUS
+    # NO_MATCH, not AMBIGUOUS: the question here is "which order did you mean", not "which of these
+    # two look alike" -- the clue told us nothing about either of them.
+    assert result.status is OrderResolutionStatus.NO_MATCH
     # The flag is what lets the caller ask a *broader* question instead of implying the clue worked.
     assert result.clue_matched_nothing is True
     assert result.candidate_order_ids == ["order-002", "order-001"]
+    assert tools.get_calls == []
 
 
 @pytest.mark.asyncio

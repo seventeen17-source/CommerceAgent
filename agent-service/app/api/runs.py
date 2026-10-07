@@ -243,8 +243,10 @@ def _view(record: RunRecord) -> AgentRunView:
 
 
 #: Why a run is waiting for the customer, phrased so the customer can act on it. A Literal rather
-#: than an enum because it crosses the API boundary as a plain string.
-ClarificationKind = Literal["INTENT_UNKNOWN", "ORDER_AMBIGUOUS"]
+#: than an enum because it crosses the API boundary as a plain string. ``ORDER_NO_MATCH`` means the
+#: run could not tie the request's product clue to any order, which is a different question from
+#: "several orders look plausible" even when the fallback list it offers is the same one.
+ClarificationKind = Literal["INTENT_UNKNOWN", "ORDER_AMBIGUOUS", "ORDER_NO_MATCH"]
 
 
 class RunClarification(BaseModel):
@@ -266,14 +268,23 @@ def _clarification_for(status: RunStatus, state: AgentState | None) -> RunClarif
     """What to ask the customer, derived from the facts the payload recorded.
 
     The routing decision is not stored, so this rebuilds the question from its inputs - and only
-    from inputs that are facts: an unset/UNKNOWN intent, and the candidate orders the understanding
-    step recorded. When neither explains the wait, it returns None rather than inventing a question,
-    because a customer-facing prompt that might be wrong is worse than no prompt.
+    from inputs that are facts: an unset/UNKNOWN intent, the clue-matched-nothing flag, and the
+    candidate orders the understanding step recorded. When none of them explains the wait, it
+    returns None rather than inventing a question, because a customer-facing prompt that might be
+    wrong is worse than no prompt.
     """
     if status is not RunStatus.WAITING_USER or state is None:
         return None
     if state.intent is None or state.intent == "UNKNOWN":
         return RunClarification(kind="INTENT_UNKNOWN")
+    if state.clue_matched_nothing:
+        # Checked before the candidate count on purpose: a clue that matched nothing can still fall
+        # back to several candidates, and answering "several orders look plausible" would describe a
+        # ranking question when the truth is that not one of them matched what the customer named.
+        return RunClarification(
+            kind="ORDER_NO_MATCH",
+            candidate_order_ids=[str(order_id) for order_id in state.candidate_order_ids],
+        )
     if len(state.candidate_order_ids) >= 2:
         return RunClarification(
             kind="ORDER_AMBIGUOUS",

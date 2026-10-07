@@ -242,6 +242,10 @@ def safe_stop_reason_for(
         if (
             decision.resolution_attempted
             and state.resolved_order_id is None
+            # A zero match has its own answer (ask about the clue), so it must not be read here as
+            # "resolution found nothing". The count test below only distinguishes the several-
+            # candidates case, which is why the flag has to be checked alongside it.
+            and not state.clue_matched_nothing
             and len(state.candidate_order_ids) < 2
         ):
             return SafeStopReason.ORDER_UNRESOLVED
@@ -288,7 +292,9 @@ def route_after_resolve_order(state: AgentState, decision: Decision | None = Non
     """After order resolution: continue, ask the user, or refuse.
 
     Several matching orders is a question for the user, not a ranking problem: picking "the most
-    likely" order would let a guess decide whose refund is created.
+    likely" order would let a guess decide whose refund is created. A clue that matched *nothing* is
+    also a question, and a different one: the fallback list may hold a single order, and resolving
+    that one would silently answer a question the clue never answered.
     """
     if state.is_terminal:
         return Node.FINALIZE
@@ -296,6 +302,8 @@ def route_after_resolve_order(state: AgentState, decision: Decision | None = Non
         return Node.SAFE_STOP
     if state.resolved_order_id is not None:
         return Node.DECIDE_EVIDENCE
+    if state.clue_matched_nothing:
+        return Node.WAITING_USER
     if len(state.candidate_order_ids) >= 2:
         return Node.WAITING_USER
     # Unresolved with nothing to ask about: the node must have declared ORDER_UNRESOLVED. Refusing
