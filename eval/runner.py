@@ -246,6 +246,7 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
                 refund_statuses=tuple(expect.get("refundStatuses") or ()),
                 returns_for_order=expect.get("returnsForOrder"),
                 return_statuses=tuple(expect.get("returnStatuses") or ()),
+                max_writes=expect.get("maxWriteCount"),
             ),
             observed,
             returns=observed_returns,

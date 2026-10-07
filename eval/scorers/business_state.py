@@ -78,6 +78,13 @@ class Expectation:
     refund_statuses: tuple[str, ...] = ()
     returns_for_order: int | None = None
     return_statuses: tuple[str, ...] = ()
+    #: Upper bound on **any** after-sales write for this order (T048's ``maxWriteCount``).
+    #:
+    #: It counts refunds and returns together, and the union is the point: "nothing was written" must mean
+    #: nothing of *either* kind. A bound that only looked at refunds would call a run clean while it had
+    #: already opened a return -- and vice versa. It is an upper bound rather than an exact count because
+    #: the claim is "no write has happened yet", not "exactly N happened".
+    max_writes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +103,16 @@ def score_business_state(
 ) -> Verdict:
     """Grade one case from the rows that exist afterwards."""
     reasons: list[str] = []
+
+    # The write bound is checked first and against both object kinds together: a case that says "nothing
+    # may have been written yet" is making a claim about the world, not about one table.
+    if expectation.max_writes is not None:
+        writes = len(observed) + len(returns)
+        if writes > expectation.max_writes:
+            reasons.append(
+                f"expected at most {expectation.max_writes} after-sales write(s), found {writes} "
+                f"({len(observed)} refund(s) + {len(returns)} return(s))"
+            )
 
     if (
         expectation.refunds_for_order is not None
