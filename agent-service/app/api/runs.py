@@ -45,6 +45,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from app.agent.ask_clarification import clarification_for
 from app.agent.routing import Node
 from app.agent.runtime import RunSession, drive_graph
 from app.agent.state import (
@@ -265,32 +266,24 @@ class RunClarification(BaseModel):
 
 
 def _clarification_for(status: RunStatus, state: AgentState | None) -> RunClarification | None:
-    """What to ask the customer, derived from the facts the payload recorded.
+    """This endpoint's shape of the question the runtime decided to ask.
 
-    The routing decision is not stored, so this rebuilds the question from its inputs - and only
-    from inputs that are facts: an unset/UNKNOWN intent, the clue-matched-nothing flag, and the
-    candidate orders the understanding step recorded. When none of them explains the wait, it
-    returns None rather than inventing a question, because a customer-facing prompt that might be
-    wrong is worse than no prompt.
+    The decision itself lives in ``app.agent.ask_clarification`` (T045): "stop and ask" is a
+    state-machine fact, not a transport fact, and the runtime answers the same question this payload
+    publishes. This function only maps that answer onto the response model.
     """
-    if status is not RunStatus.WAITING_USER or state is None:
+    clarification = clarification_for(
+        waiting_for_user=status is RunStatus.WAITING_USER and state is not None,
+        intent=None if state is None else state.intent,
+        clue_matched_nothing=False if state is None else state.clue_matched_nothing,
+        candidate_order_ids=() if state is None else state.candidate_order_ids,
+    )
+    if clarification is None:
         return None
-    if state.intent is None or state.intent == "UNKNOWN":
-        return RunClarification(kind="INTENT_UNKNOWN")
-    if state.clue_matched_nothing:
-        # Checked before the candidate count on purpose: a clue that matched nothing can still fall
-        # back to several candidates, and answering "several orders look plausible" would describe a
-        # ranking question when the truth is that not one of them matched what the customer named.
-        return RunClarification(
-            kind="ORDER_NO_MATCH",
-            candidate_order_ids=[str(order_id) for order_id in state.candidate_order_ids],
-        )
-    if len(state.candidate_order_ids) >= 2:
-        return RunClarification(
-            kind="ORDER_AMBIGUOUS",
-            candidate_order_ids=[str(order_id) for order_id in state.candidate_order_ids],
-        )
-    return None
+    return RunClarification(
+        kind=clarification.kind,
+        candidate_order_ids=list(clarification.candidate_order_ids),
+    )
 
 
 def _approval_request_id(state: AgentState | None) -> str | None:

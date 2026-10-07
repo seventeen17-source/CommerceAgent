@@ -1,0 +1,63 @@
+"""The "waiting for the customer" half of the state machine (T045).
+
+Why this is a module and not a few lines inside the API router: "stop and ask" is a *state*, and
+a state that is described in three places drifts. The API needs the customer-facing question,
+the runtime needs "may I park here?", and the resume path needs "may I wake this run up?" --
+all three are questions about the same facts, so they get answered from the same place.
+
+Nothing here reads or writes a database, and no statuses are redefined: the status vocabulary
+itself stays in ``app/trace/checkpoint.py`` (one truth per fact). This module is a pure function
+of facts the caller already holds, which makes the waiting rules testable without a server.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Literal
+
+#: The published vocabulary, mirrored by the API Literal and the contract enum. Plain strings rather
+#: than an enum because they cross the API boundary as strings -- one representation, not two.
+ClarificationKindName = Literal["INTENT_UNKNOWN", "ORDER_AMBIGUOUS", "ORDER_NO_MATCH"]
+
+INTENT_UNKNOWN: ClarificationKindName = "INTENT_UNKNOWN"
+ORDER_AMBIGUOUS: ClarificationKindName = "ORDER_AMBIGUOUS"
+ORDER_NO_MATCH: ClarificationKindName = "ORDER_NO_MATCH"
+
+
+@dataclass(frozen=True)
+class Clarification:
+    """What the customer has to supply before this run can continue."""
+
+    kind: ClarificationKindName
+    candidate_order_ids: tuple[str, ...] = ()
+
+
+def _as_ids(candidate_order_ids: Sequence[object]) -> tuple[str, ...]:
+    return tuple(str(order_id) for order_id in candidate_order_ids)
+
+
+def clarification_for(
+    *,
+    waiting_for_user: bool,
+    intent: str | None,
+    clue_matched_nothing: bool,
+    candidate_order_ids: Sequence[object] = (),
+) -> Clarification | None:
+    """The question to publish, derived only from facts -- or ``None`` when nothing explains it.
+
+    ``None`` is a real answer, not a failure: a customer-facing prompt that might be wrong is
+    worse than no prompt, so a wait with no known reason publishes nothing instead of a guess.
+    """
+    if not waiting_for_user:
+        return None
+    if intent is None or intent == "UNKNOWN":
+        return Clarification(kind=INTENT_UNKNOWN)
+    if clue_matched_nothing:
+        # Checked before the candidate count on purpose: a clue that matched nothing can still fall
+        # back to several candidates, and answering "several orders look plausible" would describe a
+        # ranking question when the truth is that not one of them matched what the customer named.
+        return Clarification(kind=ORDER_NO_MATCH, candidate_order_ids=_as_ids(candidate_order_ids))
+    if len(candidate_order_ids) >= 2:
+        return Clarification(kind=ORDER_AMBIGUOUS, candidate_order_ids=_as_ids(candidate_order_ids))
+    return None
