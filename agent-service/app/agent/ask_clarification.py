@@ -25,8 +25,16 @@ never be reachable before authorization.
 **The version check is a conditional write, not a check.** ``UPDATE ... WHERE status =
 'WAITING_USER' AND version = ?`` fuses "still waiting" and "still the version I read" into one
 atomic statement; a read-compare-then-write leaves a TOCTOU gap in which two wake-ups both pass the
-comparison and the later one silently overwrites the earlier one. Enforcement belongs to the store;
-wiring this contract into ``/input`` is the remaining half of T045.
+comparison and the later one silently overwrites the earlier one.
+
+**Enforcement stays where it already is, and this module must not grow a second copy of it.**
+Ownership lives in the API's owner-scoped read; status *and* version live inside the store's single
+transaction (``SELECT ... FOR UPDATE``, compare, then ``UPDATE ... WHERE version = %s`` requiring
+exactly one row). ``/input``'s own docstring gives the reason: "two places deciding 'is this run
+resumable' would be two answers, and the one in SQL is the one that holds under concurrency". An
+earlier draft of this note said the remaining work was to wire these checks in here; that was wrong,
+and it is recorded because acting on it would have created the duplicate decider the design forbids.
+**This module declares the rule; the store is its only enforcer.**
 """
 
 from __future__ import annotations
