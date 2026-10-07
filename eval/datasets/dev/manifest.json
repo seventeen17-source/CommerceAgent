@@ -1,0 +1,12 @@
+{
+  "datasetVersion": "v1",
+  "status": "development",
+  "cases": [
+    {
+      "caseId": "refund-logistics-001",
+      "fixtureVersion": "t014-refund-logistics-001-v1",
+      "description": "Synthetic customer-001 shipped electronics order with stalled logistics and deterministic refund rule."
+    }
+  ],
+  "note": "Development manifest only. T074 freezes the full test/dev dataset."
+}

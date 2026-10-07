@@ -1,0 +1,28 @@
+# 统一换行符策略。本机 core.autocrlf=true 会把手写文件转成 CRLF，
+# 但下列文件必须在 Linux 容器/环境中保持 LF，否则出现 "bad interpreter: /bin/bash^M"
+# 或变量值里混入 \r。
+
+# 在 postgres 容器内由 entrypoint 执行的初始化脚本
+*.sh text eol=lf
+
+# docker compose 读取的 env 文件：CRLF 会把 \r 带进变量值
+.env text eol=lf
+.env.example text eol=lf
+
+# 容器内使用、且对 CRLF 敏感的其他文本
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# Flyway 迁移：文件内容参与 checksum 计算（写在 flyway_schema_history 里）。
+# 本机 core.autocrlf=true 会在 checkout 时把已提交的 LF 换成 CRLF，
+# 同一个迁移在"本机 Windows"与"Linux 容器/CI"就会算出不同 checksum，
+# 表现为突然的 "Migration checksum mismatch"。钉死 LF，让三处字节一致。
+*.sql text eol=lf
+
+# 上面是"按路径钉住"的历史做法：只覆盖了已经咬到过人的那几类文件。
+# 但它漏掉了最大的一类——*.java（以及 .py / .ts / .md / .json …）：
+# 在 core.autocrlf=true 的机器上，拉下来的 Java 文件是 CRLF，
+# 而 Spotless / Palantir 要求 LF，于是**没人改过的文件**也会报格式错误。
+# 下面这条是全仓库默认值：.gitattributes 的优先级高于 core.autocrlf，
+# 所以克隆者不必改自己的 Git 设置，拿到的就是 LF。
+* text=auto eol=lf

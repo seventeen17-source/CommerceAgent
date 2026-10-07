@@ -35,6 +35,10 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 - 可选 `product_query`
 - 可选 `status_filter`
 
+> 分层说明：这些过滤项属于后续 T029/T030 的 Tool / candidate-resolution 能力，不代表当前 Java
+> `GET /api/v1/orders` 接受同名 query parameter。T023 的 Java HTTP 面只返回 authenticated owner 的
+> customer-scoped 订单列表；候选筛选与自然语言解析留在 Agent Tool 层，避免在 Java 契约里声明尚未实现的过滤语义。
+
 输出：
 - `order_id`
 - 商品摘要
@@ -58,7 +62,9 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 - timestamps
 - current after-sales state
 
-错误：`ORDER_NOT_FOUND`、`ORDER_FORBIDDEN`、`DEPENDENCY_UNAVAILABLE`。
+错误：`ORDER_NOT_FOUND`（订单不存在**或**不属于当前用户，两者刻意不可区分）、`ACCESS_DENIED`（角色/能力不足）、
+`DEPENDENCY_UNAVAILABLE`。注意这里**不使用** `ORDER_FORBIDDEN`：把 cross-owner 读与"不存在"分开会让工具变成
+存在性预言机（见 `error-contracts.md` 的 Ownership Concealment Rule）。
 
 ## T3 `get_logistics`
 
@@ -69,8 +75,16 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 输出：
 - shipment status
 - signed flag
+- **signed timestamp**（`shipments.signed_at` 的原样直传，T039 起加入）
+  它是退货窗口的起算点：资格判定用「签收时刻 + 规则声明的窗口天数」判断还来不来得及。
+  承运方没有给出签收时刻时它是 `null`，此时 Java 返回 `RETURN_WINDOW_UNKNOWN` 并拒绝，
+  **不猜**一个时刻 —— 那是数据缺口，与「已经过了窗口」是两件不同的事。
 - last meaningful event/time
 - deterministic anomaly projection（如有）
+
+错误：`ORDER_NOT_FOUND`（同上，与 cross-owner 不可区分）、`ACCESS_DENIED`、`INVALID_ORDER_STATE`
+（例如 `PAID + no shipment`：尚未进入物流生命周期，non-retryable）、`LOGISTICS_UNAVAILABLE`（订单已进入
+应有物流记录的状态，但权威运单缺失；只允许在有限预算内重试，且**不得**据此推断物流状态）。
 
 规则：依赖不可用时不得编造 anomaly state。
 
@@ -162,6 +176,12 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 - return deadline/instructions（如适用）
 
 前置条件：deterministic return eligibility、ownership、当前状态/窗口检查，以及需要时的权威审批记录校验。
+
+**V1 实现口径（T040/T041）**：
+- 输入里**没有金额**，而且这不是"暂时不用"：退货行没有金额列（V004），"退多少钱"在这条路径上无法表达；
+- **它只创建退货单。** `RETURN_REFUND` 的"退钱"不在这个 Tool 里发生 —— 退款需要它自己那条受保护的写路径与授权，否则就等于绕过"已签收订单不得被直接退款"这条 US2 守卫；
+- `approval_request_id` 在 V1 无法校验，任何非空值一律 `400` fail closed（US4/T049 才做真绑定）；
+- 返回的 `return_deadline` 是**受理时冻结**的（规则窗口 + 运单签收时刻），不是读时重算的。
 
 ## T8 `create_support_ticket`
 

@@ -1,0 +1,25 @@
+# 测试 profile（由测试类上的 @ActiveProfiles("test") 激活）
+#
+# 这里刻意不写 datasource / flyway 的连接信息：
+#   - TestcontainersConfiguration 通过 @ServiceConnection 把容器连接信息注入 spring.datasource.*；
+#   - Flyway 因为没有独立的 url/user，会回落到同一个数据源。
+# 一旦在这里写死连接串，测试就会去连 localhost 的库，"用真实容器做集成测试" 就失去意义了。
+#
+# 测试容器里 schema 不存在也没关系：Flyway 的 createSchemas 默认为 true，
+# 会按下面的 schemas 列表创建 commerce / agent / policy。
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    default-schema: commerce
+    schemas: commerce,agent,policy
+
+logging:
+  level:
+    com.seventeen17.commerceagent: INFO

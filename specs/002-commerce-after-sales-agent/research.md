@@ -177,6 +177,30 @@ Eval Run 必须记录模型配置，以保证数字可追溯。
 
 **验证方式**：T004 实装结果为 `typescript 6.0.3 / vite 8.3.0 / react 19.3.0 / @vitejs/plugin-react 6.1.1 / oxlint 1.83.0`，且 `npm run build`（`tsc -b && vite build`）成功产出 `dist/`。
 
+## 决策 18 — schema/role 由 initdb 脚本创建，业务表仍归 Flyway
+
+**决定**：数据库逻辑 schema（`commerce` / `agent` / `policy`）与三个角色（`commerce_app` / `agent_app` / `migrator`）由 `infra/postgres/initdb/01-roles-and-schemas.sh` 在数据卷初始化时创建；**所有业务表仍由 Java 侧 Flyway 迁移创建**（`commerce-backend/src/main/resources/db/migration/`）。
+
+**原因**：
+
+1. `CREATE ROLE` 需要超级用户权限，而 Flyway 应以应用/迁移角色运行。把超管凭据交给应用迁移不是好实践。
+2. initdb 脚本只在数据卷为空时执行一次，天然适合「环境前置条件」（角色、schema、权限），而不是「随时间演进的表结构」。
+3. 业务表的演进必须可版本化、可回溯，这是 Flyway 的职责；角色与 schema 的存在属于环境事实。
+
+**影响**：
+
+- `plan.md` 中「Flyway 是 V1 单一迁移权威」应理解为**表结构的单一迁移权威**，不是「所有 DDL 都走 Flyway」。本决策明确了这条边界。
+- 新增 `migrator` 角色供 Flyway 使用；`commerce_app` / `agent_app` 以 `NOSUPERUSER / NOCREATEDB / NOCREATEROLE` 创建。
+- 使用 `ALTER DEFAULT PRIVILEGES FOR ROLE migrator`，使 Flyway 后续建的表自动授权给对应应用角色。
+
+**关键边界**：`agent_app` 对 `commerce` schema **无任何权限**（显式 `REVOKE ALL ON SCHEMA commerce FROM agent_app` 并收回 PUBLIC）。这条边界由数据库强制，不依赖约定。
+
+**验证方式（T005 已实测）**：
+
+- `psql -U agent_app -c 'select * from commerce.orders'` → `ERROR: permission denied for schema commerce`
+- 正向对照：`psql -U agent_app -c 'create table agent.probe(id int) ...'` 成功
+- 三个角色 `rolsuper / rolcreatedb / rolcreaterole` 均为 `f`
+
 ## 明确拒绝的技术/功能
 
 核心范围拒绝：

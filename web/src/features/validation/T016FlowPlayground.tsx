@@ -1,0 +1,1434 @@
+import { useMemo, useState } from 'react'
+
+type ScenarioId =
+  | 'normal'
+  | 'unknown-role'
+  | 'logistics-timeout'
+  | 'invalid-order'
+  | 'unknown-action'
+  | 'trace-mismatch'
+
+type StepStatus = 'pending' | 'success' | 'warning' | 'blocked'
+type LiveStepId =
+  | 'read-logistics'
+  | 'check-eligibility'
+  | 'create-run'
+  | 'create-refund'
+  | 'verify-refund'
+  | 'tool-get-order'
+  | 'tool-get-logistics'
+  | 'tool-check-eligibility'
+  | 'tool-after-sales'
+  | 't030-live-agent'
+  | 't031-live-write'
+  | 't032-live-run'
+  | 'read-run'
+  | 'read-events'
+  | 'us2-delivered-return'
+
+type FlowStep = {
+  id: string
+  title: string
+  file: string
+  action: string
+  input: string
+  work: string
+  output: string
+  status: StepStatus
+  note?: string
+  live?: LiveStepId
+}
+
+type Scenario = {
+  id: ScenarioId
+  label: string
+  summary: string
+}
+
+/**
+ * One raw HTTP exchange of a live step that needs more than one call.
+ *
+ * A step that resets a fixture, drives a run and then reads two authorities has four real responses,
+ * and collapsing them into one would hide which of the four failed. Each entry keeps the bytes the
+ * service actually returned.
+ */
+type LiveTrailEntry = {
+  label: string
+  path: string
+  status: number | null
+  body?: unknown
+  note?: string
+}
+
+type CallResult =
+  | { kind: 'idle' }
+  | { kind: 'pending'; step: LiveStepId }
+  | { kind: 'ok'; step: LiveStepId; status: number; body: unknown; trail?: LiveTrailEntry[] }
+  | {
+      kind: 'error'
+      step: LiveStepId
+      status: number | null
+      detail: string
+      trail?: LiveTrailEntry[]
+    }
+
+type CompletedLiveSteps = Record<LiveStepId, boolean>
+
+const AGENT_API = '/agent/runs'
+const COMMERCE_API = '/commerce/orders'
+const ELIGIBILITY_API = '/commerce/after-sales/eligibility'
+const REFUND_API = '/commerce/refunds'
+const TOOL_DEBUG_API = '/agent/dev/tools/execute'
+const T030_DEBUG_API = '/agent/dev/t030/run'
+const T031_DEBUG_API = '/agent/dev/t031/run'
+
+// US2 (T041/T042): the eval fixture reset lives on Java *without* the /api/v1 prefix -- the
+// controller's own @RequestMapping is "/internal/eval/fixtures" -- so the Vite proxy entry added for
+// it carries no rewrite, unlike /agent and /commerce.
+const EVAL_FIXTURE_API = '/internal/eval/fixtures'
+const US2_RETURN_CASE_ID = 'return-delivered-001'
+const US2_RETURN_ORDER_ID = 'order-003'
+// The exact request this step grades: "I received it, I don't want it, refund me". Deliberately a
+// constant instead of the shared message box, so clicking this step cannot run a different case than
+// the one the fixture reset above just prepared.
+const US2_RETURN_MESSAGE = '东西我收到了，但是我不要了，钱退给我'
+
+const scenarios: Scenario[] = [
+  { id: 'normal', label: '正常流程', summary: '身份 → 订单 → 物流 → eligibility 全部通过' },
+  { id: 'unknown-role', label: '未知角色', summary: 'Java 返回 Python 不认识的 role，identity.py fail closed' },
+  { id: 'logistics-timeout', label: '物流 Timeout', summary: '读请求结果未知，但操作无副作用，可进入有限重试路径' },
+  { id: 'invalid-order', label: '非法 orderId', summary: '模型输入试图改写 URL，客户端在发请求前拒绝' },
+  { id: 'unknown-action', label: '未知 allowedAction', summary: 'Java 新增动作值，传输层接受，执行层必须 SAFE_STOP' },
+  { id: 'trace-mismatch', label: 'traceId 不一致', summary: 'header 与 error envelope 不一致，使用已校验 correlation id' },
+]
+
+function statusLabel(status: StepStatus) {
+  if (status === 'success') return '通过'
+  if (status === 'warning') return '警告'
+  if (status === 'blocked') return '停止'
+  return '等待'
+}
+
+function statusIcon(status: StepStatus) {
+  if (status === 'success') return '✓'
+  if (status === 'warning') return '!'
+  if (status === 'blocked') return '×'
+  return '·'
+}
+
+type RawResponse = { status: number; ok: boolean; text: string; body: unknown }
+
+/**
+ * One HTTP exchange, returned with its own status instead of thrown.
+ *
+ * A multi-call step has to show *which* call failed, so the failure has to arrive as a value. The
+ * non-JSON fallback is kept for the same reason as in the single-call path: a proxy or service error
+ * page is still evidence.
+ */
+async function sendJson(path: string, init: RequestInit): Promise<RawResponse> {
+  const response = await fetch(path, init)
+  const text = await response.text()
+  let body: unknown = text
+  try {
+    body = JSON.parse(text)
+  } catch {
+    // Keep non-JSON proxy/service responses visible for diagnosis.
+  }
+  return { status: response.status, ok: response.ok, text, body }
+}
+
+function runIdOf(body: unknown): string | null {
+  if (body && typeof body === 'object' && 'runId' in body) {
+    const value = (body as { runId?: unknown }).runId
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return null
+}
+
+/** The tool names on a run's trace timeline, in the order the timeline already sorted them. */
+function toolNamesFromTrace(body: unknown): string[] {
+  if (!Array.isArray(body)) return []
+  const names: string[] = []
+  for (const event of body) {
+    if (event && typeof event === 'object' && 'toolName' in event) {
+      const name = (event as { toolName?: unknown }).toolName
+      if (typeof name === 'string' && name.length > 0) names.push(name)
+    }
+  }
+  return names
+}
+
+/**
+ * The two counts US2 is graded on, or ``null`` when the body is not the documented aggregate.
+ *
+ * Returning ``null`` rather than zero matters: "the shape was not what we expected" and "the
+ * authority said there are none" are opposite readings of the same screen.
+ */
+function afterSalesCounts(body: unknown): { returns: number; refunds: number } | null {
+  if (!body || typeof body !== 'object') return null
+  const aggregate = body as { returns?: unknown; refunds?: unknown }
+  if (!Array.isArray(aggregate.returns) || !Array.isArray(aggregate.refunds)) return null
+  return { returns: aggregate.returns.length, refunds: aggregate.refunds.length }
+}
+
+/** One string field of a JSON object, for rendering a short "key point" line next to raw JSON. */
+function fieldOf(body: unknown, key: string): string | null {
+  if (body && typeof body === 'object' && key in body) {
+    const value = (body as Record<string, unknown>)[key]
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return null
+}
+
+function buildSteps(scenario: ScenarioId): FlowStep[] {
+  const normal: FlowStep[] = [
+    {
+      id: 'auth',
+      title: '包装调用凭据',
+      file: 'app/clients/auth.py',
+      action: 'AuthContext',
+      input: 'Bearer eyJhbGciOi...',
+      work: 'SecretStr 脱敏；拒绝空白、CR/LF 和控制字符；不携带 user_id / role。',
+      output: 'AuthContext(token=**********)',
+      status: 'success',
+    },
+    {
+      id: 'principal',
+      title: '向 Java 求证当前身份',
+      file: 'app/clients/commerce_client.py + models.py',
+      action: 'GET /api/v1/me',
+      input: 'AuthContext + X-Trace-Id',
+      work: 'CommerceClient 发起请求；CurrentPrincipal 校验 Java JSON 的 userId / role 结构。',
+      output: 'CurrentPrincipal(user_id="customer-001", role="CUSTOMER")',
+      status: 'success',
+    },
+    {
+      id: 'identity',
+      title: '把 wire role 转成可授权角色',
+      file: 'app/clients/identity.py',
+      action: 'resolve_principal()',
+      input: 'CurrentPrincipal(role="CUSTOMER")',
+      work: '只接受 Agent 已知角色；不猜、不大小写归一、不提供默认角色。',
+      output: 'PrincipalContext(user_id="customer-001", role=CUSTOMER)',
+      status: 'success',
+    },
+    {
+      id: 'orders',
+      title: '定位耳机订单',
+      file: 'app/clients/commerce_client.py + models.py',
+      action: 'GET /api/v1/orders?productQuery=耳机',
+      input: 'AuthContext + product_query="耳机"',
+      work: 'Java 基于认证用户做 ownership 查询；Python 把 JSON 数组校验成 OrderSummary[]。',
+      output: 'order-001 / Sony 耳机 / SHIPPED',
+      status: 'success',
+    },
+    {
+      id: 'logistics',
+      title: '求证物流是否停滞',
+      file: 'app/clients/commerce_client.py + models.py',
+      action: 'GET /api/v1/orders/order-001/logistics',
+      input: 'AuthContext + order_id="order-001"',
+      work: '先校验 path segment，再调用 Java；LogisticsSnapshot 校验返回结构。',
+      output: 'IN_TRANSIT / stalled_hours=82 / signed=false',
+      status: 'success',
+    },
+    {
+      id: 'eligibility',
+      title: '求证售后资格',
+      file: 'app/clients/models.py + commerce_client.py',
+      action: 'POST /api/v1/after-sales/eligibility',
+      input: 'EligibilityRequest(order_id="order-001", reason_code="LOGISTICS_STALLED")',
+      work: '这是无副作用评估。金额由 Java 规则计算，Agent 不能自己提交 maxRefundAmount。',
+      output: 'eligible=true / allowedAction=REFUND_ONLY / maxRefundAmount=399.00',
+      status: 'success',
+    },
+    {
+      id: 'state',
+      title: '形成已验证业务事实',
+      file: 'app/agent/state.py',
+      action: 'AgentState',
+      input: 'PrincipalContext + Order + Logistics + Eligibility',
+      work: '只保存派生身份和结构化业务证据，不保存 raw JWT。T017 才负责持久化。',
+      output: '当前结论：物流停滞 82h，Java 规则允许进入退款候选路径。',
+      status: 'success',
+      note: '此页面只是 T016 mock 教学模拟器；真实 LangGraph/Tool/FastAPI 流转尚未在这里执行。',
+    },
+  ]
+
+  if (scenario === 'normal') return normal
+
+  if (scenario === 'unknown-role') {
+    return normal.map((step) => {
+      if (step.id === 'principal') {
+        return { ...step, output: 'CurrentPrincipal(user_id="customer-001", role="OPS_ADMIN_V2")' }
+      }
+      if (step.id === 'identity') {
+        return {
+          ...step,
+          input: 'CurrentPrincipal(role="OPS_ADMIN_V2")',
+          work: 'identity.py 不认识该 Java wire role，不猜测权限，抛 UnknownPrincipalRoleError。',
+          output: 'ACCESS_DENIED → SAFE_STOP / ESCALATED',
+          status: 'blocked',
+          note: '后续订单、物流、退款资格都不应继续调用。',
+        }
+      }
+      if (['orders', 'logistics', 'eligibility', 'state'].includes(step.id)) {
+        return { ...step, status: 'pending', output: '未执行：身份边界已 fail closed' }
+      }
+      return step
+    })
+  }
+
+  if (scenario === 'logistics-timeout') {
+    return normal.map((step) => {
+      if (step.id === 'logistics') {
+        return {
+          ...step,
+          work: 'Java 没有返回可信答案，CommerceClient 抛 CommerceTransportError。',
+          output: 'outcome_unknown=true / request_was_safe=true',
+          status: 'warning',
+          note: '物流查询无副作用，因此 Tool 层可在有限 retry budget 内重试；client 自己不会偷偷重试。',
+        }
+      }
+      if (['eligibility', 'state'].includes(step.id)) {
+        return { ...step, status: 'pending', output: '等待物流事实后再继续' }
+      }
+      return step
+    })
+  }
+
+  if (scenario === 'invalid-order') {
+    return normal.map((step) => {
+      if (step.id === 'orders') {
+        return { ...step, output: '模型给出候选 order_id="../../admin/users"', status: 'warning' }
+      }
+      if (step.id === 'logistics') {
+        return {
+          ...step,
+          input: 'order_id="../../admin/users"',
+          work: '_safe_path_segment() 在 HTTP 请求发出前拒绝 /、?、#、空白等危险路径字符。',
+          output: 'UnsafeRequestParameterError(error_code="INVALID_PARAMETER")',
+          status: 'blocked',
+          note: '没有请求离开 Python 进程，所以这是已知本地失败，不存在 unknown outcome。',
+        }
+      }
+      if (['eligibility', 'state'].includes(step.id)) {
+        return { ...step, status: 'pending', output: '未执行：非法参数已阻断' }
+      }
+      return step
+    })
+  }
+
+  if (scenario === 'unknown-action') {
+    return normal.map((step) => {
+      if (step.id === 'eligibility') {
+        return {
+          ...step,
+          output: 'eligible=true / allowedAction=EXCHANGE / ruleVersion=4',
+          status: 'warning',
+          note: 'models.py 故意把 Java-owned allowedAction 保持为开放 string，因此不会解析崩溃。',
+        }
+      }
+      if (step.id === 'state') {
+        return {
+          ...step,
+          work: '传输层已成功接收新值，但当前 Agent 不认识 EXCHANGE，不能猜测它等价于退款或退货。',
+          output: 'SAFE_STOP：unknown allowedAction="EXCHANGE"',
+          status: 'blocked',
+          note: '“解析宽，授权严”：远程新增合法值可抵达决策层，但未知值不能解锁业务写操作。',
+        }
+      }
+      return step
+    })
+  }
+
+  return normal.map((step) => {
+    if (step.id === 'eligibility') {
+      return {
+        ...step,
+        work: '模拟 Java 错误响应：Header X-Trace-Id=java-trace-403，JSON envelope.traceId=other-trace。',
+        output: 'CommerceApiError(trace_id="java-trace-403")',
+        status: 'warning',
+        note: 'T016 post-review 修复：错误路径也统一使用 _correlate() 已校验的 correlation id。',
+      }
+    }
+    if (step.id === 'state') {
+      return {
+        ...step,
+        output: '未来 T017 持久化 trace_id="java-trace-403"',
+        status: 'success',
+        note: '这样 Agent ToolExecution 的 traceId 才能真实对应 Java 日志中的请求。',
+      }
+    }
+    return step
+  })
+}
+
+function buildLiveSteps(completed: CompletedLiveSteps, failedStep: LiveStepId | null): FlowStep[] {
+  const statusFor = (id: LiveStepId): StepStatus => {
+    if (completed[id]) return 'success'
+    if (failedStep === id) return 'warning'
+    return 'pending'
+  }
+
+  return [
+    {
+      id: 'read-logistics',
+      live: 'read-logistics',
+      title: '读取真实物流事实',
+      file: 'LogisticsController.java + LogisticsService.java',
+      action: 'GET /api/v1/orders/{orderId}/logistics',
+      input: 'Bearer token + orderId',
+      work: 'T024 通过 Vite dev proxy 直连 Java :8080；Java 从 principal 校验 ownership，再返回权威物流快照和 stalledHours。',
+      output: 'status / signed / lastMeaningfulEventAt / stalledHours',
+      status: statusFor('read-logistics'),
+      note: '这是 T024 的真实 Java API 页面验收，不经过 Agent Tool；真正 Web → Agent → Tool → Java 链路在 T029/T032 接入。',
+    },
+    {
+      id: 'check-eligibility',
+      live: 'check-eligibility',
+      title: '读取真实售后资格',
+      file: 'EligibilityController.java + EligibilityService.java',
+      action: 'POST /api/v1/after-sales/eligibility',
+      input: 'Bearer token + orderId + reasonCode',
+      work: 'T025 把已由 T020 验证过的 deterministic EligibilityService 正式接入当前 US1 主链；页面经 Vite dev proxy 调 Java :8080，Java 使用认证 principal、订单、物流和规则事实返回权威 EligibilityDecision。reasonCode 只是描述性上下文，不参与规则选择或金额计算。',
+      output: 'eligible / allowedAction / maxRefundAmount / approvalRequired / ruleCode / ruleVersion / reasonCodes',
+      status: statusFor('check-eligibility'),
+      note: '这是 T025 的页面级验收：验证 deterministic EligibilityDecision 能通过真实 HTTP 边界被消费；仍不冒充 T029/T030/T032 才会完成的 Agent Tool / LangGraph 主链。',
+    },
+    {
+      id: 'create-run',
+      live: 'create-run',
+      title: '创建并持久化 Agent Run',
+      file: 'app/api/runs.py + app/trace/store.py',
+      action: 'POST /api/v1/agent/runs',
+      input: 'Bearer token + 用户请求',
+      work: 'T018 验证身份与 ownership；T017 在同一事务中写入 AgentRun 和 version=1 的首个 Checkpoint。',
+      output: 'runId / RUNNING / currentNode=created / version=1',
+      status: statusFor('create-run'),
+      note: 'T028 的退款请求把这个 runId 作为溯源字段，但 Java 绝不会把 runId 当成身份或授权依据。',
+    },
+    {
+      id: 'create-refund',
+      live: 'create-refund',
+      title: '创建真实退款请求',
+      file: 'RefundController.java + RefundService.java',
+      action: 'POST /api/v1/refunds',
+      input: 'Bearer token + Idempotency-Key + orderId + reasonCode + runId',
+      work: 'T028 通过真实 HTTP 写入路径调用 Java：RefundService 在提交前重新校验 ownership、当前订单状态、eligibility 与金额；同 key 重放返回同一笔退款，不同 key 的第二笔活动退款被拒绝。',
+      output: 'refundRequestId / status=CREATED / acceptedAmount',
+      status: statusFor('create-refund'),
+      note: '这是 money-moving API。页面收到响应仍不代表 Agent 可以只靠“我发过请求”宣告成功；下一步必须从权威状态读回验证。',
+    },
+    {
+      id: 'verify-refund',
+      live: 'verify-refund',
+      title: '按 key 验证退款事实',
+      file: 'RefundController.java + RefundService.java',
+      action: 'GET /api/v1/orders/{orderId}/after-sales?idempotencyKey=K',
+      input: 'Bearer token + orderId + idempotencyKey',
+      work: 'T028 用 authenticated user + order + idempotencyKey 三重范围查询已提交事实。错误 key 返回显式 refunds=[]，不会把同订单上的其他退款误认为本次超时写成功。',
+      output: 'refunds[] / returns[]；匹配 key 时返回刚才的 refundRequestId',
+      status: statusFor('verify-refund'),
+      note: '这就是 T022/T031 unknown-write recovery 需要的 Java authority read：先确认事实，再决定是否 same-key retry。',
+    },
+    {
+      id: 'tool-get-order',
+      live: 'tool-get-order',
+      title: 'T029 Tool：读取订单',
+      file: 'app/tools/registry.py + commerce_tools.py',
+      action: 'POST /api/v1/agent/dev/tools/execute',
+      input: 'Bearer token + toolName=get_order + orderId',
+      work: '5173 先到 Python Agent Service；ToolRegistry 校验 capability，再绑定 CommerceTools.get_order，随后 CommerceClient 调 Java 权威订单 API。',
+      output: 'ToolEnvelope<OrderSnapshot>',
+      status: statusFor('tool-get-order'),
+      note: '这一步验证的不是 Java API 本身，而是 Web → Python Tool → CommerceClient → Java 的 T029 链路。',
+    },
+    {
+      id: 'tool-get-logistics',
+      live: 'tool-get-logistics',
+      title: 'T029 Tool：读取物流',
+      file: 'app/tools/registry.py + commerce_tools.py',
+      action: 'POST /api/v1/agent/dev/tools/execute',
+      input: 'Bearer token + toolName=get_logistics + orderId',
+      work: 'ToolRegistry 解析 get_logistics；CommerceTools 把 Java 成功/失败统一包装为 ToolEnvelope。',
+      output: 'success / data / errorCode / retryable / latencyMs / traceId',
+      status: statusFor('tool-get-logistics'),
+    },
+    {
+      id: 'tool-check-eligibility',
+      live: 'tool-check-eligibility',
+      title: 'T029 Tool：售后资格判定',
+      file: 'app/tools/registry.py + commerce_tools.py',
+      action: 'POST /api/v1/agent/dev/tools/execute',
+      input: 'Bearer token + toolName=check_after_sales_eligibility + orderId + reasonCode',
+      work: 'Agent Tool 只传订单和原因码；退款金额仍由 Java EligibilityService 权威计算。',
+      output: 'ToolEnvelope<EligibilityDecision>',
+      status: statusFor('tool-check-eligibility'),
+    },
+    {
+      id: 'tool-after-sales',
+      live: 'tool-after-sales',
+      title: 'T029 Tool：读取售后状态',
+      file: 'app/tools/registry.py + commerce_tools.py',
+      action: 'POST /api/v1/agent/dev/tools/execute',
+      input: 'Bearer token + toolName=get_after_sales_status + orderId + idempotencyKey',
+      work: '通过 Tool 层按 logical key 读取 Java 权威售后状态，为 T031 unknown-write recovery 提供事实。',
+      output: 'ToolEnvelope<AfterSalesStatus>',
+      status: statusFor('tool-after-sales'),
+    },
+    {
+      id: 't030-live-agent',
+      live: 't030-live-agent',
+      title: 'T030 Agent：证据驱动资格链',
+      file: 'app/api/dev_t030.py + app/agent/*',
+      action: 'POST /api/v1/agent/dev/t030/run',
+      input: 'Bearer token + 用户自然语言',
+      work: '真实 LLM 先理解用户请求；订单线索必须经过 Java ownership 校验；模型只能在受限 evidence capability 中建议下一步，Guard 审核后执行真实物流 Tool；拿到 LOGISTICS 后重新判断，最后交给 Java EligibilityService 做确定性资格结论。',
+      output: 'understood / orderResolution / rounds[] / evidence[] / eligibility / toolHistory[]',
+      status: statusFor('t030-live-agent'),
+      note: '这是 T030 的 dev/live 验收 harness：真实 LLM + 真实 Tool + 真实 Java；正式 LangGraph 节点装配仍由 T032 完成。',
+    },
+    {
+      id: 't031-live-write',
+      live: 't031-live-write',
+      title: 'T031 Agent：安全退款写入 + 权威验证',
+      file: 'app/api/dev_t031.py + execute_write.py + verify_business_state.py',
+      action: 'POST /api/v1/agent/dev/t031/run',
+      input: 'Bearer token + runId + orderId + reasonCode',
+      work: '先重新读取 Java eligibility；服务器自行生成/复用 durable idempotency key，并在 money-moving Tool 前通过 RunStore checkpoint_state 持久化 write intent；未知结果先按同 key 读权威 after-sales 状态，最后再执行 verify_business_state。',
+      output: 'write / verification / idempotencyKey / toolHistory；只有 VERIFIED_SUCCESS 才 completed=true',
+      status: statusFor('t031-live-write'),
+      note: '这是 T031 的 dev/live 验收 harness。浏览器不能提交 requestedAmount，也不能选择任意 Tool 或 idempotency key；正式 LangGraph 装配仍由 T032 完成。',
+    },
+    {
+      id: 't032-live-run',
+      live: 't032-live-run',
+      title: 'T032 Agent：LangGraph 自动主链（创建即驱动）',
+      file: 'app/agent/{graph,routing,nodes,runtime,wiring}.py + app/api/runs.py',
+      action: 'POST /api/v1/agent/runs',
+      input: 'Bearer token + 用户自然语言（不需要手填 orderId / reasonCode / idempotency key）',
+      work: '这是 T032 的正式装配，不再是 dev harness：创建 run 之后由 LangGraph 显式主链一路驱动——understand → resolve_order → evidence 循环 → Java eligibility → 受保护退款写入 → 权威写后校验 → 终态。每个节点边界都由 RunSession 落盘（同状态快照 + 版本 CAS），终态走带守卫的 transition；节点只上报事实，下一步由 Router 决定。',
+      output: 'status / currentNode / nextAction / stepCount / version / resolvedOrderId / finalAction',
+      status: statusFor('t032-live-run'),
+      note: 'PASS 判据：status 不再是 RUNNING；stepCount > 0；currentNode 是真实节点（finalize / safe_stop / waiting_user）；version 随边界递增。返回 503 MODEL_API_KEY_NOT_CONFIGURED 也是设计的一部分——driver 在写任何东西之前就拒绝，所以库里不会留下一个没人能推进的 RUNNING run。跑完用下面「读取持久化 Run」「读取 Checkpoint 与 Trace」两步看这次驱动的落盘证据。',
+    },
+    {
+      id: 'read-run',
+      live: 'read-run',
+      title: '读取持久化 Run',
+      file: 'app/api/runs.py + app/trace/store.py',
+      action: 'GET /api/v1/agent/runs/{runId}',
+      input: 'Bearer token + runId',
+      work: 'owner userId 进入 SQL 查询条件；只能读取自己的 Run，并返回数据库当前版本。',
+      output: 'Run 状态、节点、stepCount、version',
+      status: statusFor('read-run'),
+    },
+    {
+      id: 'read-events',
+      live: 'read-events',
+      title: '读取 Checkpoint 与 Trace',
+      file: 'app/api/runs.py + app/trace/store.py',
+      action: 'GET /api/v1/agent/runs/{runId}/trace',
+      input: 'Bearer token + runId',
+      work: '按顺序读取持久化事件；当前新 Run 至少应包含 version=1 的创建 Checkpoint。',
+      output: 'checkpoint timeline + structured tool traces',
+      status: statusFor('read-events'),
+      note: '当前还没有真正执行 Tool，所以创建后 tool trace 数量为 0 是正确结果。',
+    },
+    {
+      id: 'us2-delivered-return',
+      live: 'us2-delivered-return',
+      title: 'US2 退货路径：已签收证据走退货而不是退款',
+      file: 'app/agent/routing.py + app/agent/nodes.py + returns/ReturnService.java',
+      action: 'POST /api/v1/agent/runs（reset → run → trace → after-sales）',
+      input: `Bearer token + 固定请求「${US2_RETURN_MESSAGE}」+ eval case「${US2_RETURN_CASE_ID}」`,
+      work: `按真实顺序走四步：① POST ${EVAL_FIXTURE_API}/${US2_RETURN_CASE_ID}/reset 把世界换成隔离世界（customer-001 只有一张 DELIVERED 的 ${US2_RETURN_ORDER_ID}，签收时刻是 reset 时刻的 3 天前，退货窗口 7 天，且只有一条匹配规则）；② 创建并驱动真实 LangGraph 主链；③ 读回 runs/{runId} 与 trace；④ 读 Java 权威 after-sales 聚合。Java 的确定性规则判定这张已签收的 APPAREL 订单返回 RETURN_REFUND，所以 routing.py 走 RETURN_WRITE 而不是 REFUND_WRITE，Tool 层只会调用 create_return_request。`,
+      output: `trace 里出现 create_return_request、不出现 create_refund_request；GET /api/v1/orders/${US2_RETURN_ORDER_ID}/after-sales 返回 returns 恰好 1 条、refunds 为 0`,
+      status: statusFor('us2-delivered-return'),
+      note: `这是 US2 的页面级真实验收，判据只有两个：退货写入发生（trace 里 create_return_request 出现、create_refund_request 不出现），以及权威读回的事实是 returns=1 / refunds=0。第 4 步的读没有带 Idempotency-Key：Agent 生成的写 key 只存在于它自己的 write intent（AgentState）里，GET /agent/runs/{runId} 与 /trace 都不发布它，页面拿不到，所以展示的是不带过滤的聚合 —— 因为 reset 之后这个订单上不存在别的退货/退款行，这份聚合仍然能回答"我这一笔落库了没有"。`,
+    },
+  ]
+}
+
+export function T016FlowPlayground() {
+  const [scenario, setScenario] = useState<ScenarioId>('normal')
+  const [started, setStarted] = useState(false)
+  const [openStep, setOpenStep] = useState<string | null>('auth')
+  const [token, setToken] = useState('')
+  const [message, setMessage] = useState('订单 order-001 物流三天没动了，帮我退款')
+  const [runId, setRunId] = useState('')
+  const [orderId, setOrderId] = useState('order-001')
+  const [reasonCode, setReasonCode] = useState('LOGISTICS_DELAY')
+  const [idempotencyKey, setIdempotencyKey] = useState('t028_live_refund_001')
+  const [result, setResult] = useState<CallResult>({ kind: 'idle' })
+  const [completedLiveSteps, setCompletedLiveSteps] = useState<CompletedLiveSteps>({
+    'read-logistics': false,
+    'check-eligibility': false,
+    'create-run': false,
+    'create-refund': false,
+    'verify-refund': false,
+    'tool-get-order': false,
+    'tool-get-logistics': false,
+    'tool-check-eligibility': false,
+    'tool-after-sales': false,
+    't030-live-agent': false,
+    't031-live-write': false,
+    't032-live-run': false,
+    'read-run': false,
+    'read-events': false,
+    'us2-delivered-return': false,
+  })
+
+  const failedStep = result.kind === 'error' ? result.step : null
+  const steps = useMemo(
+    () => [...buildSteps(scenario), ...buildLiveSteps(completedLiveSteps, failedStep)],
+    [scenario, completedLiveSteps, failedStep],
+  )
+  const activeScenario = scenarios.find((item) => item.id === scenario)!
+
+  async function callLiveStep(step: LiveStepId): Promise<void> {
+    if (!token.trim()) {
+      setResult({
+        kind: 'error',
+        step,
+        status: null,
+        detail: '请先填写真实 Bearer token。输入框里的灰字只是格式示例。',
+      })
+      return
+    }
+    if (
+      (step === 'read-logistics' ||
+        step === 'check-eligibility' ||
+        step === 'create-refund' ||
+        step === 'verify-refund' ||
+        step === 'tool-get-order' ||
+        step === 'tool-get-logistics' ||
+        step === 'tool-check-eligibility' ||
+        step === 'tool-after-sales' ||
+        step === 't031-live-write') &&
+      !orderId.trim()
+    ) {
+      setResult({ kind: 'error', step, status: null, detail: '请先填写 orderId。' })
+      return
+    }
+    if (
+      (step === 'check-eligibility' ||
+        step === 'create-refund' ||
+        step === 'tool-check-eligibility' ||
+        step === 't031-live-write') &&
+      !reasonCode.trim()
+    ) {
+      setResult({ kind: 'error', step, status: null, detail: '请先填写 reasonCode。' })
+      return
+    }
+    if (
+      (step === 'create-refund' || step === 'verify-refund' || step === 'tool-after-sales') &&
+      !idempotencyKey.trim()
+    ) {
+      setResult({ kind: 'error', step, status: null, detail: '请先填写 Idempotency-Key。' })
+      return
+    }
+    if (
+      (step === 'create-run' || step === 't030-live-agent' || step === 't032-live-run') &&
+      !message.trim()
+    ) {
+      setResult({ kind: 'error', step, status: null, detail: '请先填写用户请求。' })
+      return
+    }
+    if (
+      step !== 'read-logistics' &&
+      step !== 'check-eligibility' &&
+      step !== 'create-run' &&
+      step !== 'verify-refund' &&
+      step !== 'tool-get-order' &&
+      step !== 'tool-get-logistics' &&
+      step !== 'tool-check-eligibility' &&
+      step !== 'tool-after-sales' &&
+      step !== 't030-live-agent' &&
+      step !== 't032-live-run' &&
+      step !== 'us2-delivered-return' &&
+      !runId.trim()
+    ) {
+      setResult({
+        kind: 'error',
+        step,
+        status: null,
+        detail: '请先执行步骤 10 创建 Run，或在 runId 输入框中填入已有 ID。',
+      })
+      return
+    }
+
+    if (step === 'us2-delivered-return') {
+      await callUs2DeliveredReturnPath(step)
+      return
+    }
+
+    const path =
+      step === 'read-logistics'
+        ? `${COMMERCE_API}/${encodeURIComponent(orderId.trim())}/logistics`
+        : step === 'check-eligibility'
+          ? ELIGIBILITY_API
+          : step === 'create-run' || step === 't032-live-run'
+            ? AGENT_API
+            : step === 'create-refund'
+              ? REFUND_API
+              : step === 'verify-refund'
+                ? `${COMMERCE_API}/${encodeURIComponent(orderId.trim())}/after-sales?idempotencyKey=${encodeURIComponent(idempotencyKey.trim())}`
+                : step === 'tool-get-order' ||
+                    step === 'tool-get-logistics' ||
+                    step === 'tool-check-eligibility' ||
+                    step === 'tool-after-sales'
+                  ? TOOL_DEBUG_API
+                : step === 't030-live-agent'
+                  ? T030_DEBUG_API
+                : step === 't031-live-write'
+                  ? T031_DEBUG_API
+                : step === 'read-run'
+                  ? `${AGENT_API}/${runId.trim()}`
+                  : `${AGENT_API}/${runId.trim()}/trace`
+    const init: RequestInit =
+      step === 'check-eligibility'
+        ? {
+            method: 'POST',
+            body: JSON.stringify({
+              orderId: orderId.trim(),
+              reasonCode: reasonCode.trim(),
+            }),
+          }
+        : step === 'create-run' || step === 't032-live-run'
+          ? { method: 'POST', body: JSON.stringify({ message: message.trim() }) }
+          : step === 'tool-get-order'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({ toolName: 'get_order', orderId: orderId.trim() }),
+              }
+          : step === 'tool-get-logistics'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({ toolName: 'get_logistics', orderId: orderId.trim() }),
+              }
+          : step === 'tool-check-eligibility'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({
+                  toolName: 'check_after_sales_eligibility',
+                  orderId: orderId.trim(),
+                  reasonCode: reasonCode.trim(),
+                }),
+              }
+          : step === 'tool-after-sales'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({
+                  toolName: 'get_after_sales_status',
+                  orderId: orderId.trim(),
+                  idempotencyKey: idempotencyKey.trim(),
+                }),
+              }
+          : step === 't030-live-agent'
+            ? { method: 'POST', body: JSON.stringify({ userRequest: message.trim() }) }
+          : step === 't031-live-write'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({
+                  runId: runId.trim(),
+                  orderId: orderId.trim(),
+                  reasonCode: reasonCode.trim(),
+                }),
+              }
+          : step === 'create-refund'
+            ? {
+                method: 'POST',
+                body: JSON.stringify({
+                  orderId: orderId.trim(),
+                  reasonCode: reasonCode.trim(),
+                  approvalRequestId: null,
+                  runId: runId.trim(),
+                }),
+              }
+            : { method: 'GET' }
+
+    setResult({ kind: 'pending', step })
+    try {
+      const response = await fetch(path, {
+        ...init,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token.trim()}`,
+          ...(step === 'create-refund' ? { 'Idempotency-Key': idempotencyKey.trim() } : {}),
+        },
+      })
+      const text = await response.text()
+      let body: unknown = text
+      try {
+        body = JSON.parse(text)
+      } catch {
+        // Keep non-JSON proxy/service responses visible for diagnosis.
+      }
+
+      if (!response.ok) {
+        setResult({ kind: 'error', step, status: response.status, detail: text })
+        return
+      }
+
+      if (body && typeof body === 'object' && 'runId' in body) {
+        setRunId(String(body.runId))
+      }
+      setCompletedLiveSteps((current) => ({ ...current, [step]: true }))
+      setResult({ kind: 'ok', step, status: response.status, body })
+    } catch (error) {
+      setResult({
+        kind: 'error',
+        step,
+        status: null,
+        detail: `${String(error)} - 对应服务（Agent :8000 / Java :8080）是否已启动？`,
+      })
+    }
+  }
+
+  /**
+   * US2 (T041/T042): reset the eval fixture, drive one real graph run, then read the authorities back.
+   *
+   * Four calls in this exact order, and the order is the point: the reset is what makes the run's
+   * outcome meaningful (one delivered order, one matching rule), and the reads are what make the
+   * outcome evidence rather than a claim. Every response is kept, including the failing one, because
+   * "which call failed" is the only question this panel exists to answer.
+   */
+  async function callUs2DeliveredReturnPath(step: LiveStepId): Promise<void> {
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token.trim()}`,
+    }
+    const trail: LiveTrailEntry[] = []
+    const stopWith = (detail: string, status: number | null): void => {
+      setResult({ kind: 'error', step, status, detail, trail })
+    }
+
+    setResult({ kind: 'pending', step })
+    try {
+      // 1/4 -- known isolated world.
+      const reset = await sendJson(`${EVAL_FIXTURE_API}/${US2_RETURN_CASE_ID}/reset`, {
+        method: 'POST',
+        headers: authHeaders,
+      })
+      trail.push({
+        label: '1/4 eval reset：把世界换成这个用例的隔离世界',
+        path: `${EVAL_FIXTURE_API}/${US2_RETURN_CASE_ID}/reset`,
+        status: reset.status,
+        body: reset.body,
+        note: `期望 fixtureVersion/datasetVersion + resetAt；reset 之后 customer-001 只有一张 DELIVERED 的 ${US2_RETURN_ORDER_ID}（签收=reset 前 3 天，窗口 7 天）。`,
+      })
+      if (!reset.ok) {
+        stopWith(`eval reset 失败，后面三步不应继续：${reset.text}`, reset.status)
+        return
+      }
+
+      // 2/4 -- create the run; the graph drives the whole chain before this response arrives.
+      const created = await sendJson(AGENT_API, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ message: US2_RETURN_MESSAGE }),
+      })
+      trail.push({
+        label:
+          '2/4 创建并驱动真实 LangGraph run（创建即驱动；503 MODEL_API_KEY_NOT_CONFIGURED 也是设计的一部分）',
+        path: AGENT_API,
+        status: created.status,
+        body: created.body,
+        note: `请求体是固定的一句话：{"message":"${US2_RETURN_MESSAGE}"}。页面不提交 orderId / 金额 / idempotency key。`,
+      })
+      if (!created.ok) {
+        stopWith(`创建 run 失败：${created.text}`, created.status)
+        return
+      }
+      const createdRunId = runIdOf(created.body)
+      if (createdRunId === null) {
+        stopWith('创建 run 的响应里没有 runId，无法继续读 run/trace。', created.status)
+        return
+      }
+      setRunId(createdRunId)
+
+      // 3/4 -- read the durable projection and then the timeline it was built from.
+      const run = await sendJson(`${AGENT_API}/${createdRunId}`, {
+        method: 'GET',
+        headers: authHeaders,
+      })
+      trail.push({
+        label: '3a/4 读取持久化 Run：状态与终态节点',
+        path: `${AGENT_API}/${createdRunId}`,
+        status: run.status,
+        body: run.body,
+        note: `status=${fieldOf(run.body, 'status') ?? '?'} · currentNode=${fieldOf(run.body, 'currentNode') ?? '?'} · finalAction=${fieldOf(run.body, 'finalAction') ?? 'null'} · verificationStatus=${fieldOf(run.body, 'verificationStatus') ?? 'null'}`,
+      })
+      const trace = await sendJson(`${AGENT_API}/${createdRunId}/trace`, {
+        method: 'GET',
+        headers: authHeaders,
+      })
+      const toolNames = toolNamesFromTrace(trace.body)
+      trail.push({
+        label: '3b/4 读取 Checkpoint 与 Trace：关键看点是工具名',
+        path: `${AGENT_API}/${createdRunId}/trace`,
+        status: trace.status,
+        body: trace.body,
+        note: `本次 trace 的工具名（按时间顺序）：${toolNames.length > 0 ? toolNames.join(' → ') : '（没有工具调用）'}｜看点：create_return_request ${toolNames.includes('create_return_request') ? '出现了 ✓' : '没有出现（异常）'}；create_refund_request ${toolNames.includes('create_refund_request') ? '出现了（异常：走了退款而不是退货）' : '没有出现 ✓'}`,
+      })
+
+      // 4/4 -- the Java authority's own answer, read back after the write.
+      const afterSales = await sendJson(`${COMMERCE_API}/${US2_RETURN_ORDER_ID}/after-sales`, {
+        method: 'GET',
+        headers: authHeaders,
+      })
+      const counts = afterSalesCounts(afterSales.body)
+      trail.push({
+        label: '4/4 Java 权威售后状态（未按 Idempotency-Key 过滤）',
+        path: `${COMMERCE_API}/${US2_RETURN_ORDER_ID}/after-sales`,
+        status: afterSales.status,
+        body: afterSales.body,
+        note:
+          counts === null
+            ? '响应不是契约里的 { returns[], refunds[] } 形状，只能人工判读。'
+            : `returns ${counts.returns} 条 / refunds ${counts.refunds} 条 —— US2 的判据是 returns 恰好 1 条、refunds 为 0。这一读**没有带 Idempotency-Key**：Agent 生成并复用的写 key 只存在于它自己的 write intent（AgentState）里，GET /agent/runs/{runId} 与 /trace 都不发布它，页面拿不到，所以展示的是不带过滤的聚合；因为 reset 之后这个订单上不存在别的退货/退款行，这份聚合仍然能回答"我这一笔落库了没有"。要按 key 过滤的读，走 T031 的 verify 路径（key 由 Agent 服务端持有）。`,
+      })
+
+      const failed = [reset, created, run, trace, afterSales].find((item) => !item.ok)
+      if (failed) {
+        stopWith(`有一处调用返回了 HTTP ${failed.status}，请看上面的原始响应。`, failed.status)
+        return
+      }
+
+      setCompletedLiveSteps((current) => ({ ...current, [step]: true }))
+      setResult({ kind: 'ok', step, status: afterSales.status, body: afterSales.body, trail })
+    } catch (error) {
+      setResult({
+        kind: 'error',
+        step,
+        status: null,
+        detail: `${String(error)} - 对应服务（Agent :8000 / Java :8080）与 Vite proxy 是否都正常？`,
+        trail,
+      })
+    }
+  }
+
+  const renderTrail = (trail: LiveTrailEntry[]) => (
+    <div className="validation-trail">
+      {trail.map((entry) => (
+        <div className="io-card" key={`${entry.label}-${entry.path}`}>
+          <span className="io-label">{entry.label}</span>
+          <code>{entry.path}</code>
+          <p className={entry.status !== null && entry.status < 400 ? 'validation-success' : 'validation-error'}>
+            {entry.status === null ? '没有拿到 HTTP 响应' : `HTTP ${entry.status}`}
+          </p>
+          {entry.note ? <p className="helper-text">{entry.note}</p> : null}
+          <pre>{typeof entry.body === 'string' ? entry.body : JSON.stringify(entry.body, null, 2)}</pre>
+        </div>
+      ))}
+    </div>
+  )
+
+  const chooseScenario = (id: ScenarioId) => {
+    setScenario(id)
+    setStarted(false)
+    setOpenStep('auth')
+  }
+
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <div>
+          <div className="eyebrow">CommerceAgent · Visible Output</div>
+          <h1>CommerceAgent Flow Playground</h1>
+          <p className="subtitle">同一条售后链路，从 T016 教学模拟逐步长成真实 Agent 调试器。</p>
+        </div>
+        <div className="capability-badges" aria-label="当前验证能力">
+          <span className="capability-badge mock">T016 · MOCK FLOW</span>
+          <span className="capability-badge persisted">T017 · PERSISTED</span>
+          <span className="capability-badge live">T018 · LIVE API</span>
+          <span className="capability-badge live">T024 · LIVE JAVA</span>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('check-eligibility')
+            }}
+          >
+            T025 · LIVE ELIGIBILITY
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('create-refund')
+            }}
+          >
+            T028 · LIVE REFUND
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('tool-get-order')
+            }}
+          >
+            T029 · LIVE TOOL
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('t030-live-agent')
+            }}
+          >
+            T030 · LIVE AGENT
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('t031-live-write')
+            }}
+          >
+            T031 · LIVE WRITE + VERIFY
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('t032-live-run')
+            }}
+          >
+            T032 · LIVE GRAPH RUN
+          </button>
+          <button
+            type="button"
+            className="capability-badge live"
+            onClick={() => {
+              setStarted(true)
+              setOpenStep('us2-delivered-return')
+            }}
+          >
+            US2 · LIVE RETURN PATH
+          </button>
+        </div>
+      </header>
+
+      <section className="case-card">
+        <div>
+          <span className="section-kicker">固定案例</span>
+          <h2>“我的耳机物流好久没动了，能退款吗？”</h2>
+          <p>
+            前 7 步把 T016 已有代码边界可视化，后续步骤在同一条调用链中接入真实接口：
+            <code>auth.py</code>、<code>models.py</code>、<code>identity.py</code>、
+            <code>commerce_client.py</code>、<code>errors.py</code>、T015 的 <code>state.py</code>，
+            以及 T017/T018 的 Run 与 Checkpoint API。
+          </p>
+        </div>
+        <button className="primary-button" type="button" onClick={() => setStarted(true)}>
+          {started ? '重新演示流转' : '开始流转'}
+        </button>
+      </section>
+
+      <section className="scenario-section">
+        <div className="section-heading">
+          <div>
+            <span className="section-kicker">故障注入</span>
+            <h2>切换一个真实工程问题</h2>
+          </div>
+          <p>{activeScenario.summary}</p>
+        </div>
+        <div className="scenario-grid">
+          {scenarios.map((item) => (
+            <button
+              className={item.id === scenario ? 'scenario-chip active' : 'scenario-chip'}
+              type="button"
+              key={item.id}
+              onClick={() => chooseScenario(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className={started ? 'flow-layout visible' : 'flow-layout'}>
+        <aside className="flow-rail">
+          <div className="rail-title">调用链</div>
+          {steps.map((step, index) => (
+            <button
+              type="button"
+              key={step.id}
+              className={openStep === step.id ? `rail-step ${step.status} selected` : `rail-step ${step.status}`}
+              onClick={() => setOpenStep(step.id)}
+            >
+              <span className="step-index">{String(index + 1).padStart(2, '0')}</span>
+              <span className="step-copy">
+                <strong>{step.title}</strong>
+                <small>{step.action}</small>
+              </span>
+              <span className="status-dot" aria-label={statusLabel(step.status)}>
+                {statusIcon(step.status)}
+              </span>
+            </button>
+          ))}
+        </aside>
+
+        <div className="detail-panel">
+          {!started ? (
+            <div className="empty-state">
+              <div className="empty-icon">→</div>
+              <h2>点击“开始流转”</h2>
+              <p>然后逐步查看每个 Python 文件的输入、职责和输出。</p>
+            </div>
+          ) : (
+            steps.map((step) =>
+              openStep === step.id && step.live ? (
+                <article key={step.id} className="step-detail live-step-detail">
+                  <div className="detail-header">
+                    <div>
+                      <span className="section-kicker">
+                        {step.live === 'read-logistics' ||
+                        step.live === 'check-eligibility' ||
+                        step.live === 'create-refund' ||
+                        step.live === 'verify-refund'
+                          ? 'LIVE STEP · JAVA BUSINESS AUTHORITY'
+                          : step.live === 'tool-get-order' ||
+                              step.live === 'tool-get-logistics' ||
+                              step.live === 'tool-check-eligibility' ||
+                              step.live === 'tool-after-sales'
+                            ? 'LIVE STEP · T029 PYTHON TOOL LAYER'
+                          : step.live === 't030-live-agent'
+                            ? 'LIVE STEP · T030 AGENT EVIDENCE ROUTING'
+                          : step.live === 't031-live-write'
+                            ? 'LIVE STEP · T031 SAFE WRITE + VERIFY'
+                          : step.live === 't032-live-run'
+                            ? 'LIVE STEP · T032 GRAPH-DRIVEN MAIN CHAIN'
+                          : step.live === 'us2-delivered-return'
+                            ? 'LIVE STEP · US2 DELIVERED-RETURN PATH'
+                          : 'LIVE STEP · T017 PERSISTENCE VIA T018 API'}
+                      </span>
+                      <h2>{step.title}</h2>
+                    </div>
+                    <span className={`status-pill ${step.status}`}>
+                      {statusIcon(step.status)} {statusLabel(step.status)}
+                    </span>
+                  </div>
+
+                  <div className="file-strip">
+                    <span>对应代码</span>
+                    <code>{step.file}</code>
+                  </div>
+
+                  <div className="io-grid">
+                    <div className="io-card">
+                      <span className="io-label">输入</span>
+                      <pre>{step.input}</pre>
+                    </div>
+                    <div className="io-card">
+                      <span className="io-label">做了什么</span>
+                      <p>{step.work}</p>
+                    </div>
+                    <div className="io-card output">
+                      <span className="io-label">预期输出</span>
+                      <pre>{step.output}</pre>
+                    </div>
+                  </div>
+
+                  <div className="live-step-console">
+                    <div className="live-step-form">
+                      <label htmlFor={`token-${step.live}`}>Bearer token</label>
+                      <textarea
+                        id={`token-${step.live}`}
+                        value={token}
+                        onChange={(event) => setToken(event.target.value)}
+                        rows={3}
+                        placeholder="这里需要粘贴真实 JWT；灰字不是已填写内容"
+                        className="validation-token"
+                      />
+
+                      {step.live === 'read-logistics' ? (
+                        <>
+                          <label htmlFor="live-order-id">orderId</label>
+                          <input
+                            id="live-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                        </>
+                      ) : step.live === 'check-eligibility' ? (
+                        <>
+                          <label htmlFor="live-eligibility-order-id">orderId</label>
+                          <input
+                            id="live-eligibility-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                          <label htmlFor="live-reason-code">reasonCode</label>
+                          <input
+                            id="live-reason-code"
+                            value={reasonCode}
+                            onChange={(event) => setReasonCode(event.target.value)}
+                            placeholder="例如 LOGISTICS_DELAY"
+                          />
+                        </>
+                      ) : step.live === 'tool-get-order' || step.live === 'tool-get-logistics' ? (
+                        <>
+                          <label htmlFor={`live-tool-order-${step.live}`}>orderId</label>
+                          <input
+                            id={`live-tool-order-${step.live}`}
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                        </>
+                      ) : step.live === 'tool-check-eligibility' ? (
+                        <>
+                          <label htmlFor="live-tool-elig-order">orderId</label>
+                          <input
+                            id="live-tool-elig-order"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                          />
+                          <label htmlFor="live-tool-elig-reason">reasonCode</label>
+                          <input
+                            id="live-tool-elig-reason"
+                            value={reasonCode}
+                            onChange={(event) => setReasonCode(event.target.value)}
+                          />
+                        </>
+                      ) : step.live === 'tool-after-sales' ? (
+                        <>
+                          <label htmlFor="live-tool-after-order">orderId</label>
+                          <input
+                            id="live-tool-after-order"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                          />
+                          <label htmlFor="live-tool-after-key">idempotencyKey</label>
+                          <input
+                            id="live-tool-after-key"
+                            value={idempotencyKey}
+                            onChange={(event) => setIdempotencyKey(event.target.value)}
+                          />
+                        </>
+                      ) : step.live === 'create-run' ||
+                        step.live === 't030-live-agent' ||
+                        step.live === 't032-live-run' ? (
+                        <>
+                          <label htmlFor={`live-user-request-${step.live}`}>User request</label>
+                          <textarea
+                            id={`live-user-request-${step.live}`}
+                            value={message}
+                            onChange={(event) => setMessage(event.target.value)}
+                            rows={2}
+                          />
+                        </>
+                      ) : step.live === 't031-live-write' ? (
+                        <>
+                          <label htmlFor="live-t031-run-id">runId</label>
+                          <input
+                            id="live-t031-run-id"
+                            value={runId}
+                            onChange={(event) => setRunId(event.target.value)}
+                            placeholder="先执行创建 Run"
+                          />
+                          <label htmlFor="live-t031-order-id">orderId</label>
+                          <input
+                            id="live-t031-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                          <label htmlFor="live-t031-reason-code">reasonCode</label>
+                          <input
+                            id="live-t031-reason-code"
+                            value={reasonCode}
+                            onChange={(event) => setReasonCode(event.target.value)}
+                            placeholder="例如 LOGISTICS_DELAY"
+                          />
+                          <p className="helper-text">
+                            idempotency key 由 Agent 生成并先写入 checkpoint；页面不允许手填。
+                          </p>
+                        </>
+                      ) : step.live === 'us2-delivered-return' ? (
+                        <>
+                          <label htmlFor="live-us2-case">eval fixture case</label>
+                          <input id="live-us2-case" value={US2_RETURN_CASE_ID} readOnly />
+                          <label htmlFor="live-us2-message">固定用户请求（本步骤不使用上面的输入框）</label>
+                          <textarea id="live-us2-message" value={US2_RETURN_MESSAGE} readOnly rows={2} />
+                          <p className="helper-text">
+                            点击按钮会按顺序真实调用四次：eval reset → POST /agent/runs → GET run /
+                            trace → GET /commerce/orders/{US2_RETURN_ORDER_ID}/after-sales。
+                            页面不提交 orderId、金额或 idempotency key；这些都由 Agent 服务端或
+                            Java 权威决定。
+                          </p>
+                        </>
+                      ) : step.live === 'create-refund' ? (
+                        <>
+                          <label htmlFor="live-refund-order-id">orderId</label>
+                          <input
+                            id="live-refund-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                          <label htmlFor="live-refund-reason-code">reasonCode</label>
+                          <input
+                            id="live-refund-reason-code"
+                            value={reasonCode}
+                            onChange={(event) => setReasonCode(event.target.value)}
+                            placeholder="例如 LOGISTICS_DELAY"
+                          />
+                          <label htmlFor="live-refund-key">Idempotency-Key</label>
+                          <input
+                            id="live-refund-key"
+                            value={idempotencyKey}
+                            onChange={(event) => setIdempotencyKey(event.target.value)}
+                          />
+                          <label htmlFor="live-refund-run-id">runId</label>
+                          <input
+                            id="live-refund-run-id"
+                            value={runId}
+                            onChange={(event) => setRunId(event.target.value)}
+                            placeholder="先执行创建 Run"
+                          />
+                        </>
+                      ) : step.live === 'verify-refund' ? (
+                        <>
+                          <label htmlFor="live-verify-order-id">orderId</label>
+                          <input
+                            id="live-verify-order-id"
+                            value={orderId}
+                            onChange={(event) => setOrderId(event.target.value)}
+                            placeholder="例如 order-001"
+                          />
+                          <label htmlFor="live-verify-key">idempotencyKey</label>
+                          <input
+                            id="live-verify-key"
+                            value={idempotencyKey}
+                            onChange={(event) => setIdempotencyKey(event.target.value)}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <label htmlFor={`run-id-${step.live}`}>runId</label>
+                          <input
+                            id={`run-id-${step.live}`}
+                            value={runId}
+                            onChange={(event) => setRunId(event.target.value)}
+                            placeholder="先执行步骤 10，或填入已有 runId"
+                          />
+                        </>
+                      )}
+
+                      <button
+                        className="live-call-button"
+                        type="button"
+                        onClick={() => void callLiveStep(step.live!)}
+                        disabled={result.kind === 'pending'}
+                      >
+                        {result.kind === 'pending' && result.step === step.live
+                          ? '请求中...'
+                          : step.action}
+                      </button>
+                    </div>
+
+                    <div className="validation-result" aria-live="polite">
+                      <span className="io-label">真实响应</span>
+                      {result.kind === 'idle' && <p>填写输入后，亲手点击左侧当前接口。</p>}
+                      {result.kind === 'pending' && result.step === step.live && <p>Loading...</p>}
+                      {result.kind !== 'idle' && result.step !== step.live && (
+                        <p>当前步骤还没有调用。上一步结果和 runId 已保留。</p>
+                      )}
+                      {result.kind === 'error' && result.step === step.live && (
+                        <p className="validation-error">
+                          {result.status ? `HTTP ${result.status}: ` : ''}
+                          {result.detail}
+                        </p>
+                      )}
+                      {result.kind === 'ok' && result.step === step.live && !result.trail && (
+                        <>
+                          <p className="validation-success">HTTP {result.status} · 已从真实服务返回</p>
+                          <pre>{JSON.stringify(result.body, null, 2)}</pre>
+                        </>
+                      )}
+                      {result.kind === 'ok' && result.step === step.live && result.trail ? (
+                        <>
+                          <p className="validation-success">
+                            四个真实调用全部完成（最后一次 HTTP {result.status}）· 每一步的原始响应如下
+                          </p>
+                          {renderTrail(result.trail)}
+                        </>
+                      ) : null}
+                      {result.kind === 'error' && result.step === step.live && result.trail
+                        ? renderTrail(result.trail)
+                        : null}
+                    </div>
+                  </div>
+
+                  {step.note ? <div className="note-box">{step.note}</div> : null}
+                </article>
+              ) : openStep === step.id ? (
+                <article key={step.id} className="step-detail">
+                  <div className="detail-header">
+                    <div>
+                      <span className="section-kicker">STEP DETAIL</span>
+                      <h2>{step.title}</h2>
+                    </div>
+                    <span className={`status-pill ${step.status}`}>
+                      {statusIcon(step.status)} {statusLabel(step.status)}
+                    </span>
+                  </div>
+
+                  <div className="file-strip">
+                    <span>对应代码</span>
+                    <code>{step.file}</code>
+                  </div>
+
+                  <div className="io-grid">
+                    <div className="io-card">
+                      <span className="io-label">输入</span>
+                      <pre>{step.input}</pre>
+                    </div>
+                    <div className="io-card">
+                      <span className="io-label">做了什么</span>
+                      <p>{step.work}</p>
+                    </div>
+                    <div className="io-card output">
+                      <span className="io-label">输出</span>
+                      <pre>{step.output}</pre>
+                    </div>
+                  </div>
+
+                  {step.note ? <div className="note-box">{step.note}</div> : null}
+                </article>
+              ) : null,
+            )
+          )}
+        </div>
+      </section>
+
+      <section className="map-card">
+        <span className="section-kicker">MAP FIRST</span>
+        <div className="architecture-line">
+          <span>用户意图</span><b>→</b><span>FastAPI · T018</span><b>→</b>
+          <span className="focus-node">Run / Checkpoint · T017</span><b>→</b><span>Tool</span><b>→</b>
+          <span>CommerceClient · T016</span><b>→</b><span>Java</span><b>→</b><span>PostgreSQL</span>
+        </div>
+        <p>
+          T024/T025/T028 可从页面直连 Java 验证业务权威；T029 现在新增 Web → Python Agent Service →
+          ToolRegistry / CommerceTools → CommerceClient → Java 的真实 Tool 调试链。T018 提供 Agent Run 入口，
+          T017 保存可恢复状态和 Trace；<b>T032 已把 LangGraph 显式主链接起来</b>——创建 run 即驱动整条链，
+          上面的 T030/T031 步骤保留为 dev harness（页面不能提交金额或选 key，正式链路不接受这些输入）。
+        </p>
+      </section>
+    </main>
+  )
+}

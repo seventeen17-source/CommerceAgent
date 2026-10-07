@@ -1,0 +1,280 @@
+"""Response and request models for the Java business API (read / evaluation surface).
+
+Naming: Python attributes are ``snake_case`` and the wire format is ``camelCase``, so every field
+carries an alias. ``populate_by_name=True`` also lets tests and internal callers use the Python
+name.
+
+Why ``extra="ignore"`` here while ``AgentState`` uses ``extra="forbid"``
+-----------------------------------------------------------------------
+``app/agent/state.py`` uses ``extra="forbid"`` because *this* service builds that object: an
+undeclared field there is a bug or an injection attempt and must fail loudly. These models describe
+*another* service's responses, so the same setting would do the opposite of what we want -- a
+backend that adds a field would turn a healthy response into a parse failure. Remote additive
+changes are tolerated here; the forward-compatibility policy is applied by the caller instead.
+
+Validation still happens, but on *shape* rather than on *value*: ``allowed_action`` is constrained
+to a non-empty bounded string while its value set stays open, because that set is owned by Java
+(``AllowedAction.java`` + the V001 CHECK constraint). An unknown value must reach the caller so it
+can degrade to ``SAFE_STOP`` with a reason code, exactly as the cross-service value policy in
+``app/agent/state.py`` requires. A strict enum here would turn a benign additive backend rollout
+into an unparseable response.
+
+The principal role is open on the wire for exactly the same reason as ``allowed_action``: the value
+set is owned by Java (``UserRole.java`` plus the ``commerce.users`` CHECK constraint). An
+unrecognized role must therefore reach the caller so authorization can *deny* it explicitly, rather
+than turning an additive backend role into a parse failure that prevents a run from being created at
+all -- with no ``SAFE_STOP``, no reason code and no audit record. The wire-to-``PrincipalRole``
+mapping that performs that denial is :func:`app.clients.identity.resolve_principal`, so this module
+stays free of authorization semantics.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+__all__ = [
+    "AfterSalesStatus",
+    "CreateRefundRequest",
+    "CreateReturnRequest",
+    "CurrentPrincipal",
+    "EligibilityDecision",
+    "EligibilityRequest",
+    "ErrorEnvelope",
+    "LogisticsSnapshot",
+    "OrderItem",
+    "OrderSnapshot",
+    "OrderSummary",
+    "RefundResult",
+    "ReturnResult",
+]
+
+# Responses come from Java: tolerate additive fields rather than failing the call.
+_RESPONSE = ConfigDict(extra="ignore", populate_by_name=True)
+# Requests are built here: an undeclared field is our bug and must fail loudly.
+_REQUEST = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class CurrentPrincipal(BaseModel):
+    """``GET /me`` -- authoritative identity resolved by Java from the verified JWT subject.
+
+    ``role`` is a shape-validated open string: the value set is Java-owned, so an unrecognized role
+    must be denied explicitly by the identity layer instead of failing here as a parse error.
+    """
+
+    model_config = _RESPONSE
+
+    user_id: str = Field(alias="userId", min_length=1, max_length=64)
+    role: str = Field(min_length=1, max_length=32)
+
+
+class OrderSummary(BaseModel):
+    """``GET /orders`` -- one row of the authenticated customer's order list."""
+
+    model_config = _RESPONSE
+
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    product_summary: str = Field(alias="productSummary")
+    status: str
+    created_at: datetime = Field(alias="createdAt")
+
+
+class OrderItem(BaseModel):
+    """One line item inside an order snapshot.
+
+    Every property is optional in the contract, so every field here is optional too: the client
+    must not invent a stricter requirement than the authority publishes.
+    """
+
+    model_config = _RESPONSE
+
+    product_id: str | None = Field(default=None, alias="productId")
+    product_name: str | None = Field(default=None, alias="productName")
+    product_category: str | None = Field(default=None, alias="productCategory")
+    quantity: int | None = None
+
+
+class OrderSnapshot(BaseModel):
+    """``GET /orders/{orderId}`` -- authoritative order snapshot."""
+
+    model_config = _RESPONSE
+
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    status: str
+    # Money is Decimal, never float: binary floating point cannot represent 0.10 exactly and this
+    # value can end up in a refund decision.
+    total_amount: Decimal = Field(alias="totalAmount")
+    currency: str = Field(min_length=3, max_length=3)
+    items: list[OrderItem] = Field(default_factory=list)
+    after_sales_status: str | None = Field(default=None, alias="afterSalesStatus")
+
+
+class LogisticsSnapshot(BaseModel):
+    """``GET /orders/{orderId}/logistics`` -- authoritative logistics snapshot."""
+
+    model_config = _RESPONSE
+
+    status: str
+    signed: bool
+    last_meaningful_event_at: datetime | None = Field(default=None, alias="lastMeaningfulEventAt")
+    stalled_hours: int | None = Field(default=None, alias="stalledHours")
+
+
+class EligibilityRequest(BaseModel):
+    """``POST /after-sales/eligibility`` request body.
+
+    This endpoint uses POST but is a deterministic, side-effect free evaluation, not a write.
+    """
+
+    model_config = _REQUEST
+
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    reason_code: str = Field(alias="reasonCode", min_length=1, max_length=100)
+
+
+class EligibilityDecision(BaseModel):
+    """``POST /after-sales/eligibility`` -- deterministic eligibility decision.
+
+    ``allowed_action`` is Java-owned and deliberately an open string; see the module docstring.
+
+    ``rule_code`` / ``rule_version`` are ``None`` together when Java could not determine an
+    applicable rule (T020: for example ``MANUAL_REVIEW`` because no rule matches, or because two
+    different rule codes match the same order). Java enforces "cited together or not at all", and a
+    decision that grants an action always cites its rule -- so a caller must never infer "there is
+    no rule, therefore someone approved this". Both fields stay optional here because making them
+    required would turn a legitimate, non-eligible decision into a parse failure.
+    """
+
+    model_config = _RESPONSE
+
+    eligible: bool
+    allowed_action: str = Field(alias="allowedAction", min_length=1, max_length=32)
+    max_refund_amount: Decimal | None = Field(default=None, alias="maxRefundAmount")
+    approval_required: bool = Field(alias="approvalRequired")
+    rule_code: str | None = Field(default=None, alias="ruleCode", min_length=1, max_length=100)
+    rule_version: int | None = Field(default=None, alias="ruleVersion", ge=1)
+    reason_codes: list[str] = Field(default_factory=list, alias="reasonCodes")
+
+    @model_validator(mode="after")
+    def _rule_citation_is_all_or_nothing(self) -> EligibilityDecision:
+        """Mirror the producer's invariant instead of trusting it silently.
+
+        The Java producer already refuses to construct a half-cited decision. Keeping the same rule
+        on the consumer side means a malformed or mis-proxied payload stops here rather than
+        reaching the graph as a decision that looks like it came from a rule but names none.
+        """
+        if (self.rule_code is None) != (self.rule_version is None):
+            raise ValueError("ruleCode and ruleVersion are cited together or not at all")
+        return self
+
+
+class CreateRefundRequest(BaseModel):
+    """``POST /refunds`` request body (T022).
+
+    ``extra="forbid"`` for the same reason as ``EligibilityRequest``: this body is built here, so an
+    undeclared field is our bug. Note what is *absent*: there is no ``userId`` (ownership comes from
+    the forwarded credential) and no ``idempotencyKey`` (that travels as the ``Idempotency-Key``
+    header, because it identifies the HTTP request rather than the business payload -- two retries
+    of one logical refund share the header, and Java's fingerprint deliberately excludes it).
+
+    ``requestedAmount`` is optional and, on the Java side, must equal the authorised amount exactly:
+    V1 refunds the whole order and never silently substitutes a different number.
+    """
+
+    model_config = _REQUEST
+
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    reason_code: str = Field(alias="reasonCode", min_length=1, max_length=100)
+    requested_amount: Decimal | None = Field(default=None, alias="requestedAmount")
+    approval_request_id: str | None = Field(default=None, alias="approvalRequestId", max_length=64)
+    run_id: str = Field(alias="runId", min_length=1, max_length=64)
+
+
+class RefundResult(BaseModel):
+    """``RefundResult`` -- the authoritative refund row that exists right now.
+
+    Every field is required by the contract: a response missing ``refundRequestId`` is not a refund
+    we can verify, and the client turns that into a transport error rather than into ``None``.
+    """
+
+    model_config = _RESPONSE
+
+    refund_request_id: str = Field(alias="refundRequestId", min_length=1, max_length=64)
+    # Java-owned forward-compatible status (CREATED / PROCESSING / COMPLETED / REJECTED /
+    # CANCELLED in V1). Open string on purpose: an additive backend value must safe-stop, not fail
+    # to parse (see the module docstring).
+    status: str = Field(min_length=1, max_length=32)
+    accepted_amount: Decimal = Field(alias="acceptedAmount")
+
+
+class CreateReturnRequest(BaseModel):
+    """``POST /returns`` request body (T041).
+
+    Note what is *absent*, and absent by construction rather than merely unused: there is no amount
+    field. A return row never carries money (V004 deliberately has no amount column), so "how much"
+    is not expressible here at all -- the same type-level argument that stops a model from
+    proposing an amount on a refund.
+
+    ``returnMethod`` is published by the contract and, on the Java side, participates in the
+    idempotency fingerprint, so a replay must send the same value or Java answers 409.
+    """
+
+    model_config = _REQUEST
+
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    reason_code: str = Field(alias="reasonCode", min_length=1, max_length=100)
+    return_method: str | None = Field(default=None, alias="returnMethod", max_length=32)
+    approval_request_id: str | None = Field(default=None, alias="approvalRequestId", max_length=64)
+    run_id: str = Field(alias="runId", min_length=1, max_length=64)
+
+
+class ReturnResult(BaseModel):
+    """``ReturnResult`` -- the authoritative return row that exists right now.
+
+    ``returnDeadline`` is nullable in the contract, and a missing value is a *fact*, not a gap:
+    it means the accepted return carried no window. The deadline is frozen by Java at acceptance, so
+    a consumer must never recompute it from the current rule.
+    """
+
+    model_config = _RESPONSE
+
+    return_request_id: str = Field(alias="returnRequestId", min_length=1, max_length=64)
+    # Java-owned forward-compatible status (CREATED in V1). Open string on purpose, like refunds.
+    status: str = Field(min_length=1, max_length=32)
+    return_deadline: datetime | None = Field(default=None, alias="returnDeadline")
+
+
+class AfterSalesStatus(BaseModel):
+    """``GET /orders/{orderId}/after-sales`` -- the authoritative answer to "did it commit?".
+
+    Both arrays are required by the contract. That is a safety property, not cosmetic strictness:
+    an explicit empty ``refunds`` list means "the authority checked and found none", while an
+    omitted field means "the response did not state the fact". Collapsing omission into ``[]``
+    would license a money retry from missing evidence.
+    """
+
+    model_config = _RESPONSE
+
+    refunds: list[RefundResult]
+    # T041 makes this typed: a return write is verified by reading this array back, and "is my row
+    # in it?" cannot be answered from opaque dicts without re-implementing the contract here.
+    returns: list[ReturnResult]
+
+
+class ErrorEnvelope(BaseModel):
+    """The machine-readable error body every endpoint returns on failure.
+
+    ``retryable`` is a statement by the backend that the request did not take effect and may be
+    repeated. It is never authority to retry without a budget: see
+    ``contracts/error-contracts.md``.
+    """
+
+    model_config = _RESPONSE
+
+    error_code: str = Field(alias="errorCode", min_length=1, max_length=100)
+    message: str = Field(default="")
+    retryable: bool
+    trace_id: str = Field(alias="traceId", min_length=1, max_length=128)
+    details: dict[str, object] = Field(default_factory=dict)

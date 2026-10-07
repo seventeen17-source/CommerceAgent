@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Agent API
-  version: 0.2.0
+  version: 0.2.1
 servers:
   - url: http://agent-service:8000/api/v1
 paths:
@@ -153,6 +153,41 @@ components:
         finalAction: { type: [string, 'null'] }
         finalMessage: { type: [string, 'null'] }
         approvalRequestId: { type: [string, 'null'] }
+        verificationStatus:
+          description: >-
+            What authority confirmed, not what a write response said. Null means either that nothing
+            was verified or that retention reclaimed the payload; checkpointCompactedAt tells the two
+            apart.
+          type: [string, 'null']
+          enum: [NOT_RUN, PENDING, VERIFIED_SUCCESS, VERIFIED_FAILURE, UNKNOWN, null]
+        verifiedRefundRequestId:
+          description: The refund id authority confirmed. Null unless verificationStatus is VERIFIED_SUCCESS.
+          type: [string, 'null']
+        clarification:
+          description: >-
+            What the customer must supply before the run can continue, present only while the run is
+            WAITING_USER. A customer-facing channel on purpose: 'waiting for more information' is not
+            actionable, and candidateOrderIds are the caller's own orders, so they leak nothing.
+            ORDER_AMBIGUOUS means several orders are plausible; ORDER_NO_MATCH means the product the
+            customer named matched none of them, so the candidates are a fallback list to confirm
+            rather than a filtered answer.
+          type: [object, 'null']
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              enum: [INTENT_UNKNOWN, ORDER_AMBIGUOUS, ORDER_NO_MATCH]
+            candidateOrderIds:
+              type: array
+              items: { type: string }
+        version:
+          description: The compare-and-swap token a client passes back when retrying a write.
+          type: integer
+        checkpointCompactedAt:
+          description: When retention reclaimed this run's payload, or null while it is still held.
+          type: [string, 'null']
+          format: date-time
         errorCode: { type: [string, 'null'] }
     RunEvent:
       type: object

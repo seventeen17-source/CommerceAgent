@@ -910,48 +910,58 @@ T083  最终作品集 README
 
 ## 13. 当前阶段怎么映射到总图
 
-实际当前 Task 必须以 `PROJECT_PROGRESS.md` 为准，不在本架构文档硬编码长期不变的“当前任务”。
+> **状态说明（2026-09-29 更新）**：本节写于 Phase 1，当时导航文件把实现起点定义为 T001–T007。
+> **真实进度只有一个入口：[`PROJECT_PROGRESS.md`](../PROJECT_PROGRESS.md)** —— 不要用本节的文字判断"当前"。
+> 下面的 Phase 1 映射保留为**"如何把新东西放进总图"的范例**，不是现状。
 
-截至 T016 前后的 Foundation 阶段，可以这样定位：
-
-```text
-① Web
-   目前主要还是脚手架
-
-② Agent 接入层
-   T018 将补 FastAPI Auth / Run API
-
-③ Agent 大脑层
-   T015 AgentState ✅
-   T030–T032 才进入理解 / 路由 / LangGraph 核心
-
-④ Tool / Client 层
-   T016 CommerceClient ← 当前附近
-   T029 Typed Tools     ← 后续第一次明显有 Tool Calling 感
-
-⑤ Java 业务权威层
-   T009–T014 已完成大量基础
-   T023–T028 会补 US1 真正业务 API
-
-⑥ PostgreSQL
-   T005/T008 已建立基础边界
-```
-
-Foundation 后半段已经不是单纯环境搭建。T015–T018 正在建立 **Agent runtime 与真实业务系统之间的运行边界**。
-
-学习时不要只看 `T016 / 83`，而应同时看：
+当前阶段（Phase 3 / US1 MVP，T032 进行中）用同一张图映射是这样：
 
 ```text
-工程骨架             已建立
-业务权威基础         已建立主要部分
-Agent Runtime        正在建立
-Agent 决策 / Routing 尚未开始
-Tool Execution       尚未开始
-HITL / Resume        尚未开始
-Eval                 仅有基础 fixture，完整评估未开始
+T032 LangGraph Assembly
+→ ② Agent Service 的 Agent Brain 子框：只负责控制流（节点 / 路由 / step-retry 预算）；
+  不拥有业务事实（Java 拥有），也不拥有 run 的最终状态（RunStore 拥有）
+
+T031 execute_write / verify_business_state
+→ 同一框内的「安全写入」子层：决定【如何安全地】做一次写，以及写后如何读权威校验
+
+T017 RunStore（agent.agent_runs / agent_checkpoints / agent.tool_executions）
+→ ④ PostgreSQL 的 agent.* schema：当前 run 的唯一状态与恢复依据
 ```
 
-具体教学方式见 `docs/LEARNING_PROTOCOL.md`。
+下面以当时的 Phase 1 / T001–T007 为例，演示映射方法：
+
+```text
+T002
+Spring Initializr
+→ 把“Java Backend”框搭出来
+
+T003
+uv init
+→ 把“Agent Service”框搭出来
+
+T004
+Vite React TS
+→ 把“Web”框搭出来
+
+T005
+PostgreSQL + Docker Compose
+→ 把“DB + Infra”框搭出来
+
+T006/T007
+→ 给这些空壳补开发质量和配置基础
+```
+
+因此 T002/T003/T004 完成时，项目依然只是**三个可运行空壳**，不是业务功能已完成。
+
+Phase 1 Gate 至少要求：
+
+- Java 官方脚手架与 Maven Wrapper 可用；
+- Python 官方 uv 项目、Python 3.13、`uv.lock` 可复现；
+- React + TypeScript Vite 工程能 build；
+- PostgreSQL / Docker Compose 基础环境可启动；
+- 三端最小启动/构建成功；
+- 没有提前引入 MCP / Multi-Agent 等非当前依赖；
+- devlog 记录真实证据。
 
 ---
 

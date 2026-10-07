@@ -1,0 +1,39 @@
+datasetVersion: v1
+dataset: us3_ambiguous_order
+description: >-
+  US3 的判定线：同一个客户名下有两张都可能是"耳机"的订单时，系统必须先问是哪一张，
+  而在客户回答之前**一个售后写入都不许发生**。
+
+  与 US2 的 T042 同一纪律，这个 case 也有两半：
+    · 结果层：两张候选订单上 refund_requests 与 return_requests 合计 0 行（maxWriteCount: 0）；
+    · 机制层：Tool trace 里**任何**写工具都没出现过（writeToolForbidden）。
+  只断结果会假通过 —— "没有行"在一个什么都没做的 run 上同样成立，而这个 case 要证明的恰恰是
+  "它在有资格动钱的情况下仍然没动"。
+
+  为什么两张订单都造成"有资格"（已签收 + 窗口内 + 规则授予 RETURN_REFUND）：夹具越像真能写，
+  "零写入"就越有说服力。如果订单本身不合规，那么不写是廉价的。
+
+  为什么断言的是两张订单的**合计**（orderIds 而不是 orderId）：歧义 case 的要害是"哪一张都没被写"，
+  只盯一张会漏掉"系统猜了另一张"这种最危险的失败。
+
+  前置（T048 的 Java 侧改动）：fixture case `order-ambiguous-001` 必须注册进 FixtureCaseRegistry，
+  为 customer-001 造两张商品摘要都含"耳机"的已签收订单（签收时刻**相对 reset 时刻**生成，
+  照 T042 的做法，否则夹具会随时间腐烂），并且**只有它们**匹配同一条规则。
+  在那之前 reset 返回 404 —— 与 US1/US2 数据集里记的一样：404 的含义是"registry 里没有这个 case"，
+  不是"路由没注册"。
+
+cases:
+  - scenarioId: us3-order-ambiguity
+    caseId: order-ambiguous-001
+    fixtureVersion: t048-order-ambiguous-001-v1
+    orderIds: [order-101, order-102]
+    user: customer-001
+    request: 把上次买的耳机退掉
+    scenario: 两张相似订单 + 商品线索命中两张 → 必须停成 WAITING_USER，且零写入
+    expect:
+      # 它必须**停下等人**，而不是挑一张继续 —— 这是 US3 的全部要点。
+      terminalStatus: WAITING_USER
+      # 结果层：两张候选上的写入合计为 0。
+      maxWriteCount: 0
+      # 机制层：退款与退货的写工具都一次没被调用。
+      writeToolForbidden: true

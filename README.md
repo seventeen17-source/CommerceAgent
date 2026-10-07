@@ -2,9 +2,7 @@
 
 企业电商售后执行与异常处置 Agent。
 
-> 当前状态：**设计阶段已完成；官方脚手架已就位，Phase 2 Foundation 正在 `foundation/*` 分支推进。**
->
-> `main` 只保留**已合并**的里程碑，因此其任务勾选状态滞后于实际开发；真实进度以 [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) 的「main 的定位与活跃分支」一节为准。
+> 当前状态：**Phase 3 — US1 MVP**。**T019–T031 已完成并验收**；当前是 **T032（LangGraph 装配）进行中、未验收** —— 节点与路由已实现 7/10，终态节点、持久化接缝与生产接线尚未完成。
 >
 > 仓库中的性能、安全、时延、成本和成功率等指标，在没有实际 Eval 运行产物之前都只视为目标，不视为已达成结果。
 
@@ -38,6 +36,34 @@ Verified Result + Structured Trace
 - **政策检索不等于业务授权**：非结构化政策只能用于解释和引用，不能覆盖结构化业务规则。
 - **Trace 不保存隐藏思维链**：只记录状态迁移、Tool、参数摘要、结果、错误、重试、审批和写后验证。
 
+## 当前实现进度
+
+项目已经完成 Setup + Foundation，并进入 **Phase 3 — US1 物流异常退款闭环**。当前已完成的主链能力包括：
+
+- **T018**：FastAPI Agent Run 骨架、认证 / ownership、Checkpoint / Structured Trace 持久化，以及 5173 Flow Playground 基线；
+- **T019–T020**：ownership-scoped 订单 / 物流读取、权威物流停滞计算、deterministic EligibilityDecision；
+- **T021–T022**：受保护退款写入、数据库幂等约束、订单行锁、unknown-write recovery、write-ahead intent；
+- **T023–T025**：订单、物流、Eligibility 的真实 HTTP API 与 5173 live 验证；
+- **T026**：`commerce.refund_requests` migration + Entity / Repository 已随 T021 交付；
+- **T027**：RefundService 的 ownership / current-state / eligibility / amount 写前重校验、幂等、行锁、审计和状态读面已落地；真正的 approval binding 留到 US4/T049；
+- **T028**：已暴露 `POST /api/v1/refunds` 与 `GET /api/v1/orders/{orderId}/after-sales`，后者支持可选 `idempotencyKey` 精确过滤，为 unknown-write recovery 提供权威读后验证。HTTP 集成测试 **8/8**，Maven **BUILD SUCCESS**。
+- **T029**：已新增 `app/tools/`，实现六个 US1 typed tools、统一 `ToolEnvelope`、显式 allowlist、risk metadata 与 name→bound implementation 映射；`create_refund_request` 为唯一 high-write Tool，写超时归一为 `WRITE_TIMEOUT_UNKNOWN` 且禁止盲重试。另新增 dev/test-only `/api/v1/agent/dev/tools/execute` 与 `T029 · LIVE TOOL` Flow Playground，用于观察安全只读/判定 Tool 的真实链路（不暴露 high-write Tool）。5173 已实测 `get_order`、`get_logistics`、`check_after_sales_eligibility`、`get_after_sales_status`，并验证 missing key → `refunds=[]`、cross-owner 与 missing order → 同样 `ORDER_NOT_FOUND`。最终 Python `ruff check` / `ruff format --check` / `mypy` 全绿，`pytest` **285 passed, 6 skipped, 6 warnings**；Web `npm.cmd run build` / `npm.cmd run lint` 全绿。
+- **T030**：真实 OpenAI-compatible 模型只做请求理解与受限 evidence capability 建议；`mentionedOrderId` 仅是线索，必须经 Java ownership-confirmed `get_order` 才能成为 `resolved_order_id`；确定性 guard 复核 registry risk、当前状态与重复证据；`stalledHours` / eligibility / 金额始终由 Java 计算。另加 dev/test-only `/api/v1/agent/dev/t030/run` 与 `T030 · LIVE AGENT`。
+- **T031**：Agent 侧写后权威校验与持久化接缝 —— `verify_business_state.py` 按**同一** idempotency key 读 Java 权威状态（读失败 → `UNKNOWN`；权威返回空 → `VERIFIED_FAILURE`；同 key 多条或 id 不符 → `UNKNOWN`，**自己不重试**）；`execute_write.py` 改写为经 T029 typed tools 执行与恢复；`PostgresRunStore.checkpoint_state()` 新增 CAS 全量状态快照；`app/api/dev_t031.py` 提供 dev-only live harness。**收口时修掉 9 个远端提交带进来的 lint/format 债**，四条 Python 门禁全绿（`pytest` **344 passed, 6 skipped**）。
+
+> **T032 进行中（未验收）**：`app/agent/` 下已新增 `graph.py`（`GraphState` + 显式条件边目标表 + 装配校验 + `compile(checkpointer=None)`）、`routing.py`（路由表 / 预算 / `SafeStopReason` / `HandoffReason` / `TerminalDecision`）、`nodes.py`（**10 / 10 节点**，含终态 `finalize` / `safe_stop` / `waiting_user`）、`runtime.py`（`RunSession` 的三个写 seam + `drive_graph`：版本跟踪、边界写延迟一步、失败收尸）、`wiring.py`（10 节点 + 9 依赖的唯一组装点），`state.py` 增 `advance()` 作为唯一校验变更入口；`runs.py` 的 `/input` 与 `/resume` **现在真的组装图并驱动 run**。**未完成**：5173 live 验收、`/input` 与 `/resume` 的 HTTP happy-path 用例。**三个入口都会驱动 run**：`POST /runs` 是第一次 invocation 的**唯一入口**（契约没有 execute 端点，`/input` 与 `/resume` 又都要求 run 处于 `WAITING_*`），驱动做成可注入的 `RunDriver` 接缝，`check` 在写任何东西之前拒绝——避免留下一个没人能推进的 `RUNNING` run。**真库 E2E 已在真实 PostgreSQL 上跑通**（`tests/integration/` 共 65 passed，含新接缝 6 个用例）。**所以"节点与接线齐备"不等于"live 已验证"**，T032 仍**不得勾选**。设计见 [`specs/002-commerce-after-sales-agent/t032-runtime-design.md`](specs/002-commerce-after-sales-agent/t032-runtime-design.md)。
+
+- **T033 已完成**：`AgentRunView` 只报告**权威确认过的事实**——新增 `verificationStatus` / `verifiedRefundRequestId`（**只在 `VERIFIED_SUCCESS` 时非空**）/ `finalMessage`（由终态 + 校验结果确定性推导，不复述模型的话），补齐契约已发布但从未返回的 `finalMessage` / `approvalRequestId`，并把 `version` 与 `checkpointCompactedAt` 补进契约。
+
+当前下一步：
+
+- **T032 剩余两件**：① 5173 live 验收（点页面上的 `T032 · LIVE GRAPH RUN` 步骤）；② `/input` 与 `/resume` 的 HTTP happy-path 用例；
+- 之后按 `tasks.md` 进入 **T033**（Run 序列化只返回已验证事实）与 **T034**（最小 Customer Console）。
+
+> 说明：Flow Playground 已有 `T028 · LIVE REFUND` 的 create + verify 控件；最近一次手工 5173 尝试命中了未重启的旧 8080 Java 进程，因此这里不把该次尝试写成成功验收证据。
+
+> `pgvector/pgvector` 镜像已作为未来能力基线使用，但 **T005 不启用 `vector` extension，也不创建向量表**；是否启用向量检索由 US6 / T065 决定。
+
 ## 项目总架构入口
 
 如果你想从一张总图理解整个项目，包括 Web、React、TypeScript、Vite、npm、Python、FastAPI、LangGraph、Java、Spring Boot、PostgreSQL、Docker、Eval、T001–T083 的关系和完整请求链路，先看：
@@ -48,21 +74,22 @@ Verified Result + Structured Trace
 ## 仓库结构
 
 ```text
-.specify/
-  memory/constitution.md
-
-specs/
-  001-agent-career-project/
-  002-commerce-after-sales-agent/
+commerce-backend/   # Java 业务后端
+agent-service/      # Python Agent Service
+web/                # React + TypeScript Web
+infra/              # PostgreSQL / Docker Compose
+specs/              # Spec / Plan / Research / Tasks / Contracts
+.specify/           # Spec Kit 项目配置
+.agents/skills/     # Spec Kit 初始化生成的项目内 speckit-* 工具
 ```
 
-### `001-agent-career-project`
+### `specs/001-agent-career-project`
 
 回答：**为什么最终选择 CommerceAgent？**
 
 包含招聘市场调研、能力地图、项目候选、Fatal Gate、评分、Red Team 和最终选题依据。
 
-### `002-commerce-after-sales-agent`
+### `specs/002-commerce-after-sales-agent`
 
 回答：**CommerceAgent 具体怎么做？**
 
@@ -84,8 +111,6 @@ specs/
 - PostgreSQL
 - Docker Compose
 - JUnit / Testcontainers / pytest
-
-当前尚未提交正式实现代码；后续基础工程将使用 Spring Initializr、`uv init` 和 Vite 官方脚手架生成。
 
 ## 第一实现目标
 

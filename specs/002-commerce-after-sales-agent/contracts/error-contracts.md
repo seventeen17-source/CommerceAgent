@@ -6,21 +6,93 @@
 
 ```json
 {
-  "errorCode": "ORDER_FORBIDDEN",
-  "message": "Order is not accessible to the authenticated user",
+  "errorCode": "ORDER_NOT_FOUND",
+  "message": "The order does not exist or is not accessible to the authenticated user",
   "retryable": false,
   "traceId": "...",
   "details": {}
 }
 ```
 
+## Ownership Concealment Rule（T019）
+
+**订单不存在**与**订单属于其他用户**必须产生**完全相同**的响应：相同状态码（`404`）、相同 `errorCode`
+（`ORDER_NOT_FOUND`）、相同 `message`。实现不得为其中一种情况补一句"更友好"或"更精确"的提示。
+
+理由：错误码的字面语义会附带事实。`403` 的字面含义是"资源**存在**，但你无权访问"，因此它顺带回答了"这个
+id 存不存在"。本项目订单 id 形如 `order-001`，是可枚举的；把这两种情况分开，读接口就变成攻击者的**存在性
+预言机**（existence oracle）。
+
+因此：
+
+- `403` 在两个 customer read 端点上**只**表示"已认证主体缺少该端点所需的角色/能力权限"，对应
+  `ACCESS_DENIED`。它**绝不**用于 ownership 失败。
+- `ORDER_FORBIDDEN` **已从本契约删除**：它描述的是"订单属于其他用户"这一场景，而该场景按上述规则必须与
+  "不存在"不可区分，因此它没有合法的生产方。保留一个没有合法出口的错误码，只会诱导后来的实现者重新引入
+  存在性泄露。
+- **对外抹平不等于内部失明**：后端仍必须把**真实原因**写入结构化安全审计
+  （`commerce.audit_logs`，`action = ORDER_ACCESS_DENIED`，`metadata.reason = CROSS_OWNER`）。这不是可选装饰 ——
+  否则"谁在探测别人的订单"将永远无法被回答。
+- 审计写入**失败不得改变对外结果**：若只有 cross-owner 路径会写审计，那么"审计写失败 → 500"会重新变成区分
+  两种失败的信号。请求本来就要被拒绝，此时丢掉的只是可观测性，不是业务动作，因此应记录 ERROR 日志后仍抛出
+  统一的 `ORDER_NOT_FOUND`。
+
+## 评估结论 vs 错误（T020）
+
+"资格不符合"不是错误，"评估无法完成"才是错误。这两件事必须由不同的通道表达，否则 Agent 会把一次依赖故障或一次
+越权探测当成业务结论：
+
+| 情形 | 通道 | 形态 |
+|---|---|---|
+| 评估完成，结论是**批准**某动作 | 成功 | `200` + `EligibilityDecision`（`eligible=true`、引用规则行、给出金额上界） |
+| 评估完成，结论是**拒绝** | 成功 | `200` + `eligible=false`、`allowedAction=DENY`、`reasonCodes` 说明原因 |
+| 评估完成，结论是**无法自动决定** | 成功 | `200` + `eligible=false`、`allowedAction=MANUAL_REVIEW`、`reasonCodes` 说明缺什么 |
+| 越权 / 订单不存在 | 错误 | `404 ORDER_NOT_FOUND`（两者不可区分，见上） |
+| 订单状态与规则前提冲突 | 错误 | `409 INVALID_ORDER_STATE` |
+| 权威依赖不可用（如规则要求物流证据但没有运单） | 错误 | `503 LOGISTICS_UNAVAILABLE`（有限重试） |
+
+因此：
+
+- `ELIGIBILITY_DENIED`、`MANUAL_REVIEW_REQUIRED`、`APPROVAL_REQUIRED`、`AMOUNT_EXCEEDS_ALLOWED` 是**写路径**
+  错误：它们在提交前重校验一个 proposed action 时拒绝该 action，而不是在评估阶段表达"不符合资格"。
+- 任何"把 `503`/`404` 降级成一个 `eligible=false` 决策"的实现都是错的：那会把"不知道/看不到"永久固化成
+  "业务上不允许"。
+- 反过来，把 `eligible=false` 当成请求失败（例如抛出 `500`）同样是错的：它是一次成功且权威的回答，Agent 应当
+  据此解释拒绝或转人工，而不是重试。
+
+## 退货写路径（US2 / T040）
+
+`POST /returns` 与 `POST /refunds` 共用同一套写路径纪律（写前重校验、行锁 + 复查、唯一约束兜底、状态与审计同事务），
+错误码语义也逐条对齐：
+
+| 情形 | 形态 |
+|---|---|
+| 幂等重放（同 key、同逻辑请求） | `200` + 同一笔 `ReturnResult`（不是第二行，也不是冲突） |
+| 同 key、不同逻辑请求（order / reasonCode / returnMethod 任一不同） | `409 IDEMPOTENCY_CONFLICT` |
+| 订单已有活动售后动作（含活动退货） | `409 DUPLICATE_AFTER_SALES` |
+| 越权 / 订单不存在 | `404 ORDER_NOT_FOUND`（两者不可区分） |
+| 角色或能力不足 | `403 ACCESS_DENIED`（**只**表示能力不足） |
+| 带本版本无法校验的审批引用 | `400 INVALID_PARAMETER`（fail closed，不留任何业务痕迹） |
+| 规则判定拒绝（超出退货窗口、缺签收时刻、已签收却被授予直接退款） | `422 ELIGIBILITY_DENIED` |
+| 需要人工 | `422 MANUAL_REVIEW_REQUIRED` |
+| 需要权威审批 | `422 APPROVAL_REQUIRED` |
+| 评估到提交之间物流事实消失、窗口无法冻结 | `503 LOGISTICS_UNAVAILABLE` |
+
+两条只属于退货路径的约定：
+
+- **`RETURN_REFUND` 不在这个接口里动钱。** 退货行只表达"哪一单在走退货、哪条规则批的、截止到什么时候"；金额只由退款行
+  表达（`refund_requests.amount`）。因此"已签收订单不得被直接退款"这条 US2 不变量不会因为多了退货接口而松动 —— 它仍然
+  由 `EligibilityService` 的守卫在决策层保证。
+- **`returnDeadline` 是受理时冻结的事实**，不是读时重算的派生值：规则改版不得改写已经承诺给客户的截止日。`503` 只出现
+  在"决策刚刚放行、但受理时窗口已经算不出来"这一种情形，此时**不写半截行**。
+
 ## Error Taxonomy
 
 | Code | 含义 | 可重试 | Agent 处理 |
 |---|---|---:|---|
 | `AUTH_REQUIRED` | 缺少或无效认证 | 否 | 停止，要求有效 session |
-| `ORDER_NOT_FOUND` | 订单不存在 | 否 | 澄清/重新搜索当前用户订单或停止 |
-| `ORDER_FORBIDDEN` | 订单属于其他用户/拒绝访问 | 否 | 安全停止，不泄露订单细节 |
+| `ACCESS_DENIED` | 已认证，但当前角色/权限不允许访问该能力 | 否 | 安全停止。它**只**表示角色/能力不足，绝不代表资源归属问题 |
+| `ORDER_NOT_FOUND` | 订单不存在**或**不属于当前主体（两者刻意不可区分） | 否 | 澄清/重新搜索当前用户订单或停止；不得据此推断该 id 是否存在 |
 | `AMBIGUOUS_ORDER` | 存在多个合理候选订单 | 否 | 询问澄清，禁止写入 |
 | `INVALID_ORDER_STATE` | 当前订单状态不允许该售后动作 | 否 | 重新评估路径，不强行写入 |
 | `LOGISTICS_UNAVAILABLE` | 物流依赖不可用 | 有限 | 在预算内重试，否则转人工/安全停止 |
@@ -43,7 +115,7 @@
 | `REPEATED_NO_PROGRESS` | 相同 Tool/参数重复且无新证据 | 否 | Circuit Break + 安全停止/升级 |
 | `POST_WRITE_VERIFICATION_FAILED` | 写入返回成功但最终状态无法验证 | 禁止盲重试 | 查询权威状态；仍无法确认则标记未知并升级 |
 | `PROMPT_INJECTION_BLOCKED` | 输入/检索内容试图修改受保护权限或策略 | 否 | 仅按正常权限继续，否则安全停止 |
-| `INTERNAL_ERROR` | 未分类内部错误 | 条件 | 不进行不安全续跑，记录 trace 并失败关闭 |
+| `EVAL_CASE_NOT_FOUND` | Eval fixture case/version 不存在 | 否 | Eval Runner 将 case 标为 dataset/config error |\n| `EVAL_RESET_CONFLICT` | 另一个 reset transaction 正在执行 | 有限 | Eval Runner 延迟后有限重试 |\n| `EVAL_RESET_FAILED` | fixture reset 基础设施失败 | 否 | 标记 infrastructure failure，不归因于模型 |\n| `INTERNAL_ERROR` | 未分类内部错误 | 条件 | 不进行不安全续跑，记录 trace 并失败关闭 |
 
 ## Handling Rules
 
@@ -53,3 +125,6 @@
 4. Prompt Text 不能把 forbidden/non-retryable error 变成允许动作。
 5. Error Code 必须进入 `ToolExecution` / `AgentRun` Trace 与 Eval failure taxonomy。
 6. UI 可以本地化 message，但代码分支只依赖稳定 error code / status。
+7. 越权读与"不存在"必须不可区分（见 Ownership Concealment Rule）。Agent 不得把 `ORDER_NOT_FOUND` 解读为
+   "这个 id 有效但不属于我"——它拿不到这个信息，也不应该尝试通过重试或改变措辞来获取它。
+8. 安全拒绝事件必须写结构化审计并保留真实原因；但审计子系统的可用性**不得**影响对外响应的一致性。

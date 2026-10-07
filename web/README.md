@@ -1,3 +1,15 @@
+# web
+
+CommerceAgent 的 **Web 前端**（React + TypeScript + Vite）。当前主要承载本地流转验证页 **Flow Playground**（`src/features/validation/`）；真实产品 UI 由后续业务任务实现。
+
+**进度与"下一步做什么"只读** [`PROJECT_PROGRESS.md`](../PROJECT_PROGRESS.md)。
+
+本机注意：前端命令一律用 `npm.cmd`（PowerShell 执行策略会拦 `npm.ps1`）；dev server 只监听 IPv6，页面用 `http://localhost:5173/`（不是 `127.0.0.1`）。
+
+---
+
+以下是 Vite 官方模板自带的说明，保留作参考：
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.

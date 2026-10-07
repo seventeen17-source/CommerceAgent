@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+	<!--
+		Spring singleton collaborators are intentionally constructor-injected and kept in private final fields.
+		These references are not exposed through the public API. Keep EI_EXPOSE_REP2 enabled everywhere else.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.common.error.RestAccessDeniedHandler"/>
+		<Field name="responseWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.common.error.RestAuthenticationEntryPoint"/>
+		<Field name="responseWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.common.error.SecurityErrorResponseWriter"/>
+		<Field name="jsonMapper"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.audit.AuditWriter"/>
+		<Field name="repository"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<!--
+		T019: OrderService injects the concrete AuditWriter to record concealed cross-owner read
+		denials. Same provable false positive as above: the reference lives in a private final
+		field, is only used to call writeSecurityEvent, and is never returned or exposed.
+
+		Careful when editing this file: a double hyphen inside an XML comment makes the document
+		ill-formed, and SpotBugs then silently ignores the WHOLE filter file instead of failing.
+		That turns every existing suppression back on at once, which looks nothing like the cause.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.order.OrderService"/>
+		<Field name="auditWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<!--
+		T021: RefundService injects the concrete AuditWriter for the same reason OrderService does, and
+		hits the same provable false positive: the reference lives in a private final field, is only
+		used to call writeBusinessEvent, and is never returned or exposed. Keep this exemption narrowed
+		to class plus field; do not widen it to the package, and do not disable the pattern.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.refund.RefundService"/>
+		<Field name="auditWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<!--
+		T040: ReturnService injects the concrete AuditWriter for the same reason RefundService and
+		OrderService do, and hits the same provable false positive: the reference lives in a private
+		final field, is only used to call writeBusinessEvent, and is never returned or exposed. Keep this
+		exemption narrowed to class plus field; do not widen it to the package, and do not disable the pattern.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.returns.ReturnService"/>
+		<Field name="auditWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.fixture.FixtureLoader"/>
+		<Field name="jdbcTemplate"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.fixture.FixtureLoader"/>
+		<Field name="registry"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.fixture.DevelopmentFixtureInitializer"/>
+		<Field name="fixtureLoader"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+	<Match>
+		<Class name="com.seventeen17.commerceagent.fixture.EvalFixtureController"/>
+		<Field name="fixtureLoader"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
+</FindBugsFilter>
