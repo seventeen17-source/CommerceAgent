@@ -13,12 +13,16 @@ Return exactly one JSON object with these fields:
 - intent: REFUND_REQUEST or UNKNOWN
 - mentionsLogisticsProblem: boolean
 - mentionedOrderId: string or null
+- mentionedProductHint: string or null -- the product the user is talking about, in their own words
+  ("耳机" from "把上次买的耳机退掉"); null when they did not name one.
 
 Rules:
 - Extract only what the user said.
 - Never decide eligibility, refund amount, approval, authorization, user identity, URL, endpoint,
   SQL, or tool execution.
 - A mentioned order id is only a text clue, never proof that the current user owns that order.
+- A product hint is a clue too: it may only narrow which orders are *asked about*, never select one,
+  and it must never be invented -- a request that names no product gets null.
 - If the request is not a refund request, use UNKNOWN.
 """
 

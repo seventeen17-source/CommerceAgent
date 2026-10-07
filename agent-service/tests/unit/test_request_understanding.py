@@ -26,6 +26,45 @@ def test_understood_request_keeps_only_non_authoritative_language_facts() -> Non
     assert result.mentioned_order_id == "order-001"
 
 
+def test_a_product_hint_travels_as_a_clue_and_stays_optional() -> None:
+    """T044: the second clue the model may extract.
+
+    Optional on purpose: most requests name no product, and "absent" must stay distinguishable from
+    "empty string" -- an empty hint that looked like a clue would match nothing and turn every
+    ordinary request into a "no order matched" question.
+    """
+    with_hint = UnderstoodRequest.model_validate(
+        {
+            "intent": "REFUND_REQUEST",
+            "mentionsLogisticsProblem": False,
+            "mentionedOrderId": None,
+            "mentionedProductHint": "耳机",
+        }
+    )
+    without_hint = UnderstoodRequest.model_validate(
+        {
+            "intent": "REFUND_REQUEST",
+            "mentionsLogisticsProblem": False,
+            "mentionedOrderId": None,
+        }
+    )
+
+    assert with_hint.mentioned_product_hint == "耳机"
+    assert without_hint.mentioned_product_hint is None
+
+
+def test_an_over_long_product_hint_is_rejected() -> None:
+    """The clue is untrusted model output, so it is bounded like any other model-supplied field."""
+    with pytest.raises(ValidationError):
+        UnderstoodRequest.model_validate(
+            {
+                "intent": "REFUND_REQUEST",
+                "mentionsLogisticsProblem": False,
+                "mentionedProductHint": "x" * 65,
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "forbidden_field",
     [
