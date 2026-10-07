@@ -196,6 +196,48 @@ class FixtureLoaderIntegrationTest {
                         """));
     }
 
+    @Test
+    void theClueNarrowingCaseSeedsThreeWritableOrdersAndOnlyOneDescribedByTheClue() throws Exception {
+        seedAuthenticatedUser();
+        String token = localJwtIssuer.issue("customer-001");
+
+        mockMvc.perform(post("/internal/eval/fixtures/order-clue-narrow-001/reset")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetVersion\":\"v1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("order-clue-narrow-001"))
+                .andExpect(jsonPath("$.fixtureVersion").value("t048b-order-clue-narrow-001-v1"));
+
+        // Three delivered orders, of which *exactly one* answers to the clue. "Exactly one" is the whole
+        // case: with two matching orders it would be the ambiguity case again, and with one order in total
+        // there would be nothing for a filter to do. The other two are not decoration -- they are what
+        // makes a COMPLETED run count as evidence that filtering happened.
+        assertEquals(3, count("""
+                        SELECT COUNT(*) FROM commerce.orders
+                         WHERE id IN ('order-101','order-201','order-202') AND status = 'DELIVERED'
+                        """));
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.order_items
+                         WHERE order_id IN ('order-101','order-201','order-202') AND product_name LIKE '%耳机%'
+                        """));
+        // Signed inside the window *relative to the reset* -- a literal timestamp is what rots, and every
+        // one of the three has to be inside it, or "the filter chose" could be explained by eligibility.
+        assertEquals(3, count("""
+                        SELECT COUNT(*) FROM commerce.shipments
+                         WHERE order_id IN ('order-101','order-201','order-202')
+                           AND signed_at > now() - interval '7 days'
+                        """));
+        // Exactly one active rule may cover them. Two matching ruleCodes is a CONFLICTING_RULES refusal by
+        // design, and that is what turned T042's second real run into a failure of the *fixture*: one
+        // decoy would then be refusable for a reason that has nothing to do with the clue.
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.after_sales_rules
+                         WHERE active = TRUE AND required_order_status = 'DELIVERED'
+                           AND (product_category IS NULL OR product_category = 'APPAREL')
+                        """));
+    }
+
     private void performReset(String token) throws Exception {
         mockMvc.perform(post("/internal/eval/fixtures/refund-logistics-001/reset")
                         .header("Authorization", "Bearer " + token)
