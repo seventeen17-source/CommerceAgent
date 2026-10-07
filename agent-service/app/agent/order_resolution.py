@@ -1,8 +1,8 @@
 """Single-candidate order resolution for T030.
 
 Language extraction may suggest an order id, but only an ownership-validated Tool read may turn
-that clue into resolved_order_id. Multiple candidates are never guessed; clarification is a
-later user story (T043+).
+that clue into resolved_order_id. Multiple candidates are never guessed: a deterministic product
+clue narrows them (T044), and what is left is handed back as a clarification to answer.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.agent.product_matching import select_candidates
 from app.agent.request_understanding import UnderstoodRequest
 from app.agent.state import Identifier, ToolHistoryEntry
 from app.agent.tool_tracing import TraceSink, report_tool_call
@@ -41,6 +42,9 @@ class OrderResolution(BaseModel):
 
     status: OrderResolutionStatus
     candidate_order_ids: list[Identifier] = Field(default_factory=list)
+    #: ``True`` when an informative product clue matched no order (T044). The caller must then ask a
+    #: *broader* question instead of presenting this fallback list as if the clue had worked.
+    clue_matched_nothing: bool = False
     resolved_order_id: Identifier | None = None
     order: OrderSnapshot | None = None
     error_code: str | None = Field(default=None, max_length=100)
@@ -122,13 +126,15 @@ async def resolve_single_order(
     listed_orders = listed.data
     if listed_orders is None:
         raise ValueError("successful list_user_orders Tool result is missing data")
-    candidate_ids = [order.order_id for order in listed_orders]
+    selection = select_candidates(understood.mentioned_product_hint, listed_orders)
+    candidate_ids = list(selection.candidate_order_ids)
     if not candidate_ids:
         return OrderResolution(status=OrderResolutionStatus.UNRESOLVED, history=[listed_entry])
     if len(candidate_ids) > 1:
         return OrderResolution(
             status=OrderResolutionStatus.AMBIGUOUS,
             candidate_order_ids=candidate_ids,
+            clue_matched_nothing=selection.clue_matched_nothing,
             history=[listed_entry],
         )
 

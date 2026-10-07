@@ -35,9 +35,10 @@ class RequestIntent(StrEnum):
 class UnderstoodRequest(BaseModel):
     """Narrow, non-authoritative interpretation of one user request.
 
-    The model may identify the user's goal and extract an order-id-shaped clue. It may not
-    decide whether the request is allowed, choose a refund amount, or select arbitrary backend
-    capabilities.
+    The model may identify the user's goal and extract two *clues* -- an order-id-shaped one and a
+    product-shaped one. It may not decide whether the request is allowed, choose a refund amount,
+    or select arbitrary backend capabilities; and a clue it extracts is never authority: an order
+    id still has to be confirmed by an ownership-validated read, and a product hint only narrows.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -45,6 +46,11 @@ class UnderstoodRequest(BaseModel):
     intent: RequestIntent
     mentions_logistics_problem: bool = Field(alias="mentionsLogisticsProblem")
     mentioned_order_id: Identifier | None = Field(default=None, alias="mentionedOrderId")
+    #: A product-shaped clue ("耳机"), which is what makes a vague request filterable at all (T044).
+    #: Optional and bounded: the model does the wording, the matcher does the selecting.
+    mentioned_product_hint: str | None = Field(
+        default=None, alias="mentionedProductHint", max_length=64
+    )
 
 
 class RequestUnderstandingModel(Protocol):

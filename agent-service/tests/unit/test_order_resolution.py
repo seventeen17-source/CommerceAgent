@@ -174,3 +174,72 @@ async def test_list_failure_is_not_misrepresented_as_no_orders() -> None:
     assert result.status is OrderResolutionStatus.UNRESOLVED
     assert result.error_code == "DEPENDENCY_UNAVAILABLE"
     assert result.retryable is True
+
+
+def _product_summary(order_id: str, product: str, day: int = 1) -> OrderSummary:
+    return OrderSummary.model_validate(
+        {
+            "orderId": order_id,
+            "productSummary": product,
+            "status": "SHIPPED",
+            "createdAt": datetime(2026, 9, day, tzinfo=UTC).isoformat(),
+        }
+    )
+
+
+def _understood_with_hint(hint: str | None) -> UnderstoodRequest:
+    return UnderstoodRequest(
+        intent=RequestIntent.REFUND_REQUEST,
+        mentions_logistics_problem=True,
+        mentioned_order_id=None,
+        mentioned_product_hint=hint,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_product_clue_narrows_two_orders_to_one_it_still_confirms() -> None:
+    """T044: the clue filters, and the authority still confirms ownership before it is resolved."""
+    tools = _FakeOrderTools(
+        orders=[
+            _product_summary("order-001", "无线蓝牙耳机 Pro"),
+            _product_summary("order-002", "运动水壶"),
+        ],
+        details={"order-001": ToolEnvelope(success=True, data=_snapshot("order-001"), latencyMs=1)},
+    )
+
+    result = await resolve_single_order(_understood_with_hint("耳机"), tools=tools)
+
+    assert result.status is OrderResolutionStatus.RESOLVED
+    assert result.resolved_order_id == "order-001"
+    # The filtered order was read back from Java -- a clue is never treated as an answer.
+    assert tools.get_calls == ["order-001"]
+
+
+@pytest.mark.asyncio
+async def test_a_clue_that_matches_nothing_still_asks_and_says_that_it_did() -> None:
+    tools = _FakeOrderTools(
+        orders=[
+            _product_summary("order-001", "运动水壶", day=1),
+            _product_summary("order-002", "登山杖", day=2),
+        ]
+    )
+
+    result = await resolve_single_order(_understood_with_hint("耳机"), tools=tools)
+
+    assert result.status is OrderResolutionStatus.AMBIGUOUS
+    # The flag is what lets the caller ask a *broader* question instead of implying the clue worked.
+    assert result.clue_matched_nothing is True
+    assert result.candidate_order_ids == ["order-002", "order-001"]
+
+
+@pytest.mark.asyncio
+async def test_the_candidate_list_is_capped_so_the_question_stays_answerable() -> None:
+    tools = _FakeOrderTools(
+        orders=[_product_summary(f"order-{day:03d}", "耳机", day=day) for day in range(1, 9)]
+    )
+
+    result = await resolve_single_order(_understood_with_hint("耳机"), tools=tools)
+
+    assert result.status is OrderResolutionStatus.AMBIGUOUS
+    assert len(result.candidate_order_ids) == 5
+    assert result.candidate_order_ids[0] == "order-008"
