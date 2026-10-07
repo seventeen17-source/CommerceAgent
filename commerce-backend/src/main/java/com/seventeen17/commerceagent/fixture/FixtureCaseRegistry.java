@@ -17,7 +17,12 @@ class FixtureCaseRegistry {
             // window whenever it is reset -- see FixtureLoader.seedDeliveredReturnCase for why
             // that cannot be expressed with a literal timestamp.
             key("return-delivered-001", DEFAULT_DATASET_VERSION),
-            new FixtureCase("return-delivered-001", DEFAULT_DATASET_VERSION, "t042-return-delivered-001-v1"));
+            new FixtureCase("return-delivered-001", DEFAULT_DATASET_VERSION, "t042-return-delivered-001-v1"),
+            // T048: the US3 world. Two orders whose product summaries both answer to the same clue, so
+            // the only correct outcome is a question -- and the case can only prove "nothing was written"
+            // if both orders look writable in the first place.
+            key("order-ambiguous-001", DEFAULT_DATASET_VERSION),
+            new FixtureCase("order-ambiguous-001", DEFAULT_DATASET_VERSION, "t048-order-ambiguous-001-v1"));
 
     Optional<FixtureCase> find(String caseId, String datasetVersion) {
         String resolvedVersion =

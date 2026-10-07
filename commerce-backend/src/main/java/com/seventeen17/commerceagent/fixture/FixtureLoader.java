@@ -43,6 +43,12 @@ public class FixtureLoader {
     private static final int RETURN_WINDOW_DAYS = 7;
     private static final Duration SIGNED_AGO = Duration.ofDays(3);
 
+    /** T048: the ambiguity case -- two writable-looking orders that the same product clue describes. */
+    static final String AMBIGUOUS_ORDER_CASE = "order-ambiguous-001";
+
+    private static final String AMBIGUOUS_ORDER_FIRST_ID = "order-101";
+    private static final String AMBIGUOUS_ORDER_SECOND_ID = "order-102";
+
     private final JdbcTemplate jdbcTemplate;
     private final FixtureCaseRegistry registry;
     private final Clock clock;
@@ -80,6 +86,8 @@ public class FixtureLoader {
             // case therefore seeds only its own world.
             if (RETURN_DELIVERED_CASE.equals(fixtureCase.caseId())) {
                 seedDeliveredReturnCase();
+            } else if (AMBIGUOUS_ORDER_CASE.equals(fixtureCase.caseId())) {
+                seedAmbiguousOrderCase();
             } else {
                 seedRefundLogisticsCase();
             }
@@ -115,17 +123,19 @@ public class FixtureLoader {
         // FK 违约失败。Eval reset 的语义是"业务状态回到基线"，退款这类写入结果必须一起清掉，否则"重置后重跑同一个
         // 用例"会因为上一轮的退款行而得到不同结论。
         jdbcTemplate.update(
-                "DELETE FROM commerce.refund_requests WHERE order_id IN ('order-001', 'order-002', 'order-003')");
+                "DELETE FROM commerce.refund_requests WHERE order_id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
         // T038：退货行与退款行同类 —— 都是"运行产生的写入结果"，不是用例的起点。同样必须在删 orders 之前
         // 处理掉（同样的外键），否则"重置后重跑同一个用例"会带着上一轮的退货行，结论不可比。
         jdbcTemplate.update(
-                "DELETE FROM commerce.return_requests WHERE order_id IN ('order-001', 'order-002', 'order-003')");
+                "DELETE FROM commerce.return_requests WHERE order_id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
         jdbcTemplate.update(
-                "DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002', 'shipment-003')");
-        jdbcTemplate.update("DELETE FROM commerce.shipments WHERE order_id IN ('order-001', 'order-002', 'order-003')");
+                "DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002', 'shipment-003', 'shipment-101', 'shipment-102')");
         jdbcTemplate.update(
-                "DELETE FROM commerce.order_items WHERE order_id IN ('order-001', 'order-002', 'order-003')");
-        jdbcTemplate.update("DELETE FROM commerce.orders WHERE id IN ('order-001', 'order-002', 'order-003')");
+                "DELETE FROM commerce.shipments WHERE order_id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.order_items WHERE order_id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.orders WHERE id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
         // The eval world must not inherit policy rows it did not choose. Deleting only the two rule codes
         // this loader creates left the demo seed's rules in place, and a delivered order then matched both
         // a demo return rule and this case's rule: two distinct ruleCodes matching one order is a
@@ -173,6 +183,30 @@ public class FixtureLoader {
                 signedAt);
         ensureLogisticsEvent(RETURN_DELIVERED_SHIPMENT_ID, "DELIVERED", "Synthetic signed delivery event", signedAt);
         upsertReturnRule();
+    }
+
+    /**
+     * T048: two orders that one product clue describes -- both of them writable-looking.
+     *
+     * <p>The point of the fixture is that *not writing* has to be a decision rather than an accident:
+     * both orders are delivered, inside the return window, and covered by a rule that grants
+     * {@code RETURN_REFUND}. A run that guessed would therefore leave a real return row behind, which is
+     * exactly what the eval case asserts must not exist.
+     */
+    private void seedAmbiguousOrderCase() {
+        Instant signedAt = clock.instant().minus(SIGNED_AGO);
+        seedAmbiguousOrder(AMBIGUOUS_ORDER_FIRST_ID, "item-101", "product-101", "无线蓝牙耳机 Pro", "shipment-101", signedAt);
+        seedAmbiguousOrder(
+                AMBIGUOUS_ORDER_SECOND_ID, "item-102", "product-102", "有线耳机 Basic", "shipment-102", signedAt);
+        upsertReturnRule();
+    }
+
+    private void seedAmbiguousOrder(
+            String orderId, String itemId, String productId, String productName, String shipmentId, Instant signedAt) {
+        upsertOrder(orderId, "customer-001", "DELIVERED", "199.00", signedAt);
+        upsertOrderItem(itemId, orderId, productId, productName, "APPAREL", "199.00");
+        upsertShipmentSignedAt(shipmentId, orderId, "SYNTHETIC", "TRACK-" + orderId, "DELIVERED", signedAt);
+        ensureLogisticsEvent(shipmentId, "DELIVERED", "Synthetic signed delivery event", signedAt);
     }
 
     private void seedRefundLogisticsCase() {
