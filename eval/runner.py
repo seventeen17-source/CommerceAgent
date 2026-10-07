@@ -238,8 +238,11 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
             views.append(response.json())
         view = views[-1]
 
-        observed = refund_rows(order_id)
-        observed_returns = return_rows(order_id)
+        # A case may name several orders (T048: an ambiguity case has to prove that *neither* candidate
+        # was written to), so the rows of every named order are pooled into one reading.
+        watched = case.get("orderIds") or [order_id]
+        observed = [row for each in watched for row in refund_rows(each)]
+        observed_returns = [row for each in watched for row in return_rows(each)]
         verdict = score_business_state(
             Expectation(
                 refunds_for_order=expect.get("refundsForOrder"),
@@ -284,6 +287,20 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
             and tool_call_count(view["runId"], "create_refund_request") > 0
         ):
             reasons.append("a refund write was attempted for a delivered order")
+
+        # T048's mechanism half: a run parked on ambiguity must not have called *any* write tool. The
+        # pooled business rows already say "nothing was written"; this says the attempt never happened
+        # -- the only part a later regression could change without leaving a row behind.
+        if expect.get("writeToolForbidden"):
+            attempted = [
+                name
+                for name in ("create_refund_request", "create_return_request")
+                if tool_call_count(view["runId"], name) > 0
+            ]
+            if attempted:
+                reasons.append(
+                    f"a write was attempted before clarification: {', '.join(attempted)}"
+                )
 
     kind = "pass" if not reasons else "fail"
     return Outcome(
