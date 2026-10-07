@@ -85,6 +85,12 @@ def _client(request: Request) -> CommerceClient:
 def _stop_reason_for_resolution(resolution: OrderResolution) -> str:
     if resolution.status is OrderResolutionStatus.AMBIGUOUS:
         return "ORDER_AMBIGUOUS"
+    if resolution.status is OrderResolutionStatus.NO_MATCH:
+        # T044/T048: "the clue matched nothing" is not "unresolved". Reporting it as
+        # ORDER_UNRESOLVED would make this probe describe a failed resolution when the truth is that
+        # the question simply could not be narrowed -- the same confusion the customer-facing kind
+        # (`ORDER_NO_MATCH`) exists to avoid.
+        return "ORDER_NO_MATCH"
     return resolution.error_code or "ORDER_UNRESOLVED"
 
 
