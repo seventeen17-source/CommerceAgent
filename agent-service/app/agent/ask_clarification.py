@@ -8,6 +8,25 @@ all three are questions about the same facts, so they get answered from the same
 Nothing here reads or writes a database, and no statuses are redefined: the status vocabulary
 itself stays in ``app/trace/checkpoint.py`` (one truth per fact). This module is a pure function
 of facts the caller already holds, which makes the waiting rules testable without a server.
+
+The two halves of the wait, and where each is enforced
+------------------------------------------------------
+This module owns the *decisions*; the boundary owns the *enforcement*::
+
+    ask    : clarification_for(...)          <- decided here; published by the run view
+    resume : ownership, then state, then CAS <- order fixed here; enforced by store + API
+
+**The resume order is part of the contract, not a detail.** Ownership comes first because HTTP
+status codes are an information channel: checking the state of a run the caller does not own would
+let them tell "exists and finished" (409) from "exists and is waiting" (403) -- a status oracle for
+somebody else's run. It is also the difference between fail-closed and fail-open: a transition must
+never be reachable before authorization.
+
+**The version check is a conditional write, not a check.** ``UPDATE ... WHERE status =
+'WAITING_USER' AND version = ?`` fuses "still waiting" and "still the version I read" into one
+atomic statement; a read-compare-then-write leaves a TOCTOU gap in which two wake-ups both pass the
+comparison and the later one silently overwrites the earlier one. Enforcement belongs to the store;
+wiring this contract into ``/input`` is the remaining half of T045.
 """
 
 from __future__ import annotations
