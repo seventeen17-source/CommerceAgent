@@ -158,6 +158,44 @@ class FixtureLoaderIntegrationTest {
         assertEquals(2, count("SELECT COUNT(*) FROM commerce.orders WHERE id IN ('order-001','order-002')"));
     }
 
+    @Test
+    void theAmbiguityCaseSeedsTwoWritableOrdersAndOnlyOneMatchingRule() throws Exception {
+        seedAuthenticatedUser();
+        String token = localJwtIssuer.issue("customer-001");
+
+        mockMvc.perform(post("/internal/eval/fixtures/order-ambiguous-001/reset")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetVersion\":\"v1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("order-ambiguous-001"))
+                .andExpect(jsonPath("$.fixtureVersion").value("t048-order-ambiguous-001-v1"));
+
+        // Two delivered orders described by the same clue. Two candidates is the whole point: with one
+        // order there would be nothing to ask about, and the case would prove nothing.
+        assertEquals(2, count("""
+                        SELECT COUNT(*) FROM commerce.orders
+                         WHERE id IN ('order-101','order-102') AND status = 'DELIVERED'
+                        """));
+        assertEquals(2, count("""
+                        SELECT COUNT(*) FROM commerce.order_items
+                         WHERE order_id IN ('order-101','order-102') AND product_name LIKE '%耳机%'
+                        """));
+        // Signed inside the window *relative to the reset* -- a literal timestamp is what rots.
+        assertEquals(2, count("""
+                        SELECT COUNT(*) FROM commerce.shipments
+                         WHERE order_id IN ('order-101','order-102')
+                           AND signed_at > now() - interval '7 days'
+                        """));
+        // Exactly one active rule may cover them. Two matching ruleCodes is a CONFLICTING_RULES refusal
+        // by design, and that is what turned T042's second real run into a failure of the *fixture*.
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.after_sales_rules
+                         WHERE active = TRUE AND required_order_status = 'DELIVERED'
+                           AND (product_category IS NULL OR product_category = 'APPAREL')
+                        """));
+    }
+
     private void performReset(String token) throws Exception {
         mockMvc.perform(post("/internal/eval/fixtures/refund-logistics-001/reset")
                         .header("Authorization", "Bearer " + token)
