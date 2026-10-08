@@ -180,6 +180,9 @@ class UnusedDependency:
     async def check_after_sales_eligibility(self, order_id: str, reason_code: str) -> object:
         raise AssertionError("eligibility must not run in this stage")
 
+    async def request_human_approval(self, **kwargs: Any) -> object:
+        raise AssertionError("approval creation must not run in this stage")
+
     async def create_refund_request(self, **kwargs: Any) -> object:
         raise AssertionError("a refund write must not run in this stage")
 
@@ -204,6 +207,7 @@ def make_deps(*, understanding: Any, orders: Any) -> GraphDeps:
         evidence=unused,
         registry=ToolRegistry(),
         eligibility=unused,
+        approvals=unused,
         writes=unused,
         after_sales=unused,
         persist_intent=unused_persist,
