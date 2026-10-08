@@ -129,7 +129,7 @@ async def test_exact_approved_binding_is_checkpointed_as_verified_before_resume(
         record=record,
         client=client,  # type: ignore[arg-type]
         call=authenticated_call(),
-        body=ResumeRunRequest(approval_request_id="approval-001"),
+        body=ResumeRunRequest(approvalRequestId="approval-001"),
     )
 
     state = refreshed.to_state()
@@ -157,7 +157,7 @@ async def test_caller_cannot_swap_the_checkpointed_approval_id() -> None:
             record=record,
             client=client,  # type: ignore[arg-type]
             call=authenticated_call(),
-            body=ResumeRunRequest(approval_request_id="approval-from-another-run"),
+            body=ResumeRunRequest(approvalRequestId="approval-from-another-run"),
         )
 
     assert caught.value.status_code == 409
