@@ -752,6 +752,7 @@ def make_write_deps(
         evidence=unused,
         registry=ToolRegistry(),
         eligibility=eligibility or unused,
+        approvals=unused,
         writes=writes or unused,
         after_sales=after_sales or unused,
         persist_intent=persist or unused_persist,
