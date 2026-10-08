@@ -89,7 +89,7 @@ public class ApprovalService {
         ApprovalRequest saved = approvalRepository.saveAndFlush(approval);
 
         auditWriter.writeBusinessEvent(new AuditEvent(
-                AuditActorType.AGENT,
+                AuditActorType.USER,
                 principal.userId(),
                 AUDIT_APPROVAL_REQUESTED,
                 "APPROVAL",
