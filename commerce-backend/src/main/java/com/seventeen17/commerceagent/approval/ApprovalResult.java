@@ -18,7 +18,9 @@ public record ApprovalResult(
         String riskReason,
         ApprovalStatus status,
         String decidedBy,
-        Instant decidedAt) {
+        Instant decidedAt,
+        Instant requestedAt,
+        Instant expiresAt) {
 
     static ApprovalResult from(ApprovalRequest request) {
         return new ApprovalResult(
@@ -30,6 +32,8 @@ public record ApprovalResult(
                 request.getReasonCode(),
                 request.getStatus(),
                 request.getDecidedBy(),
-                request.getDecidedAt());
+                request.getDecidedAt(),
+                request.getCreatedAt(),
+                request.getExpiresAt());
     }
 }
