@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.agent.routing import Node, route_after_eligibility
-from app.agent.state import AgentState, RunStatus
+from app.agent.state import AgentState, ApprovalSnapshot, RunStatus, advance
 from app.api.runs import ResumeRunRequest, _verify_waiting_approval
 from app.clients.auth import AuthContext
 from app.clients.commerce_client import CommerceCall
@@ -206,23 +206,21 @@ async def test_pending_approval_does_not_claim_or_advance_the_run() -> None:
 
 
 def test_fresh_eligibility_drift_after_resume_safe_stops_instead_of_writing() -> None:
-    state = waiting_state().model_copy(
-        update={
-            "approval": {
-                "approval_request_id": "approval-001",
-                "status": "APPROVED",
-                "run_id": RUN_ID,
-                "order_id": "order-001",
-                "action_type": "REFUND_ONLY",
-                "amount": Decimal("399.00"),
-                "binding_verified": True,
-            },
-            "eligibility": waiting_state().eligibility.model_copy(
-                update={"max_refund_amount": Decimal("400.00")}
-            ),
-            "status": RunStatus.RUNNING,
-        }
+    base = waiting_state()
+    eligibility = base.eligibility
+    assert eligibility is not None
+    checked = advance(
+        base,
+        approval=ApprovalSnapshot(
+            approval_request_id="approval-001",
+            status="APPROVED",
+            run_id=RUN_ID,
+            order_id="order-001",
+            action_type="REFUND_ONLY",
+            amount=Decimal("399.00"),
+            binding_verified=True,
+        ),
+        eligibility=eligibility.model_copy(update={"max_refund_amount": Decimal("400.00")}),
+        status=RunStatus.RUNNING,
     )
-    # Revalidate because model_copy intentionally bypasses validation in production code.
-    checked = AgentState.model_validate(state.model_dump())
     assert route_after_eligibility(checked) is Node.SAFE_STOP
