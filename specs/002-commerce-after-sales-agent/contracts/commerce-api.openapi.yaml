@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.7
+  version: 0.2.8
   description: |
     ## Write-path idempotency (T021)
 
@@ -597,7 +597,11 @@ components:
             else and you get 400/422, not a smaller refund.
         approvalRequestId:
           type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
+          description: >-
+            Optional approval locator. When current eligibility requires human approval, Java owner-scopes the
+            ApprovalRequest and requires current status APPROVED plus an exact run/order/action/amount binding
+            before commit. When current eligibility does not require approval, a non-null reference is rejected;
+            the id is never a bearer token.
         runId:
           type: string
           format: uuid
@@ -634,7 +638,11 @@ components:
             but no rule or state depends on it.
         approvalRequestId:
           type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
+          description: >-
+            Optional approval locator. When current eligibility requires human approval, Java owner-scopes the
+            ApprovalRequest and requires current status APPROVED plus an exact run/order/action/amount binding
+            before commit. When current eligibility does not require approval, a non-null reference is rejected;
+            the id is never a bearer token.
         runId: { type: string }
     ReturnResult:
       type: object
