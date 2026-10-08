@@ -116,7 +116,7 @@ class ApprovalWriteBindingIntegrationTest {
                                 RUN_ID)));
 
         assertEquals(ErrorCode.APPROVAL_CONFLICT, failure.getErrorCode());
-        assertEquals(0, count("commerce.refund_requests", "t054-cross-run-order"));
+        assertEquals(0, countRefunds("t054-cross-run-order"));
     }
 
     @Test
@@ -170,7 +170,7 @@ class ApprovalWriteBindingIntegrationTest {
                                 RUN_ID)));
 
         assertEquals(ErrorCode.APPROVAL_CONFLICT, failure.getErrorCode());
-        assertEquals(0, count("commerce.return_requests", "t054-cross-action-order"));
+        assertEquals(0, countReturns("t054-cross-action-order"));
     }
 
     private void seedRefundOrder(String orderId) {
@@ -239,9 +239,15 @@ class ApprovalWriteBindingIntegrationTest {
         approvalRepository.saveAndFlush(approval);
     }
 
-    private int count(String table, String orderId) {
+    private int countRefunds(String orderId) {
         Integer value = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM " + table + " WHERE order_id = ?", Integer.class, orderId);
+                "SELECT count(*) FROM commerce.refund_requests WHERE order_id = ?", Integer.class, orderId);
+        return value == null ? 0 : value;
+    }
+
+    private int countReturns(String orderId) {
+        Integer value = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM commerce.return_requests WHERE order_id = ?", Integer.class, orderId);
         return value == null ? 0 : value;
     }
 
