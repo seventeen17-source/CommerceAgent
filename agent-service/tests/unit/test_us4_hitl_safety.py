@@ -80,7 +80,7 @@ def test_resume_request_cannot_forge_approval_status_or_role() -> None:
         ResumeRunRequest.model_validate(
             {
                 "approvalRequestId": "approval-001",
-                "approval_status": "APPROVED",
+                "approvalStatus": "APPROVED",
             }
         )
 
