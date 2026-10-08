@@ -1,0 +1,228 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+from uuid import UUID
+
+import pytest
+from fastapi import HTTPException
+
+from app.agent.routing import Node, route_after_eligibility
+from app.agent.state import AgentState, RunStatus
+from app.api.runs import ResumeRunRequest, _verify_waiting_approval
+from app.clients.auth import AuthContext
+from app.clients.commerce_client import CommerceCall
+from app.clients.models import ApprovalResult
+from app.security.dependencies import AuthenticatedCall
+from app.trace.checkpoint import RunRecord
+
+
+RUN_ID = UUID("54000000-0000-4000-8000-000000000001")
+
+
+def waiting_state() -> AgentState:
+    return AgentState.model_validate(
+        {
+            "run_id": str(RUN_ID),
+            "principal": {"user_id": "customer-001", "role": "CUSTOMER"},
+            "user_request": "高风险退款",
+            "intent": "REFUND_REQUEST",
+            "resolved_order_id": "order-001",
+            "eligibility": {
+                "eligible": True,
+                "allowed_action": "REFUND_ONLY",
+                "max_refund_amount": "399.00",
+                "approval_required": True,
+                "rule_code": "HIGH_VALUE_REFUND",
+                "rule_version": 1,
+                "reason_codes": ["APPROVAL_REQUIRED_BY_AMOUNT"],
+            },
+            "approval": {"approval_request_id": "approval-001", "status": "PENDING"},
+            "status": "WAITING_APPROVAL",
+        }
+    )
+
+
+def waiting_record() -> RunRecord:
+    state = waiting_state()
+    return RunRecord(
+        run_id=RUN_ID,
+        user_id="customer-001",
+        status=RunStatus.WAITING_APPROVAL,
+        version=1,
+        intent=state.intent,
+        resolved_order_id=state.resolved_order_id,
+        current_node=Node.WAITING_APPROVAL.value,
+        next_action=None,
+        step_count=state.step_count,
+        retry_count=state.retry_count,
+        state=state,
+        model_name="test-model",
+        prompt_version="t054-test",
+        started_at=datetime(2026, 10, 8, tzinfo=UTC),
+    )
+
+
+def approval(**overrides: Any) -> ApprovalResult:
+    payload: dict[str, Any] = {
+        "approvalRequestId": "approval-001",
+        "runId": str(RUN_ID),
+        "orderId": "order-001",
+        "actionType": "REFUND_ONLY",
+        "amount": "399.00",
+        "riskReason": "APPROVAL_REQUIRED_BY_AMOUNT",
+        "status": "APPROVED",
+        "decidedBy": "approver-001",
+        "decidedAt": "2026-10-08T08:05:00Z",
+        "requestedAt": "2026-10-08T08:00:00Z",
+        "expiresAt": "2026-10-09T08:00:00Z",
+    }
+    payload.update(overrides)
+    return ApprovalResult.model_validate(payload)
+
+
+class ApprovalClient:
+    def __init__(self, result: ApprovalResult) -> None:
+        self.result = result
+        self.calls: list[str] = []
+
+    async def get_approval(self, auth: AuthContext, approval_request_id: str) -> CommerceCall[ApprovalResult]:
+        self.calls.append(approval_request_id)
+        return CommerceCall(value=self.result, trace_id="trace-approval-001", status_code=200)
+
+
+class CheckpointStore:
+    def __init__(self, record: RunRecord) -> None:
+        self.record = record
+        self.saved_state: AgentState | None = None
+
+    def checkpoint_state(self, run_id: UUID, **kwargs: Any) -> RunRecord:
+        self.saved_state = kwargs["state"]
+        self.record = self.record.model_copy(
+            update={
+                "version": self.record.version + 1,
+                "state": self.saved_state,
+                "current_node": kwargs["current_node"],
+                "next_action": kwargs["next_action"],
+            }
+        )
+        return self.record
+
+
+def authenticated_call() -> AuthenticatedCall:
+    state = waiting_state()
+    return AuthenticatedCall(
+        auth=AuthContext(token="header.payload.signature"),  # noqa: S106 -- fixture only
+        principal=state.principal,
+    )
+
+
+@pytest.mark.asyncio
+async def test_exact_approved_binding_is_checkpointed_as_verified_before_resume() -> None:
+    record = waiting_record()
+    store = CheckpointStore(record)
+    client = ApprovalClient(approval())
+
+    refreshed = await _verify_waiting_approval(
+        store=store,  # type: ignore[arg-type]
+        record=record,
+        client=client,  # type: ignore[arg-type]
+        call=authenticated_call(),
+        body=ResumeRunRequest(approval_request_id="approval-001"),
+    )
+
+    state = refreshed.to_state()
+    assert state is not None
+    assert state.approval is not None
+    assert state.approval.binding_verified is True
+    assert state.approval.status == "APPROVED"
+    assert state.approval.run_id == RUN_ID
+    assert state.approval.amount == Decimal("399.00")
+    assert client.calls == ["approval-001"]
+
+    # A fresh Java eligibility snapshot still has to match the verified approval before a write.
+    assert route_after_eligibility(state) is Node.REFUND_WRITE
+
+
+@pytest.mark.asyncio
+async def test_caller_cannot_swap_the_checkpointed_approval_id() -> None:
+    record = waiting_record()
+    store = CheckpointStore(record)
+    client = ApprovalClient(approval())
+
+    with pytest.raises(HTTPException) as caught:
+        await _verify_waiting_approval(
+            store=store,  # type: ignore[arg-type]
+            record=record,
+            client=client,  # type: ignore[arg-type]
+            call=authenticated_call(),
+            body=ResumeRunRequest(approval_request_id="approval-from-another-run"),
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.detail == "APPROVAL_REFERENCE_MISMATCH"
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cross_run_authoritative_approval_is_rejected() -> None:
+    record = waiting_record()
+    store = CheckpointStore(record)
+    client = ApprovalClient(approval(runId="54000000-0000-4000-8000-000000000099"))
+
+    with pytest.raises(HTTPException) as caught:
+        await _verify_waiting_approval(
+            store=store,  # type: ignore[arg-type]
+            record=record,
+            client=client,  # type: ignore[arg-type]
+            call=authenticated_call(),
+            body=None,
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.detail == "APPROVAL_BINDING_MISMATCH"
+    assert store.saved_state is None
+
+
+@pytest.mark.asyncio
+async def test_pending_approval_does_not_claim_or_advance_the_run() -> None:
+    record = waiting_record()
+    store = CheckpointStore(record)
+    client = ApprovalClient(approval(status="PENDING", decidedBy=None, decidedAt=None))
+
+    with pytest.raises(HTTPException) as caught:
+        await _verify_waiting_approval(
+            store=store,  # type: ignore[arg-type]
+            record=record,
+            client=client,  # type: ignore[arg-type]
+            call=authenticated_call(),
+            body=None,
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.detail == "APPROVAL_PENDING"
+    assert store.saved_state is None
+
+
+def test_fresh_eligibility_drift_after_resume_safe_stops_instead_of_writing() -> None:
+    state = waiting_state().model_copy(
+        update={
+            "approval": {
+                "approval_request_id": "approval-001",
+                "status": "APPROVED",
+                "run_id": RUN_ID,
+                "order_id": "order-001",
+                "action_type": "REFUND_ONLY",
+                "amount": Decimal("399.00"),
+                "binding_verified": True,
+            },
+            "eligibility": waiting_state().eligibility.model_copy(
+                update={"max_refund_amount": Decimal("400.00")}
+            ),
+            "status": RunStatus.RUNNING,
+        }
+    )
+    # Revalidate because model_copy intentionally bypasses validation in production code.
+    checked = AgentState.model_validate(state.model_dump())
+    assert route_after_eligibility(checked) is Node.SAFE_STOP
