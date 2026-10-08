@@ -215,6 +215,56 @@ public class ApprovalService {
         return true;
     }
 
+    /**
+     * Final Java authorization boundary for a protected refund/return write.
+     *
+     * <p>An approval id is only a locator. This method owner-scopes the read, checks the current
+     * terminal status, and binds the approval to the exact run/order/action/amount proposed by the
+     * write. Python performs the same checks earlier for orchestration, but this method is the
+     * compensating control that still holds if the Agent is stale, buggy, or bypassed.
+     */
+    @Transactional
+    public ApprovalRequest requireApprovedForWrite(
+            CommercePrincipal principal,
+            String approvalId,
+            String runId,
+            String orderId,
+            AllowedAction action,
+            BigDecimal amount) {
+        requireCustomer(principal);
+        if (approvalId == null || approvalId.isBlank()) {
+            throw new BusinessException(ErrorCode.APPROVAL_REQUIRED);
+        }
+
+        ApprovalRequest approval = approvalRepository
+                .findByIdAndUserIdForUpdate(approvalId, principal.userId())
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.APPROVAL_NOT_FOUND,
+                        "Approval request was not found or is not accessible to the authenticated user"));
+
+        if (approval.getStatus() == ApprovalStatus.DENIED) {
+            throw new BusinessException(ErrorCode.APPROVAL_DENIED);
+        }
+        if (approval.getStatus() == ApprovalStatus.EXPIRED
+                || (approval.getStatus() == ApprovalStatus.PENDING
+                        && !clock.instant().isBefore(approval.getExpiresAt()))) {
+            throw new BusinessException(ErrorCode.APPROVAL_EXPIRED);
+        }
+        if (approval.getStatus() == ApprovalStatus.PENDING) {
+            throw new BusinessException(ErrorCode.APPROVAL_REQUIRED);
+        }
+        if (approval.getStatus() != ApprovalStatus.APPROVED) {
+            throw new BusinessException(
+                    ErrorCode.APPROVAL_CONFLICT, "Approval status is not usable for a protected write");
+        }
+        if (!approval.binds(runId, orderId, action, amount)) {
+            throw new BusinessException(
+                    ErrorCode.APPROVAL_CONFLICT,
+                    "Approval does not bind the proposed run/order/action/amount");
+        }
+        return approval;
+    }
+
     private static String requireExactApprovalProposal(
             CreateApprovalRequest request, EligibilityDecision decision) {
         if (!decision.eligible()) {
