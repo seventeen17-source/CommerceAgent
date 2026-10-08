@@ -42,6 +42,7 @@ public class ApprovalService {
 
     private static final String AUDIT_APPROVAL_REQUESTED = "APPROVAL_REQUESTED";
     private static final String AUDIT_APPROVAL_DECIDED = "APPROVAL_DECIDED";
+    private static final String AUDIT_APPROVAL_EXPIRED = "APPROVAL_EXPIRED";
 
     private final ApprovalRequestRepository approvalRepository;
     private final EligibilityService eligibilityService;
@@ -112,14 +113,15 @@ public class ApprovalService {
         return ApprovalResult.from(saved);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ApprovalResult getOwnedApproval(CommercePrincipal principal, String approvalId) {
         requireCustomer(principal);
         ApprovalRequest approval = approvalRepository
-                .findByIdAndUserId(approvalId, principal.userId())
+                .findByIdAndUserIdForUpdate(approvalId, principal.userId())
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.APPROVAL_NOT_FOUND,
                         "Approval request was not found or is not accessible to the authenticated user"));
+        expireIfDue(approval, clock.instant());
         return ApprovalResult.from(approval);
     }
 
@@ -132,7 +134,7 @@ public class ApprovalService {
         return rows.stream().map(ApprovalResult::from).toList();
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = BusinessException.class)
     public ApprovalResult decide(
             CommercePrincipal principal, String approvalId, ApprovalDecision decision) {
         ApprovalAuthorization.requireApprover(principal);
@@ -158,7 +160,10 @@ public class ApprovalService {
         }
 
         Instant now = clock.instant();
-        if (!now.isBefore(approval.getExpiresAt())) {
+        if (expireIfDue(approval, now)) {
+            // BusinessException is deliberately no-rollback for this method: the 409 tells the
+            // caller the decision was refused while the EXPIRED transition remains an authoritative
+            // fact instead of leaving a stale PENDING row behind.
             throw new BusinessException(
                     ErrorCode.APPROVAL_EXPIRED,
                     "The approval request has passed its expiresAt boundary and cannot be decided");
@@ -182,6 +187,24 @@ public class ApprovalService {
                 auditMetadata(saved)));
 
         return ApprovalResult.from(saved);
+    }
+
+    private boolean expireIfDue(ApprovalRequest approval, Instant now) {
+        if (approval.getStatus() != ApprovalStatus.PENDING || now.isBefore(approval.getExpiresAt())) {
+            return false;
+        }
+        approval.expire(now);
+        ApprovalRequest saved = approvalRepository.saveAndFlush(approval);
+        auditWriter.writeBusinessEvent(new AuditEvent(
+                AuditActorType.SYSTEM,
+                "commerce-backend",
+                AUDIT_APPROVAL_EXPIRED,
+                "APPROVAL",
+                saved.getId(),
+                UUID.fromString(saved.getRunId()),
+                ApprovalStatus.EXPIRED.name(),
+                auditMetadata(saved)));
+        return true;
     }
 
     private static String requireExactApprovalProposal(
