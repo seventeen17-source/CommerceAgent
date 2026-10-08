@@ -408,7 +408,11 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             requested_amount=snapshot.max_refund_amount,
             approval_request_id=(
                 None
-                if state.approval is None or not state.approval.binding_verified
+                if (
+                    state.approval is None
+                    or not state.approval.binding_verified
+                    or not snapshot.approval_required
+                )
                 else state.approval.approval_request_id
             ),
         )
