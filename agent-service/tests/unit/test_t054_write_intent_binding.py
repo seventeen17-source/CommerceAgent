@@ -10,7 +10,7 @@ from app.agent.execute_write import (
     refund_write_intent,
     return_write_intent,
 )
-from app.agent.state import AgentState, ApprovalSnapshot, WriteIntent, advance
+from app.agent.state import AgentState, ApprovalSnapshot, advance
 
 
 RUN_ID = UUID("54000000-0000-4000-8000-000000000001")
