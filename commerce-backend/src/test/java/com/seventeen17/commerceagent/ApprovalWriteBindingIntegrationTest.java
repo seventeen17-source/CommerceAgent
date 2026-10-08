@@ -139,6 +139,33 @@ class ApprovalWriteBindingIntegrationTest {
     }
 
     @Test
+    void approvedRefundForAnotherAmountCannotUnlockThisRefund() {
+        seedRefundOrder("t054-cross-amount-order");
+        seedApproved(
+                "t054-cross-amount-approval",
+                RUN_ID,
+                "t054-cross-amount-order",
+                AllowedAction.REFUND_ONLY,
+                new BigDecimal("399.00"),
+                "T054-REFUND");
+
+        BusinessException failure = assertThrows(
+                BusinessException.class,
+                () -> refundService.createRefund(
+                        OWNER,
+                        "t054crossamount",
+                        new RefundCommand(
+                                "t054-cross-amount-order",
+                                "STALLED_LOGISTICS",
+                                null,
+                                "t054-cross-amount-approval",
+                                RUN_ID)));
+
+        assertEquals(ErrorCode.APPROVAL_CONFLICT, failure.getErrorCode());
+        assertEquals(0, countRefunds("t054-cross-amount-order"));
+    }
+
+    @Test
     void exactApprovedReturnRefundBindingUnlocksTheReturnWrite() {
         seedDeliveredReturnRefundOrder("t054-return-order");
         seedApproved(
