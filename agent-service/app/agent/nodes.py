@@ -406,6 +406,11 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             order_id=state.resolved_order_id,
             reason_code=US1_ELIGIBILITY_REASON_CODE,
             requested_amount=snapshot.max_refund_amount,
+            approval_request_id=(
+                None
+                if state.approval is None or not state.approval.binding_verified
+                else state.approval.approval_request_id
+            ),
         )
 
         # The callback T031 calls before its first Tool call. Whatever it returns is the state that
@@ -467,6 +472,11 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             state,
             order_id=state.resolved_order_id,
             reason_code=US1_ELIGIBILITY_REASON_CODE,
+            approval_request_id=(
+                None
+                if state.approval is None or not state.approval.binding_verified
+                else state.approval.approval_request_id
+            ),
         )
 
         persisted = state
