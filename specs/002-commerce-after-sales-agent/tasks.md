@@ -110,7 +110,7 @@
 
 - [ ] T049 [P] [US4] 编写 Approval 状态迁移/Auth/Binding Java Test：`PENDING → APPROVED|DENIED|EXPIRED`、终态不可逆、run/order/action/amount binding、non-approver denial。
 - [ ] T050 [P] [US4] 编写 Python HITL Test，证明 Agent 不能 self-approve、伪造 approval state 或使用其他 run 的 approval id。
-- [ ] T051 [US4] 新建 `commerce.approval_requests` schema 与 Entity/Repository：`V005__approval_schema.sql`、`approval/`；同步扩展 T014 fixture reset 清理 approval state。
+- [ ] T051 [US4] 新建 `commerce.approval_requests` schema 与 Entity/Repository：**`V006__approval_schema.sql`**、`approval/`；同步扩展 T014 fixture reset 清理 approval state。→ **动手前已纠正一处"计划 vs 事实"冲突（2026-10-07 查证）**：任务原文写 `V005__approval_schema.sql`，但 **`V005` 已被 US2 的 T040 占用**（`V005__return_deadline.sql`：退货截止日冻结 + `return_method`），版本号重复会让 **Flyway 在启动时直接失败** —— 所以实际迁移必须是 **`V006__approval_schema.sql`**。这是"写任务时该号还空着、文档过期后以代码为准"的一例 ✓。**另外两条实现要求（来自 US4 的语义，不是可选项）**：① 表必须含 **run / order / action / amount 四元绑定列**（T049 的不变量）——审批若只存一句 `approved` 而不存"**对什么** approved"，就只是一句状态而不是一份授权；② `fixture reset` 的清理清单必须把 approval 表加进去，照 T042/T048 的教训（**重置即回到已知基线**，运行产生的写入结果必须一起清掉，否则"重置后重跑同一用例"结论不可比）✓。
 - [ ] T052 [US4] 实现 Approval Create/List/Decision API；List/Decision 要求 `APPROVER` role 并写 Audit。
 - [ ] T053 [US4] 实现 `request_human_approval` Tool，返回权威 `approvalRequestId`，并进入 `WAITING_APPROVAL`；Agent 不得生成 approval token/status。
 - [ ] T054 [US4] 实现 owner-authorized Agent Resume；恢复前重新读取 Java Approval 状态并验证 run/order/action/amount binding。
