@@ -27,6 +27,7 @@ from app.agent.routing import (
     route_after_decision,
     route_after_eligibility,
     route_after_execute,
+    route_after_request_approval,
     route_after_resolve_order,
     route_after_understand,
     route_after_write,
@@ -77,6 +78,7 @@ _ROUTERS: Final[dict[Node, Callable[[AgentState, Decision | None], Node]]] = {
     Node.DECIDE_EVIDENCE: route_after_decision,
     Node.EXECUTE_EVIDENCE: route_after_execute,
     Node.CHECK_ELIGIBILITY: route_after_eligibility,
+    Node.REQUEST_APPROVAL: route_after_request_approval,
     Node.REFUND_WRITE: route_after_write,
     Node.RETURN_WRITE: route_after_write,
 }
@@ -97,6 +99,7 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
     Node.EXECUTE_EVIDENCE: frozenset({Node.DECIDE_EVIDENCE, Node.EXECUTE_EVIDENCE, Node.SAFE_STOP}),
     Node.CHECK_ELIGIBILITY: frozenset(
         {
+            Node.REQUEST_APPROVAL,
             Node.REFUND_WRITE,
             Node.RETURN_WRITE,
             Node.CHECK_ELIGIBILITY,
@@ -104,6 +107,7 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
             Node.SAFE_STOP,
         }
     ),
+    Node.REQUEST_APPROVAL: frozenset({Node.WAITING_APPROVAL, Node.SAFE_STOP, Node.FINALIZE}),
     Node.REFUND_WRITE: frozenset({Node.VERIFY, Node.FINALIZE, Node.SAFE_STOP}),
     # T041: the return write leaves through the same doors as the refund write -- verification, a
     # quiet finish, or a refusal. It has no money to lose, but it still must never finish on the
@@ -111,9 +115,12 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
     Node.RETURN_WRITE: frozenset({Node.VERIFY, Node.FINALIZE, Node.SAFE_STOP}),
 }
 
-#: Nodes that end one invocation of the graph. ``waiting_user`` and ``safe_stop`` also end it: a
+#: Nodes that end one invocation of the graph. ``waiting_user`` / ``waiting_approval`` and
+#: ``safe_stop`` also end it: a
 #: waiting run is resumed later by the API, and a refused run must not quietly continue.
-_TERMINAL: Final[frozenset[Node]] = frozenset({Node.FINALIZE, Node.WAITING_USER, Node.SAFE_STOP})
+_TERMINAL: Final[frozenset[Node]] = frozenset(
+    {Node.FINALIZE, Node.WAITING_USER, Node.WAITING_APPROVAL, Node.SAFE_STOP}
+)
 
 
 def _edge(router: Callable[[AgentState, Decision | None], Node]) -> Callable[[GraphState], Node]:
