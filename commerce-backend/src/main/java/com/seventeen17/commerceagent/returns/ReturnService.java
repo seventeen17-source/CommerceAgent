@@ -1,5 +1,7 @@
 package com.seventeen17.commerceagent.returns;
 
+import com.seventeen17.commerceagent.approval.ApprovalRequest;
+import com.seventeen17.commerceagent.approval.ApprovalService;
 import com.seventeen17.commerceagent.audit.AuditActorType;
 import com.seventeen17.commerceagent.audit.AuditEvent;
 import com.seventeen17.commerceagent.audit.AuditWriter;
@@ -75,6 +77,7 @@ public class ReturnService {
     private final AfterSalesRuleRepository ruleRepository;
     private final LogisticsService logisticsService;
     private final ReturnRequestRepository returnRequestRepository;
+    private final ApprovalService approvalService;
     private final AuditWriter auditWriter;
 
     public ReturnService(
@@ -84,6 +87,7 @@ public class ReturnService {
             AfterSalesRuleRepository ruleRepository,
             LogisticsService logisticsService,
             ReturnRequestRepository returnRequestRepository,
+            ApprovalService approvalService,
             AuditWriter auditWriter) {
         this.orderService = orderService;
         this.orderRepository = orderRepository;
@@ -91,6 +95,7 @@ public class ReturnService {
         this.ruleRepository = ruleRepository;
         this.logisticsService = logisticsService;
         this.returnRequestRepository = returnRequestRepository;
+        this.approvalService = approvalService;
         this.auditWriter = auditWriter;
     }
 
@@ -104,8 +109,6 @@ public class ReturnService {
     public ReturnResult createReturn(CommercePrincipal principal, String idempotencyKey, ReturnCommand command) {
         requireCustomerCapability(principal);
         String key = requireValidIdempotencyKey(idempotencyKey);
-        requireReturnActionIsSupportedInThisVersion(command);
-
         // 订单行锁：ownership 写在这条查询自己的 WHERE 里，因此"不是你的"与"不存在"在这里就已经不可区分。
         Order order = orderService.requireOwnedOrderForUpdate(principal, command.orderId());
 
@@ -123,7 +126,7 @@ public class ReturnService {
 
         // 写前重校验：结论必须来自当下的权威事实，而不是上游传下来的快照。
         EligibilityDecision decision = eligibilityService.evaluate(principal, command.orderId());
-        requireReturnAuthorized(decision);
+        String approvalRequestId = requireReturnAuthorized(principal, command, decision);
         Instant returnDeadline = frozenReturnDeadline(principal, command.orderId(), decision);
 
         ReturnRequest request = ReturnRequest.create(
@@ -134,8 +137,7 @@ public class ReturnService {
                 command.returnMethod(),
                 key,
                 decision.ruleCode(),
-                // V1 没有权威审批记录可绑定；带审批引用的请求已在前面被拒绝，因此这里恒为 null。
-                null,
+                approvalRequestId,
                 command.runId(),
                 returnDeadline);
 
@@ -242,19 +244,6 @@ public class ReturnService {
         return idempotencyKey;
     }
 
-    /**
-     * V1 无法校验任何审批引用，因此带审批引用的请求一律拒绝。
-     *
-     * <p>与退款侧同样的理由：把无法验证的 {@code approvalRequestId} 原样存进退货行，会让这张表里出现"看起来
-     * 已获批准"的记录，而没有任何权威来源能证明它。宁可拒绝，也不留一条日后被误读的证据。
-     */
-    private static void requireReturnActionIsSupportedInThisVersion(ReturnCommand command) {
-        if (command.approvalRequestId() != null) {
-            throw new BusinessException(
-                    ErrorCode.INVALID_PARAMETER,
-                    "This version cannot validate an approval reference, so it must not be presented");
-        }
-    }
 
     /**
      * 幂等重放判断。
@@ -277,7 +266,8 @@ public class ReturnService {
         boolean sameOrder = request.getOrderId().equals(command.orderId());
         boolean sameReason = request.getReasonCode().equals(command.reasonCode());
         boolean sameMethod = Objects.equals(request.getReturnMethod(), command.returnMethod());
-        if (!sameOrder || !sameReason || !sameMethod) {
+        boolean sameApproval = Objects.equals(request.getApprovalRequestId(), command.approvalRequestId());
+        if (!sameOrder || !sameReason || !sameMethod || !sameApproval) {
             throw new BusinessException(
                     ErrorCode.IDEMPOTENCY_CONFLICT,
                     "This Idempotency-Key was already used for a different return request");
@@ -295,16 +285,27 @@ public class ReturnService {
      * <p>注意 US2 守卫（已签收订单不得被授予直接退款）走的是 {@code DENY} 分支 → {@code ELIGIBILITY_DENIED}：
      * 一张已签收订单即使被某条规则写成 {@code REFUND_ONLY}，也无法在这里拿到退货之外的授权。
      */
-    private static void requireReturnAuthorized(EligibilityDecision decision) {
+    private String requireReturnAuthorized(
+            CommercePrincipal principal, ReturnCommand command, EligibilityDecision decision) {
         if (decision.eligible()
                 && (decision.allowedAction() == AllowedAction.RETURN
                         || decision.allowedAction() == AllowedAction.RETURN_REFUND)) {
-            if (decision.approvalRequired()) {
-                throw new BusinessException(
-                        ErrorCode.APPROVAL_REQUIRED,
-                        "Eligible, but an authoritative approval is required before this return may be written");
+            if (!decision.approvalRequired()) {
+                if (command.approvalRequestId() != null) {
+                    throw new BusinessException(
+                            ErrorCode.INVALID_PARAMETER,
+                            "approvalRequestId is not accepted when current eligibility does not require approval");
+                }
+                return null;
             }
-            return;
+            ApprovalRequest approval = approvalService.requireApprovedForWrite(
+                    principal,
+                    command.approvalRequestId(),
+                    command.runId(),
+                    command.orderId(),
+                    decision.allowedAction(),
+                    decision.maxRefundAmount());
+            return approval.getId();
         }
         if (decision.allowedAction() == AllowedAction.MANUAL_REVIEW) {
             throw new BusinessException(
