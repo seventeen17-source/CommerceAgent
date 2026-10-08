@@ -61,7 +61,7 @@ public class ReturnRequest {
     @Column(name = "eligibility_rule_code", length = 100, nullable = false, updatable = false)
     private String eligibilityRuleCode;
 
-    /** V1 恒为 NULL：还没有权威审批记录（US4 / T049+）。列先存在，将来加绑定不必改历史。 */
+    /** 授权该高风险退货动作的权威审批引用；无需审批的退货为 null。 */
     @Column(name = "approval_request_id", length = 64, updatable = false)
     private String approvalRequestId;
 
