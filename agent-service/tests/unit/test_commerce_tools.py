@@ -215,6 +215,74 @@ async def test_eligibility_tool_rejects_empty_reason_before_http_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_request_human_approval_sends_only_the_exact_proposal_and_wraps_authority() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            201,
+            json={
+                "approvalRequestId": "approval-001",
+                "runId": "52000000-0000-4000-8000-000000000001",
+                "orderId": "order-001",
+                "actionType": "REFUND_ONLY",
+                "amount": "399.00",
+                "riskReason": "APPROVAL_REQUIRED_BY_AMOUNT",
+                "status": "PENDING",
+                "decidedBy": None,
+                "decidedAt": None,
+                "requestedAt": "2026-10-08T08:00:00Z",
+                "expiresAt": "2026-10-09T08:00:00Z",
+            },
+            headers={TRACE_ID_HEADER: "java-trace-approval1"},
+        )
+
+    async with _client(handler) as client:
+        result = await CommerceTools(client=client, auth=_AUTH).request_human_approval(
+            run_id="52000000-0000-4000-8000-000000000001",
+            order_id="order-001",
+            action_type="REFUND_ONLY",
+            amount=__import__("decimal").Decimal("399.00"),
+            risk_reason="APPROVAL_REQUIRED_BY_AMOUNT",
+        )
+
+    assert result.success is True
+    assert result.data is not None
+    assert result.data.approval_request_id == "approval-001"
+    assert result.data.status == "PENDING"
+    body = seen[0].content.decode()
+    assert '"status"' not in body
+    assert '"decidedBy"' not in body
+    assert '"runId":"52000000-0000-4000-8000-000000000001"' in body
+    assert '"amount":"399.00"' in body
+
+
+@pytest.mark.asyncio
+async def test_request_human_approval_timeout_is_unknown_and_not_blind_retryable() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    async with _client(handler) as client:
+        result = await CommerceTools(client=client, auth=_AUTH).request_human_approval(
+            run_id="52000000-0000-4000-8000-000000000001",
+            order_id="order-001",
+            action_type="REFUND_ONLY",
+            amount=__import__("decimal").Decimal("399.00"),
+            risk_reason="APPROVAL_REQUIRED_BY_AMOUNT",
+        )
+
+    assert calls == 1
+    assert result.success is False
+    assert result.error_code == "WRITE_TIMEOUT_UNKNOWN"
+    assert result.retryable is False
+
+
+@pytest.mark.asyncio
 async def test_after_sales_status_passes_exact_logical_idempotency_key() -> None:
     seen: list[httpx.Request] = []
 
