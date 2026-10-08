@@ -52,6 +52,7 @@ class ApprovalWriteBindingIntegrationTest {
     private static final Instant NOW = Instant.parse("2026-10-08T08:00:00Z");
     private static final String OWNER_ID = "t054-owner";
     private static final String APPROVER_ID = "t054-approver";
+    private static final String OTHER_ID = "t054-other";
     private static final String RUN_ID = "54000000-0000-4000-8000-000000000001";
     private static final CommercePrincipal OWNER = new CommercePrincipal(OWNER_ID, UserRole.CUSTOMER);
     private static final CommercePrincipal APPROVER = new CommercePrincipal(APPROVER_ID, UserRole.APPROVER);
@@ -136,6 +137,41 @@ class ApprovalWriteBindingIntegrationTest {
 
         assertEquals(ErrorCode.APPROVAL_CONFLICT, failure.getErrorCode());
         assertEquals(0, countRefunds("t054-cross-run-order"));
+    }
+
+    @Test
+    void anotherCustomersApprovedRecordIsConcealedAtTheFinalWrite() {
+        seedRefundOrder("t054-cross-owner-order");
+        if (userRepository.findById(OTHER_ID).isEmpty()) {
+            userRepository.saveAndFlush(User.create(OTHER_ID, OTHER_ID, UserRole.CUSTOMER));
+        }
+        ApprovalRequest approval = ApprovalRequest.pending(
+                "t054-cross-owner-approval",
+                RUN_ID,
+                "t054-cross-owner-order",
+                OTHER_ID,
+                AllowedAction.REFUND_ONLY,
+                new BigDecimal("400.00"),
+                "T054-REFUND",
+                "APPROVAL_REQUIRED_BY_AMOUNT",
+                NOW.plus(Duration.ofHours(1)));
+        approval.approve(APPROVER, NOW);
+        approvalRepository.saveAndFlush(approval);
+
+        BusinessException failure = assertThrows(
+                BusinessException.class,
+                () -> refundService.createRefund(
+                        OWNER,
+                        "t054crossowner",
+                        new RefundCommand(
+                                "t054-cross-owner-order",
+                                "STALLED_LOGISTICS",
+                                null,
+                                "t054-cross-owner-approval",
+                                RUN_ID)));
+
+        assertEquals(ErrorCode.APPROVAL_NOT_FOUND, failure.getErrorCode());
+        assertEquals(0, countRefunds("t054-cross-owner-order"));
     }
 
     @Test
