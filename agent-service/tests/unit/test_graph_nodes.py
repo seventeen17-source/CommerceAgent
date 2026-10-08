@@ -969,22 +969,25 @@ class TestLifecycleNodes:
         assert update["decision"].terminal is None
 
     @pytest.mark.asyncio
-    async def test_safe_stop_carries_the_reason_the_state_implies(self) -> None:
+    async def test_waiting_approval_requires_a_real_pending_reference(self) -> None:
         nodes = build_lifecycle_nodes()
         state = eligible_state(
-            eligibility={
-                "eligible": True,
-                "allowed_action": "REFUND_ONLY",
-                "max_refund_amount": Decimal("199.00"),
-                "approval_required": True,
-            }
+            approval={"approval_request_id": "approval-001", "status": "PENDING"}
         )
-        update = await nodes[Node.SAFE_STOP]({"state": state})
+
+        update = await nodes[Node.WAITING_APPROVAL]({"state": state})
 
         terminal = update["decision"].terminal
         assert terminal is not None
-        assert terminal.status is RunStatus.SAFE_STOP
-        assert terminal.reason is SafeStopReason.ELIGIBILITY_APPROVAL_REQUIRED
+        assert terminal.status is RunStatus.WAITING_APPROVAL
+        assert terminal.reason is None
+        assert update["state"].is_terminal is False
+
+    @pytest.mark.asyncio
+    async def test_waiting_approval_refuses_a_missing_authoritative_reference(self) -> None:
+        nodes = build_lifecycle_nodes()
+        with pytest.raises(ValueError, match="PENDING authoritative approval reference"):
+            await nodes[Node.WAITING_APPROVAL]({"state": eligible_state()})
 
     @pytest.mark.asyncio
     async def test_safe_stop_carries_the_reason_the_node_declared(self) -> None:
