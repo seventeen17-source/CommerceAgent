@@ -141,9 +141,11 @@ class ResumeRunRequest(BaseModel):
     or any synthetic approval token through this model.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    approval_request_id: str | None = Field(default=None, max_length=128)
+    approval_request_id: str | None = Field(
+        default=None, alias="approvalRequestId", max_length=128
+    )
 
 
 class AgentRunView(BaseModel):
