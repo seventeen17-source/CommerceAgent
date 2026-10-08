@@ -374,6 +374,31 @@ paths:
                 items: { $ref: '#/components/schemas/ApprovalResult' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+  /approvals/{approvalId}:
+    get:
+      summary: Re-read one authoritative approval for its owning customer
+      description: >-
+        Customer-scoped read used by Agent resume. The id is only a reference; callers must re-read
+        this record and compare runId/orderId/actionType/amount before treating APPROVED as authority.
+        Missing and cross-owner ids intentionally return the same APPROVAL_NOT_FOUND response.
+      parameters:
+        - in: path
+          name: approvalId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Authoritative approval record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalResult' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: ACCESS_DENIED for a non-customer capability.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: APPROVAL_NOT_FOUND for both missing and cross-owner approval ids.
   /approvals/{approvalId}/decision:
     post:
       summary: Authorized human decides approval
@@ -656,7 +681,7 @@ components:
       description: >-
         Authoritative approval record. Consumers must treat APPROVED as usable only together with
         the exact runId/orderId/actionType/amount binding and must re-read it before a sensitive write.
-      required: [approvalRequestId, runId, orderId, actionType, status]
+      required: [approvalRequestId, runId, orderId, actionType, status, requestedAt, expiresAt]
       properties:
         approvalRequestId: { type: string }
         runId: { type: string }
@@ -669,6 +694,11 @@ components:
           description: Java-owned forward-compatible approval status. Known V1 values are PENDING, APPROVED, DENIED, EXPIRED; consumers must fail closed on unknown values.
         decidedBy: { type: [string, 'null'] }
         decidedAt: { type: [string, 'null'], format: date-time }
+        requestedAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: V1 approval request deadline. A sensitive write still revalidates current business state even before this deadline.
     AfterSalesStatus:
       type: object
       required: [refunds, returns]
