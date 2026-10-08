@@ -169,7 +169,7 @@ class RefundIntegrationTest {
         assertEquals(OWNER_ID, refund.getUserId());
         assertEquals(RULE_CODE, refund.getEligibilityRuleCode());
         assertEquals(RUN_ID, refund.getRunId());
-        assertNull(refund.getApprovalRequestId(), "V1 恒为 null：没有可绑定的权威审批记录");
+        assertNull(refund.getApprovalRequestId(), "当前低风险 eligibility 不要求审批，因此引用必须为空");
 
         // 审计与业务写入同事务提交（T013 的 writeBusinessEvent 使用 REQUIRED），因此不会出现"审计说成功、
         // 业务回滚了"的假 SUCCESS。
@@ -369,7 +369,7 @@ class RefundIntegrationTest {
     }
 
     @Test
-    void anApprovalReferenceCannotBeAcceptedInThisVersion() {
+    void anApprovalReferenceIsRejectedWhenCurrentEligibilityDoesNotRequireApproval() {
         seedRefundableOrder("t021-order-approvalref", OWNER_ID, new BigDecimal("199.00"), Duration.ofHours(120));
 
         BusinessException failure = assertThrows(
@@ -377,7 +377,7 @@ class RefundIntegrationTest {
                 () -> refundService.createRefund(
                         OWNER, "t021-key-approvalref", command("t021-order-approvalref", null, "approval-001")));
 
-        // 无法验证的审批引用被原样存进退款行，会在表里留下"看起来已获批准"的证据。宁可拒绝。
+        // approval id 不是 bearer token：当前权威 eligibility 根本不要求审批时，额外引用反而必须拒绝。
         assertEquals(ErrorCode.INVALID_PARAMETER, failure.getErrorCode());
         assertEquals(0, refundRowCount("t021-order-approvalref"));
     }
