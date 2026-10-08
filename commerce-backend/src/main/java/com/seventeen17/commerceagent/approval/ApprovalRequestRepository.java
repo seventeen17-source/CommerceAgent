@@ -16,7 +16,12 @@ import org.springframework.data.repository.query.Param;
  */
 public interface ApprovalRequestRepository extends JpaRepository<ApprovalRequest, String> {
 
+    List<ApprovalRequest> findAllByOrderByCreatedAtDesc();
+
     List<ApprovalRequest> findByStatusOrderByCreatedAtDesc(ApprovalStatus status);
+
+    Optional<ApprovalRequest> findByRunIdAndOrderIdAndActionAndStatus(
+            String runId, String orderId, com.seventeen17.commerceagent.eligibility.AllowedAction action, ApprovalStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from ApprovalRequest a where a.id = :id")
