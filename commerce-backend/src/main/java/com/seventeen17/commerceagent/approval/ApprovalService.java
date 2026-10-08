@@ -113,6 +113,17 @@ public class ApprovalService {
     }
 
     @Transactional(readOnly = true)
+    public ApprovalResult getOwnedApproval(CommercePrincipal principal, String approvalId) {
+        requireCustomer(principal);
+        ApprovalRequest approval = approvalRepository
+                .findByIdAndUserId(approvalId, principal.userId())
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.APPROVAL_NOT_FOUND,
+                        "Approval request was not found or is not accessible to the authenticated user"));
+        return ApprovalResult.from(approval);
+    }
+
+    @Transactional(readOnly = true)
     public List<ApprovalResult> listApprovals(CommercePrincipal principal, ApprovalStatus status) {
         ApprovalAuthorization.requireApprover(principal);
         List<ApprovalRequest> rows = status == null
