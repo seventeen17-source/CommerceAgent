@@ -173,7 +173,19 @@ class ApprovalHttpIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("INVALID_PARAMETER"));
 
-        assertEquals(0, approvalRepository.count());
+        assertEquals(0, countTestApprovals());
+    }
+
+    @Test
+    void approverCannotUseTheCustomerApprovalCreateCapability() throws Exception {
+        String approverToken = tokenWithRole(APPROVER_ID, UserRole.APPROVER);
+
+        mockMvc.perform(post("/api/v1/approvals")
+                        .header("Authorization", "Bearer " + approverToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody(ORDER_ID, "REFUND_ONLY", "399.00", "APPROVAL_REQUIRED_BY_AMOUNT")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("ACCESS_DENIED"));
     }
 
     @Test
@@ -339,7 +351,7 @@ class ApprovalHttpIntegrationTest {
         String second = createApproval(token);
 
         assertEquals(first, second);
-        assertEquals(1, approvalRepository.count());
+        assertEquals(1, countTestApprovals());
     }
 
     @Test
@@ -424,6 +436,16 @@ class ApprovalHttpIntegrationTest {
                     userRepository.saveAndFlush(user);
                 },
                 () -> userRepository.saveAndFlush(User.create(userId, userId, role)));
+    }
+
+    private int countTestApprovals() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM commerce.approval_requests WHERE order_id IN (?, ?)",
+                Integer.class,
+                ORDER_ID,
+                OTHER_ORDER_ID);
+        assertNotNull(count);
+        return count;
     }
 
     private static String createBody(String orderId, String action, String amount, String riskReason) {
