@@ -33,6 +33,13 @@ public class ApprovalController {
         return approvalService.createApproval(principal, request);
     }
 
+    @GetMapping("/{approvalId}")
+    ApprovalResult getOwned(
+            @AuthenticationPrincipal CommercePrincipal principal,
+            @PathVariable String approvalId) {
+        return approvalService.getOwnedApproval(principal, approvalId);
+    }
+
     @GetMapping
     List<ApprovalResult> list(
             @AuthenticationPrincipal CommercePrincipal principal,
