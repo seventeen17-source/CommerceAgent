@@ -83,9 +83,24 @@ class FixtureLoaderIntegrationTest {
                 Map.of("traceId", "fixture-test")));
         assertNotEquals(0, auditLogRepository.count());
 
+        // T051: approval is a run-produced business fact just like refund/return state. If reset does
+        // not clear it, the next Eval run inherits a human decision from the previous world.
+        jdbcTemplate.update("""
+                INSERT INTO commerce.approval_requests
+                    (id, run_id, order_id, user_id, action, amount, status,
+                     eligibility_rule_code, reason_code, expires_at)
+                VALUES
+                    ('approval-fixture-001', 'run-fixture-001', 'order-001', 'customer-001',
+                     'REFUND_ONLY', 199.00, 'PENDING',
+                     'LOGISTICS_STALLED_REFUND', 'APPROVAL_REQUIRED_BY_AMOUNT',
+                     now() + interval '1 hour')
+                """);
+        assertEquals(1, count("SELECT COUNT(*) FROM commerce.approval_requests"));
+
         jdbcTemplate.update("UPDATE commerce.orders SET status = 'CANCELLED' WHERE id = 'order-001'");
         performReset(token);
 
+        assertEquals(0, count("SELECT COUNT(*) FROM commerce.approval_requests"));
         assertEquals(
                 "SHIPPED",
                 jdbcTemplate.queryForObject("SELECT status FROM commerce.orders WHERE id = 'order-001'", String.class));
