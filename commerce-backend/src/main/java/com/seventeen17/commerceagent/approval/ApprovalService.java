@@ -67,16 +67,15 @@ public class ApprovalService {
         EligibilityDecision decision = eligibilityService.evaluate(principal, request.orderId());
         String riskReason = requireExactApprovalProposal(request, decision);
 
+        Instant now = clock.instant();
         Optional<ApprovalRequest> existing = approvalRepository.findByRunIdAndOrderIdAndActionAndStatus(
                 request.runId().toString(),
                 request.orderId(),
                 request.actionType(),
                 ApprovalStatus.PENDING);
-        if (existing.isPresent()) {
+        if (existing.isPresent() && !expireIfDue(existing.get(), now)) {
             return replayExisting(principal, request, decision, riskReason, existing.get());
         }
-
-        Instant now = clock.instant();
         ApprovalRequest approval = ApprovalRequest.pending(
                 UUID.randomUUID().toString(),
                 request.runId().toString(),
@@ -125,13 +124,22 @@ public class ApprovalService {
         return ApprovalResult.from(approval);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<ApprovalResult> listApprovals(CommercePrincipal principal, ApprovalStatus status) {
         ApprovalAuthorization.requireApprover(principal);
-        List<ApprovalRequest> rows = status == null
-                ? approvalRepository.findAllByOrderByCreatedAtDesc()
-                : approvalRepository.findByStatusOrderByCreatedAtDesc(status);
-        return rows.stream().map(ApprovalResult::from).toList();
+
+        // Expiry is materialized lazily at an authority read/decision boundary. Loading the whole
+        // small V1 worklist first is intentional: otherwise status=EXPIRED would miss a row whose
+        // deadline passed while its persisted status was still PENDING.
+        List<ApprovalRequest> rows = approvalRepository.findAllByOrderByCreatedAtDesc();
+        Instant now = clock.instant();
+        for (ApprovalRequest row : rows) {
+            expireIfDue(row, now);
+        }
+        return rows.stream()
+                .filter(row -> status == null || row.getStatus() == status)
+                .map(ApprovalResult::from)
+                .toList();
     }
 
     @Transactional(noRollbackFor = BusinessException.class)
