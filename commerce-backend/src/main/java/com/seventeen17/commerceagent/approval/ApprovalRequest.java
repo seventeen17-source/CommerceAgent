@@ -47,7 +47,7 @@ public class ApprovalRequest {
     @Column(name = "action", length = 32, nullable = false, updatable = false)
     private AllowedAction action;
 
-    @Column(name = "amount", precision = 12, scale = 2, updatable = false)
+    @Column(name = "amount", precision = 19, scale = 2, updatable = false)
     private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)
