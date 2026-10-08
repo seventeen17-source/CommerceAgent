@@ -20,6 +20,7 @@ from app.agent.graph import CompiledGraph, build_graph
 from app.agent.nodes import (
     GraphDeps,
     PersistWriteIntent,
+    build_approval_nodes,
     build_evidence_nodes,
     build_lifecycle_nodes,
     build_read_nodes,
@@ -57,6 +58,7 @@ def build_agent_graph(
         evidence=tools,
         registry=registry,
         eligibility=tools,
+        approvals=tools,
         writes=tools,
         after_sales=tools,
         persist_intent=persist_intent,
@@ -66,6 +68,7 @@ def build_agent_graph(
         {
             **build_read_nodes(deps),
             **build_evidence_nodes(deps),
+            **build_approval_nodes(deps),
             **build_write_nodes(deps),
             **build_lifecycle_nodes(),
         }
