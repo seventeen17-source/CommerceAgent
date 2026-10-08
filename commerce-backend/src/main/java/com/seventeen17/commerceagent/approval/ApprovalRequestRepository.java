@@ -21,6 +21,8 @@ public interface ApprovalRequestRepository extends JpaRepository<ApprovalRequest
 
     List<ApprovalRequest> findByStatusOrderByCreatedAtDesc(ApprovalStatus status);
 
+    Optional<ApprovalRequest> findByIdAndUserId(String id, String userId);
+
     Optional<ApprovalRequest> findByRunIdAndOrderIdAndActionAndStatus(
             String runId, String orderId, AllowedAction action, ApprovalStatus status);
 
