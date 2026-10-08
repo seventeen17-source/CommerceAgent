@@ -294,6 +294,55 @@ class ApprovalHttpIntegrationTest {
     }
 
     @Test
+    void approverCanDenyAndTheDecisionIsAuthoritative() throws Exception {
+        seedHighRiskOrder(ORDER_ID, CUSTOMER_ID);
+        String approvalId = createApproval(token(CUSTOMER_ID));
+        String approverToken = tokenWithRole(APPROVER_ID, UserRole.APPROVER);
+
+        decide(approverToken, approvalId, "DENY")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DENIED"))
+                .andExpect(jsonPath("$.decidedBy").value(APPROVER_ID));
+
+        assertEquals("DENIED", approvalRepository.findById(approvalId).orElseThrow().getStatus().name());
+    }
+
+    @Test
+    void expiredApprovalCannotBeDecidedAndExpiryIsPersisted() throws Exception {
+        seedHighRiskOrder(ORDER_ID, CUSTOMER_ID);
+        String approvalId = createApproval(token(CUSTOMER_ID));
+        String approverToken = tokenWithRole(APPROVER_ID, UserRole.APPROVER);
+
+        jdbcTemplate.update(
+                "UPDATE commerce.approval_requests SET expires_at = ? WHERE id = ?",
+                java.sql.Timestamp.from(NOW.minusSeconds(1)),
+                approvalId);
+
+        decide(approverToken, approvalId, "APPROVE")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("APPROVAL_EXPIRED"));
+
+        assertEquals("EXPIRED", approvalRepository.findById(approvalId).orElseThrow().getStatus().name());
+        assertEquals(
+                1,
+                auditRepository
+                        .findByActionAndResourceIdOrderByCreatedAtAsc("APPROVAL_EXPIRED", approvalId)
+                        .size());
+    }
+
+    @Test
+    void replayingTheSameLiveProposalReturnsTheSameApproval() throws Exception {
+        seedHighRiskOrder(ORDER_ID, CUSTOMER_ID);
+        String token = token(CUSTOMER_ID);
+
+        String first = createApproval(token);
+        String second = createApproval(token);
+
+        assertEquals(first, second);
+        assertEquals(1, approvalRepository.count());
+    }
+
+    @Test
     void unknownApprovalDecisionReturnsNotFoundInsteadOfInternalError() throws Exception {
         String approverToken = tokenWithRole(APPROVER_ID, UserRole.APPROVER);
 
