@@ -231,6 +231,42 @@ async def test_logistics_endpoint_reuses_the_same_path_safety_rule() -> None:
     assert calls == []
 
 
+@pytest.mark.asyncio
+async def test_get_approval_is_owner_scoped_read_with_path_safety() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _json_response(
+            {
+                "approvalRequestId": "approval-001",
+                "runId": "54000000-0000-4000-8000-000000000001",
+                "orderId": "order-001",
+                "actionType": "REFUND_ONLY",
+                "amount": "399.00",
+                "riskReason": "APPROVAL_REQUIRED_BY_AMOUNT",
+                "status": "APPROVED",
+                "decidedBy": "approver-001",
+                "decidedAt": "2026-10-08T08:05:00Z",
+                "requestedAt": "2026-10-08T08:00:00Z",
+                "expiresAt": "2026-10-09T08:00:00Z",
+            }
+        )
+
+    async with _client(handler) as client:
+        call = await client.get_approval(_AUTH, "approval-001")
+
+    assert call.value.status == "APPROVED"
+    assert call.value.order_id == "order-001"
+    assert seen[0].url.path.endswith("/approvals/approval-001")
+    assert seen[0].headers["authorization"] == f"Bearer {_FAKE_JWT}"
+
+    calls_before = len(seen)
+    async with _client(handler) as client:
+        with pytest.raises(UnsafeRequestParameterError):
+            await client.get_approval(_AUTH, "../approval-other")
+    assert len(seen) == calls_before
+
 # ---- answered vs did not answer ------------------------------------------------------------
 
 
