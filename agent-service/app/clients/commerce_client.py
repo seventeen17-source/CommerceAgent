@@ -324,6 +324,21 @@ class CommerceClient:
             json_body=request.model_dump(by_alias=True, mode="json"),
         )
 
+    async def get_approval(
+        self,
+        auth: AuthContext,
+        approval_request_id: str,
+    ) -> CommerceCall[ApprovalResult]:
+        """Owner-scoped authoritative approval re-read used by T054 resume."""
+        segment = _safe_path_segment(approval_request_id, field="approval_request_id")
+        return await self._request(
+            "GET",
+            f"/approvals/{segment}",
+            auth,
+            response_model=ApprovalResult,
+            request_is_safe=True,
+        )
+
     # ---- write surface ---------------------------------------------------------------------
 
     async def create_approval(
