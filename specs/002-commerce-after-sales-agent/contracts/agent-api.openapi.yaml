@@ -91,6 +91,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 approvalRequestId:
                   type: [string, 'null']
