@@ -1,13 +1,9 @@
 """T050: the Agent must never manufacture the authority that unlocks a high-risk write.
 
-These tests intentionally stop one layer before T052-T054. At this point Python has no authority
-API to re-read, so the only safe behaviour is fail-closed: an approval-shaped value already present
-in AgentState, or an approval id supplied by a caller, must not turn approval_required into a
-write permission.
-
-T054 may later replace the safe-stop with an authoritative Java re-read + exact binding check. What
-must remain true after that change is the negative half pinned here: model/caller supplied state is
-never sufficient by itself.
+These tests pin the negative half of HITL across T050-T054: a caller may name an approval reference,
+but cannot assert status/role/binding through the resume transport, and an APPROVED-looking snapshot
+without T054's explicit authoritative binding verification must still fail closed. T054 adds the
+positive path by owner-scoped re-reading Java; it does not weaken these negative guarantees.
 """
 
 from __future__ import annotations
@@ -59,7 +55,7 @@ def test_agent_cannot_self_approve_by_putting_approved_in_its_state() -> None:
         }
     )
 
-    assert safe_stop_reason_for(state) is SafeStopReason.ELIGIBILITY_APPROVAL_REQUIRED
+    assert safe_stop_reason_for(state) is SafeStopReason.APPROVAL_STATE_UNVERIFIED
     assert route_after_eligibility(state) is Node.SAFE_STOP
 
 
@@ -97,16 +93,26 @@ def test_resume_request_cannot_forge_approval_status_or_role() -> None:
         )
 
 
-def test_agent_state_rejects_caller_invented_approval_binding_fields() -> None:
-    """Until Java supplies a typed authoritative binding, the Agent cannot smuggle one into state."""
+def test_verified_binding_marker_requires_a_complete_approved_snapshot() -> None:
+    """T054's internal marker cannot be set on a partial or merely PENDING snapshot."""
     with pytest.raises(ValidationError):
         make_state(
             approval={
                 "approval_request_id": "approval-001",
                 "status": "APPROVED",
-                "run_id": "some-run",
+                "binding_verified": True,
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        make_state(
+            approval={
+                "approval_request_id": "approval-001",
+                "status": "PENDING",
+                "run_id": uuid4(),
                 "order_id": "order-001",
-                "action": "REFUND_ONLY",
+                "action_type": "REFUND_ONLY",
                 "amount": "500.00",
+                "binding_verified": True,
             }
         )
