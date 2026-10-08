@@ -54,6 +54,8 @@ from app.clients.errors import (
 )
 from app.clients.models import (
     AfterSalesStatus,
+    ApprovalResult,
+    CreateApprovalRequest,
     CreateRefundRequest,
     CreateReturnRequest,
     CurrentPrincipal,
@@ -322,6 +324,27 @@ class CommerceClient:
         )
 
     # ---- write surface ---------------------------------------------------------------------
+
+    async def create_approval(
+        self,
+        auth: AuthContext,
+        request: CreateApprovalRequest,
+    ) -> CommerceCall[ApprovalResult]:
+        """``POST /approvals`` -- ask Java to create one authoritative PENDING approval.
+
+        This is state-changing, so a transport failure is an unknown outcome. The caller must not
+        invent an approval id or status to continue. Java makes exact replay safe for the same live
+        run/order/action proposal, but the Tool layer still surfaces the unknown result rather than
+        hiding it behind an internal retry.
+        """
+        return await self._request(
+            "POST",
+            "/approvals",
+            auth,
+            response_model=ApprovalResult,
+            request_is_safe=False,
+            json_body=request.model_dump(by_alias=True, mode="json"),
+        )
 
     async def create_refund(
         self,
