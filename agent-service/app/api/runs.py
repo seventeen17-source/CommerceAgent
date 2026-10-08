@@ -134,13 +134,11 @@ class RunInputRequest(BaseModel):
 class ResumeRunRequest(BaseModel):
     """``POST /agent/runs/{runId}/resume``.
 
-    ``approval_request_id`` is a *reference*, never an assertion. The contract is explicit that
-    resume must not trust approval status supplied by the caller, so this field is accepted for
-    contract compatibility and **deliberately not stored anywhere**: US1 has no approval record to
-    bind it to, and writing a caller's claim into ``AgentState.approval`` would turn a string a
-    client chose into evidence. Until T049+ re-reads the authoritative record from Java, a non-null
-    value here changes nothing.
-    resuming, which is useful for the audit trail and useless as authority.
+    ``approval_request_id`` is an optional *claim about the reference being resumed*, never an
+    approval assertion. For a ``WAITING_APPROVAL`` run, T054 first reads the approval id already
+    stored in the checkpoint, rejects a different caller-supplied id, and re-reads the authoritative
+    Java ApprovalRequest before the run is claimed. The caller cannot submit status, binding, role,
+    or any synthetic approval token through this model.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -586,10 +584,10 @@ async def resume_run(
 ) -> AgentRunView:
     """Resume a checkpointed run after an external decision, then advance it.
 
-    ``body.approval_request_id`` is recorded as the caller's *claim* about what it is resuming. It
-    is not authority: T049+ must re-read the authoritative approval record from Java before any
-    sensitive write. Stated here because the temptation to trust it is exactly what the contract
-    warns about, and the field's presence makes that temptation visible.
+    ``body.approval_request_id`` is only a caller claim. A ``WAITING_APPROVAL`` run is not
+    claimed until T054 has owner-scoped re-read Java's ApprovalRequest and verified the stored
+    run/order/action/amount binding. The graph then re-runs eligibility, and Java checks the same
+    approval again at the protected write boundary.
     """
     record = _owned_run(store, run_id, call)
     if record.status is RunStatus.WAITING_APPROVAL:
