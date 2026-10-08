@@ -158,14 +158,37 @@ class EligibilitySnapshot(BaseModel):
 
 
 class ApprovalSnapshot(BaseModel):
-    """Authoritative approval reference/state observed from the backend."""
+    """Approval facts observed from Java, plus whether resume verified their exact binding.
+
+    T053 stores only ``approval_request_id`` + ``PENDING``. T054 enriches the snapshot only after
+    owner-scoped re-read of Java's ApprovalRequest. ``binding_verified`` is an orchestration fact,
+    not business authority: the protected Java write re-reads the same approval again before commit.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     approval_request_id: str | None = Field(default=None, max_length=128)
-    # Owned by the Java approval state machine. Only a positively confirmed value may unlock a
-    # write; unknown/absent must never be read as approval.
+    # Owned by the Java approval state machine. Unknown/absent must never be read as approval.
     status: str | None = Field(default=None, max_length=32)
+    run_id: UUID | None = None
+    order_id: Identifier | None = None
+    action_type: str | None = Field(default=None, max_length=32)
+    amount: Decimal | None = None
+    binding_verified: bool = False
+
+    @model_validator(mode="after")
+    def validate_verified_binding(self) -> ApprovalSnapshot:
+        if not self.binding_verified:
+            return self
+        if (
+            self.approval_request_id is None
+            or self.status != "APPROVED"
+            or self.run_id is None
+            or self.order_id is None
+            or self.action_type is None
+        ):
+            raise ValueError("a verified approval binding requires APPROVED + id/run/order/action")
+        return self
 
 
 class ToolHistoryEntry(BaseModel):
