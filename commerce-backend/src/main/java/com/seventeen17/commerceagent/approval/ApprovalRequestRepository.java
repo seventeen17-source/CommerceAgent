@@ -1,5 +1,6 @@
 package com.seventeen17.commerceagent.approval;
 
+import com.seventeen17.commerceagent.eligibility.AllowedAction;
 import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
@@ -21,7 +22,7 @@ public interface ApprovalRequestRepository extends JpaRepository<ApprovalRequest
     List<ApprovalRequest> findByStatusOrderByCreatedAtDesc(ApprovalStatus status);
 
     Optional<ApprovalRequest> findByRunIdAndOrderIdAndActionAndStatus(
-            String runId, String orderId, com.seventeen17.commerceagent.eligibility.AllowedAction action, ApprovalStatus status);
+            String runId, String orderId, AllowedAction action, ApprovalStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from ApprovalRequest a where a.id = :id")
