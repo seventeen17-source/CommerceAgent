@@ -50,6 +50,7 @@ from app.agent.routing import Node
 from app.agent.runtime import RunSession, drive_graph
 from app.agent.state import (
     AgentState,
+    ApprovalSnapshot,
     RunStatus,
     VerificationStatus,
     WriteStatus,
@@ -57,6 +58,7 @@ from app.agent.state import (
 )
 from app.agent.wiring import build_agent_graph
 from app.clients.commerce_client import CommerceClient
+from app.clients.errors import CommerceApiError, CommerceTransportError, UnsafeRequestParameterError
 from app.config.settings import Settings
 from app.llm.openai_compatible import OpenAICompatibleJsonClient
 from app.security.dependencies import (
@@ -590,6 +592,15 @@ async def resume_run(
     warns about, and the field's presence makes that temptation visible.
     """
     record = _owned_run(store, run_id, call)
+    if record.status is RunStatus.WAITING_APPROVAL:
+        record = await _verify_waiting_approval(
+            store=store,
+            record=record,
+            client=_client(request),
+            call=call,
+            body=body,
+        )
+
     driver = _driver(request)
     driver.check(settings)
     resumed = _resume(
@@ -600,6 +611,95 @@ async def resume_run(
     )
     return _view(await driver.run(request, call, RunSession(store, resumed), settings))
 
+
+async def _verify_waiting_approval(
+    *,
+    store: RunStore,
+    record: RunRecord,
+    client: CommerceClient,
+    call: AuthenticatedCall,
+    body: ResumeRunRequest | None,
+) -> RunRecord:
+    """Re-establish approval authority before claiming a WAITING_APPROVAL run.
+
+    The body may repeat the approval id as a user-facing claim, but the checkpoint chooses which
+    ApprovalRequest is relevant. Java is then re-read owner-scoped, and only an exact APPROVED
+    run/order/action/amount binding is checkpointed as ``binding_verified``. Nothing here can
+    authorize the eventual write by itself; Java checks the same record again at commit time.
+    """
+    state = _payload_of(record)
+    stored = state.approval
+    if stored is None or stored.approval_request_id is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_REFERENCE_MISSING")
+
+    claimed = None if body is None else body.approval_request_id
+    if claimed is not None and claimed != stored.approval_request_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_REFERENCE_MISMATCH")
+
+    try:
+        authoritative = (
+            await client.get_approval(call.auth, stored.approval_request_id)
+        ).value
+    except UnsafeRequestParameterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_REFERENCE_INVALID"
+        ) from exc
+    except CommerceApiError as exc:
+        if exc.http_status >= 500:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="DEPENDENCY_UNAVAILABLE"
+            ) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.error_code) from exc
+    except CommerceTransportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="DEPENDENCY_UNAVAILABLE"
+        ) from exc
+
+    eligibility = state.eligibility
+    binding_matches = (
+        eligibility is not None
+        and state.resolved_order_id is not None
+        and authoritative.approval_request_id == stored.approval_request_id
+        and authoritative.run_id == state.run_id
+        and authoritative.order_id == state.resolved_order_id
+        and authoritative.action_type == eligibility.allowed_action
+        and authoritative.amount == eligibility.max_refund_amount
+    )
+    if not binding_matches:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_BINDING_MISMATCH")
+
+    if authoritative.status == "PENDING":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_PENDING")
+    if authoritative.status == "DENIED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_DENIED")
+    if authoritative.status == "EXPIRED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_EXPIRED")
+    if authoritative.status != "APPROVED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_STATUS_UNUSABLE")
+
+    verified = advance(
+        state,
+        approval=ApprovalSnapshot(
+            approval_request_id=authoritative.approval_request_id,
+            status=authoritative.status,
+            run_id=authoritative.run_id,
+            order_id=authoritative.order_id,
+            action_type=authoritative.action_type,
+            amount=authoritative.amount,
+            binding_verified=True,
+        ),
+    )
+    try:
+        return store.checkpoint_state(
+            record.run_id,
+            expected_version=record.version,
+            state=verified,
+            current_node=record.current_node or Node.WAITING_APPROVAL.value,
+            next_action=_UNDERSTAND,
+            reason_code="APPROVAL_BINDING_VERIFIED",
+        )
+    except (RunVersionConflictError, TerminalRunError, RunStoreError) as exc:
+        raise _http_error_for(exc, str(record.run_id)) from exc
 
 def _owned_run(store: RunStore, raw_run_id: str, call: AuthenticatedCall) -> RunRecord:
     """Read a run the caller owns, or raise the status that says why not.
