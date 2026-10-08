@@ -193,6 +193,31 @@ class ApprovalHttpIntegrationTest {
     }
 
     @Test
+    void ownerCanRereadExactApprovalButAnotherCustomerCannot() throws Exception {
+        seedHighRiskOrder(ORDER_ID, CUSTOMER_ID);
+        String ownerToken = token(CUSTOMER_ID);
+        String approvalId = createApproval(ownerToken);
+        String otherToken = tokenWithRole(OTHER_CUSTOMER_ID, UserRole.CUSTOMER);
+
+        mockMvc.perform(get("/api/v1/approvals/{approvalId}", approvalId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.approvalRequestId").value(approvalId))
+                .andExpect(jsonPath("$.runId").value(RUN_ID))
+                .andExpect(jsonPath("$.orderId").value(ORDER_ID))
+                .andExpect(jsonPath("$.actionType").value("REFUND_ONLY"))
+                .andExpect(jsonPath("$.amount").value(399.00))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.requestedAt").exists())
+                .andExpect(jsonPath("$.expiresAt").exists());
+
+        mockMvc.perform(get("/api/v1/approvals/{approvalId}", approvalId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("APPROVAL_NOT_FOUND"));
+    }
+
+    @Test
     void onlyApproverCanListTheWorklist() throws Exception {
         String customerToken = tokenWithRole(CUSTOMER_ID, UserRole.CUSTOMER);
         String approverToken = tokenWithRole(APPROVER_ID, UserRole.APPROVER);
