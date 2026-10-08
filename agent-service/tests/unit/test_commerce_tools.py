@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 import httpx
 import pytest
 
@@ -243,7 +244,7 @@ async def test_request_human_approval_sends_only_the_exact_proposal_and_wraps_au
             run_id="52000000-0000-4000-8000-000000000001",
             order_id="order-001",
             action_type="REFUND_ONLY",
-            amount=__import__("decimal").Decimal("399.00"),
+            amount=Decimal("399.00"),
             risk_reason="APPROVAL_REQUIRED_BY_AMOUNT",
         )
 
