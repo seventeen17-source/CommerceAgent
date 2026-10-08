@@ -180,7 +180,7 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 **V1 实现口径（T040/T041）**：
 - 输入里**没有金额**，而且这不是"暂时不用"：退货行没有金额列（V004），"退多少钱"在这条路径上无法表达；
 - **它只创建退货单。** `RETURN_REFUND` 的"退钱"不在这个 Tool 里发生 —— 退款需要它自己那条受保护的写路径与授权，否则就等于绕过"已签收订单不得被直接退款"这条 US2 守卫；
-- `approval_request_id` 在 V1 无法校验，任何非空值一律 `400` fail closed（US4/T049 才做真绑定）；
+- `approval_request_id` 当前仍 fail closed；**T054** 才把 Java 权威 ApprovalRequest 的 owner/status/run/order/action/amount 重读与绑定接入退款/退货写路径；
 - 返回的 `return_deadline` 是**受理时冻结**的（规则窗口 + 运单签收时刻），不是读时重算的。
 
 ## T8 `create_support_ticket`
@@ -200,18 +200,25 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 
 ## T9 `request_human_approval`
 
-**用途**：为高风险售后动作创建 Human-in-the-loop 审批。
+**用途**：为 Java eligibility 已明确要求审批的高风险售后动作创建 Human-in-the-loop 审批。
 
-输入：
+输入（T053 可执行口径）：
 - `run_id`
 - `order_id`
-- proposed action
-- amount/risk summary
-- evidence refs
+- `action_type`：直接来自当前 `EligibilitySnapshot.allowed_action`
+- `amount`：直接来自当前 `EligibilitySnapshot.max_refund_amount`，纯退货可空
+- `risk_reason`：直接来自当前 eligibility 的 `APPROVAL_*` reason code
 
 输出：
 - `approval_request_id`
 - authoritative status = `PENDING`
+
+**T053 边界**：
+- Tool 请求类型里**没有** status / approver / expiry / userId / approval token，Agent 在类型层就无法提交“我是 APPROVED”；
+- Java `POST /approvals` 会重新跑 deterministic eligibility，并再次校验 action/amount/riskReason，Agent 传入的仍只是 proposal；
+- Python 收到 2xx 后也不只看 `approvalRequestId`：必须核对返回的 run/order/action/amount/riskReason 与本次 proposal 一致，且 status 明确为 `PENDING`，否则 fail closed；
+- evidence 仍保留在 Agent 的结构化 evidence/trace 中，V1 不把自由文本 evidence refs 发送给审批 API；它们是解释材料，不是创建审批的授权来源；
+- 这是 state-changing Tool，transport timeout 表示结果未知；T053 不伪造 id/status，也不在 Tool 内 blind retry，而是安全停止。Java 对同一 live proposal 的重放语义负责最终去重。
 
 禁止：Agent self-approval、伪造 approval status、生成 synthetic approval token，或把审批决策 endpoint 暴露为 customer Tool。
 
