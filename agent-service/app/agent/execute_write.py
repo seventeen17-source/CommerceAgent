@@ -127,6 +127,7 @@ def _refund_request_fingerprint(
     order_id: str,
     reason_code: str,
     requested_amount: Decimal | None,
+    approval_request_id: str | None = None,
 ) -> str:
     """SHA-256 of the V1 logical refund payload, excluding run id and idempotency key."""
     payload = {
@@ -135,6 +136,8 @@ def _refund_request_fingerprint(
         "reasonCode": reason_code,
         "requestedAmount": _canonical_amount(requested_amount),
     }
+    if approval_request_id is not None:
+        payload["approvalRequestId"] = approval_request_id
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
         "utf-8"
     )
@@ -150,6 +153,7 @@ class RefundWriteIntent:
     reason_code: str
     idempotency_key: str
     requested_amount: Decimal | None = None
+    approval_request_id: str | None = None
 
     def to_state_intent(self) -> WriteIntent:
         """The persistable form. Written *before* the request is sent."""
@@ -161,6 +165,7 @@ class RefundWriteIntent:
                 order_id=self.order_id,
                 reason_code=self.reason_code,
                 requested_amount=self.requested_amount,
+                approval_request_id=self.approval_request_id,
             ),
         )
 
@@ -236,6 +241,7 @@ def refund_write_intent(
     order_id: str,
     reason_code: str,
     requested_amount: Decimal | None = None,
+    approval_request_id: str | None = None,
 ) -> RefundWriteIntent:
     """Build this run's refund intent, **reusing a persisted key** for the same target.
 
@@ -249,6 +255,7 @@ def refund_write_intent(
         order_id=order_id,
         reason_code=reason_code,
         requested_amount=requested_amount,
+        approval_request_id=approval_request_id,
     )
     if (
         persisted is not None
@@ -265,6 +272,7 @@ def refund_write_intent(
             reason_code=reason_code,
             idempotency_key=persisted.idempotency_key,
             requested_amount=requested_amount,
+            approval_request_id=approval_request_id,
         )
     return RefundWriteIntent(
         run_id=str(state.run_id),
@@ -272,6 +280,7 @@ def refund_write_intent(
         reason_code=reason_code,
         idempotency_key=uuid4().hex,
         requested_amount=requested_amount,
+        approval_request_id=approval_request_id,
     )
 
 
@@ -389,6 +398,7 @@ async def execute_refund_write(
             requested_amount=intent.requested_amount,
             idempotency_key=intent.idempotency_key,
             run_id=intent.run_id,
+            approval_request_id=intent.approval_request_id,
         )
         history.append(
             _history_entry(
@@ -575,6 +585,7 @@ def _return_request_fingerprint(
     order_id: str,
     reason_code: str,
     return_method: str | None,
+    approval_request_id: str | None = None,
 ) -> str:
     """SHA-256 of the V1 logical return payload, excluding run id and idempotency key.
 
@@ -588,6 +599,8 @@ def _return_request_fingerprint(
         "reasonCode": reason_code,
         "returnMethod": return_method,
     }
+    if approval_request_id is not None:
+        payload["approvalRequestId"] = approval_request_id
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
         "utf-8"
     )
@@ -603,6 +616,7 @@ class ReturnWriteIntent:
     reason_code: str
     idempotency_key: str
     return_method: str | None = None
+    approval_request_id: str | None = None
 
     def to_state_intent(self) -> WriteIntent:
         """The persistable form. Written *before* the request is sent."""
@@ -614,6 +628,7 @@ class ReturnWriteIntent:
                 order_id=self.order_id,
                 reason_code=self.reason_code,
                 return_method=self.return_method,
+                approval_request_id=self.approval_request_id,
             ),
         )
 
@@ -684,6 +699,7 @@ def return_write_intent(
     order_id: str,
     reason_code: str,
     return_method: str | None = None,
+    approval_request_id: str | None = None,
 ) -> ReturnWriteIntent:
     """Build this run's return intent, **reusing a persisted key** for the same target.
 
@@ -697,6 +713,7 @@ def return_write_intent(
         order_id=order_id,
         reason_code=reason_code,
         return_method=return_method,
+        approval_request_id=approval_request_id,
     )
     if (
         persisted is not None
@@ -713,6 +730,7 @@ def return_write_intent(
             reason_code=reason_code,
             idempotency_key=persisted.idempotency_key,
             return_method=return_method,
+            approval_request_id=approval_request_id,
         )
     return ReturnWriteIntent(
         run_id=str(state.run_id),
@@ -720,6 +738,7 @@ def return_write_intent(
         reason_code=reason_code,
         idempotency_key=uuid4().hex,
         return_method=return_method,
+        approval_request_id=approval_request_id,
     )
 
 
@@ -797,6 +816,7 @@ async def execute_return_write(
             idempotency_key=intent.idempotency_key,
             run_id=intent.run_id,
             return_method=intent.return_method,
+            approval_request_id=intent.approval_request_id,
         )
         history.append(
             _history_entry(
