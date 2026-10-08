@@ -50,6 +50,8 @@ public class SecurityConfig {
                         .hasRole("CUSTOMER")
                         .requestMatchers(HttpMethod.GET, "/api/v1/approvals")
                         .hasRole("APPROVER")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/approvals/*")
+                        .hasRole("CUSTOMER")
                         .requestMatchers(HttpMethod.POST, "/api/v1/approvals/*/decision")
                         .hasRole("APPROVER")
                         .anyRequest()
