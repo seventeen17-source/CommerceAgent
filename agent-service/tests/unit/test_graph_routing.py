@@ -353,10 +353,10 @@ class TestRouteAfterEligibility:
         assert route_after_eligibility(state) is Node.SAFE_STOP
         assert safe_stop_reason_for(state) is SafeStopReason.ELIGIBILITY_INCONSISTENT
 
-    def test_approval_required_refuses_until_hitl_exists(self) -> None:
+    def test_approval_required_routes_to_the_hitl_request_node(self) -> None:
         state = make_state(eligibility=make_eligibility(approval_required=True))
-        assert route_after_eligibility(state) is Node.SAFE_STOP
-        assert safe_stop_reason_for(state) is SafeStopReason.ELIGIBILITY_APPROVAL_REQUIRED
+        assert route_after_eligibility(state) is Node.REQUEST_APPROVAL
+        assert safe_stop_reason_for(state) is None
 
     def test_an_unbounded_refund_amount_is_not_the_agents_decision(self) -> None:
         state = make_state(eligibility=make_eligibility(max_refund_amount=None))
