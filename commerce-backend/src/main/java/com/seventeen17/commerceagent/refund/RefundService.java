@@ -139,8 +139,9 @@ public class RefundService {
 
         // 写前重校验：资格是"某一时刻"的结论，进入事务后必须重新计算一次，而不是相信上游传下来的快照。
         EligibilityDecision decision = eligibilityService.evaluate(principal, command.orderId());
+        requireRefundEligible(decision);
         BigDecimal amount = requireAuthorizedWholeOrderAmount(command, decision.maxRefundAmount());
-        String approvalRequestId = requireRefundAuthorized(principal, command, decision, amount);
+        String approvalRequestId = requireRefundApproval(principal, command, decision, amount);
 
         RefundRequest refund = RefundRequest.create(
                 newRefundId(),
@@ -269,28 +270,9 @@ public class RefundService {
      * 变成错误码；而且三种拒绝的原因对 Agent 的含义完全不同 —— 证据不足要转人工，规则拒绝要解释，需要审批要先去
      * 拿审批，不能合成一个笼统的"不行"。
      */
-    private String requireRefundAuthorized(
-            CommercePrincipal principal,
-            RefundCommand command,
-            EligibilityDecision decision,
-            BigDecimal amount) {
+    private static void requireRefundEligible(EligibilityDecision decision) {
         if (decision.eligible() && decision.allowedAction() == AllowedAction.REFUND_ONLY) {
-            if (!decision.approvalRequired()) {
-                if (command.approvalRequestId() != null) {
-                    throw new BusinessException(
-                            ErrorCode.INVALID_PARAMETER,
-                            "approvalRequestId is not accepted when current eligibility does not require approval");
-                }
-                return null;
-            }
-            ApprovalRequest approval = approvalService.requireApprovedForWrite(
-                    principal,
-                    command.approvalRequestId(),
-                    command.runId(),
-                    command.orderId(),
-                    AllowedAction.REFUND_ONLY,
-                    amount);
-            return approval.getId();
+            return;
         }
         if (decision.allowedAction() == AllowedAction.MANUAL_REVIEW) {
             throw new BusinessException(
@@ -299,6 +281,29 @@ public class RefundService {
         }
         throw new BusinessException(
                 ErrorCode.ELIGIBILITY_DENIED, "Deterministic after-sales rules deny a refund for this order");
+    }
+
+    private String requireRefundApproval(
+            CommercePrincipal principal,
+            RefundCommand command,
+            EligibilityDecision decision,
+            BigDecimal amount) {
+        if (!decision.approvalRequired()) {
+            if (command.approvalRequestId() != null) {
+                throw new BusinessException(
+                        ErrorCode.INVALID_PARAMETER,
+                        "approvalRequestId is not accepted when current eligibility does not require approval");
+            }
+            return null;
+        }
+        ApprovalRequest approval = approvalService.requireApprovedForWrite(
+                principal,
+                command.approvalRequestId(),
+                command.runId(),
+                command.orderId(),
+                AllowedAction.REFUND_ONLY,
+                amount);
+        return approval.getId();
     }
 
     /**
