@@ -51,6 +51,7 @@ __all__ = [
     "handoff_reason_for",
     "route_after_decision",
     "route_after_eligibility",
+    "route_after_request_approval",
     "route_after_execute",
     "route_after_resolve_order",
     "route_after_understand",
@@ -68,11 +69,13 @@ class Node(StrEnum):
     DECIDE_EVIDENCE = "decide_evidence"
     EXECUTE_EVIDENCE = "execute_evidence"
     CHECK_ELIGIBILITY = "check_eligibility"
+    REQUEST_APPROVAL = "request_approval"
     REFUND_WRITE = "refund_write"
     RETURN_WRITE = "return_write"
     VERIFY = "verify"
     FINALIZE = "finalize"
     WAITING_USER = "waiting_user"
+    WAITING_APPROVAL = "waiting_approval"
     SAFE_STOP = "safe_stop"
 
 
@@ -85,6 +88,8 @@ class SafeStopReason(StrEnum):
     ELIGIBILITY_UNKNOWN_ACTION = "ELIGIBILITY_UNKNOWN_ACTION"
     ELIGIBILITY_INCONSISTENT = "ELIGIBILITY_INCONSISTENT"
     ELIGIBILITY_APPROVAL_REQUIRED = "ELIGIBILITY_APPROVAL_REQUIRED"
+    APPROVAL_REQUEST_FAILED = "APPROVAL_REQUEST_FAILED"
+    APPROVAL_RESPONSE_INCONSISTENT = "APPROVAL_RESPONSE_INCONSISTENT"
     ELIGIBILITY_AMOUNT_UNBOUNDED = "ELIGIBILITY_AMOUNT_UNBOUNDED"
     WRITE_INTENT_NOT_DURABLE = "WRITE_INTENT_NOT_DURABLE"
     WRITE_FINGERPRINT_DRIFT = "WRITE_FINGERPRINT_DRIFT"
@@ -262,10 +267,6 @@ def safe_stop_reason_for(
         if snapshot.eligible and action in NON_WRITE_ACTIONS:
             return SafeStopReason.ELIGIBILITY_INCONSISTENT
         if snapshot.eligible:
-            if snapshot.approval_required:
-                # No HITL wiring yet (T049). Refusing is the only safe reading of "approval
-                # required": the alternative is moving money without the approval.
-                return SafeStopReason.ELIGIBILITY_APPROVAL_REQUIRED
             if action in MONEY_GRANTING_ACTIONS and snapshot.max_refund_amount is None:
                 # Java is the money authority and it did not bound the amount. An unbounded write
                 # is not something the Agent may decide for itself.
@@ -367,6 +368,8 @@ def route_after_eligibility(state: AgentState, decision: Decision | None = None)
         # Only reachable if a node failed without declaring why; the safe_stop node will refuse to
         # finish quietly, which is the intended outcome for an incomplete routing table.
         return Node.SAFE_STOP
+    if snapshot.eligible and snapshot.approval_required:
+        return Node.REQUEST_APPROVAL
     if snapshot.eligible and snapshot.allowed_action in REFUND_PERMITTING_ACTIONS:
         return Node.REFUND_WRITE
     if snapshot.eligible and snapshot.allowed_action in RETURN_PERMITTING_ACTIONS:
@@ -375,6 +378,24 @@ def route_after_eligibility(state: AgentState, decision: Decision | None = None)
         # halves of "return and refund" are separate authorised writes.
         return Node.RETURN_WRITE
     return Node.FINALIZE
+
+
+def route_after_request_approval(
+    state: AgentState, decision: Decision | None = None
+) -> Node:
+    """After creating the authoritative approval: park the run or fail closed."""
+    if state.is_terminal:
+        return Node.FINALIZE
+    if safe_stop_reason_for(state, decision) is not None:
+        return Node.SAFE_STOP
+    snapshot = state.approval
+    if (
+        snapshot is not None
+        and snapshot.approval_request_id is not None
+        and snapshot.status == "PENDING"
+    ):
+        return Node.WAITING_APPROVAL
+    return Node.SAFE_STOP
 
 
 def route_after_write(state: AgentState, decision: Decision | None = None) -> Node:
