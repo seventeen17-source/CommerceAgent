@@ -56,16 +56,35 @@ class ApprovalWriteBindingIntegrationTest {
     private static final CommercePrincipal OWNER = new CommercePrincipal(OWNER_ID, UserRole.CUSTOMER);
     private static final CommercePrincipal APPROVER = new CommercePrincipal(APPROVER_ID, UserRole.APPROVER);
 
-    @Autowired private RefundService refundService;
-    @Autowired private ReturnService returnService;
-    @Autowired private RefundRequestRepository refundRepository;
-    @Autowired private ReturnRequestRepository returnRepository;
-    @Autowired private ApprovalRequestRepository approvalRepository;
-    @Autowired private UserRepository userRepository;
-    @Autowired private OrderRepository orderRepository;
-    @Autowired private ShipmentRepository shipmentRepository;
-    @Autowired private AfterSalesRuleRepository ruleRepository;
-    @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private RefundService refundService;
+
+    @Autowired
+    private ReturnService returnService;
+
+    @Autowired
+    private RefundRequestRepository refundRepository;
+
+    @Autowired
+    private ReturnRequestRepository returnRepository;
+
+    @Autowired
+    private ApprovalRequestRepository approvalRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private ShipmentRepository shipmentRepository;
+
+    @Autowired
+    private AfterSalesRuleRepository ruleRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void exactApprovedRefundBindingUnlocksOnlyItsOwnWrite() {
@@ -253,7 +272,15 @@ class ApprovalWriteBindingIntegrationTest {
 
     @AfterEach
     void cleanUp() {
-        jdbcTemplate.update("DELETE FROM commerce.audit_logs WHERE resource_id LIKE 't054-%'");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.audit_logs WHERE resource_id IN "
+                        + "(SELECT id FROM commerce.refund_requests WHERE order_id LIKE 't054-%')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.audit_logs WHERE resource_id IN "
+                        + "(SELECT id FROM commerce.return_requests WHERE order_id LIKE 't054-%')");
+        jdbcTemplate.update(
+                "DELETE FROM commerce.audit_logs WHERE resource_id IN "
+                        + "(SELECT id FROM commerce.approval_requests WHERE order_id LIKE 't054-%')");
         jdbcTemplate.update("DELETE FROM commerce.refund_requests WHERE order_id LIKE 't054-%'");
         jdbcTemplate.update("DELETE FROM commerce.return_requests WHERE order_id LIKE 't054-%'");
         jdbcTemplate.update("DELETE FROM commerce.approval_requests WHERE order_id LIKE 't054-%'");
