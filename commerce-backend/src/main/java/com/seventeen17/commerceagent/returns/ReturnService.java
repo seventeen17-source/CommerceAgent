@@ -48,10 +48,9 @@ import org.springframework.transaction.annotation.Transactional;
  *       "审计说成功、业务回滚了"的假 SUCCESS。
  * </ol>
  *
- * <p><b>本任务刻意不做的事</b>：{@code RETURN_REFUND} 的"退款"这一半不在 {@code POST /returns} 里发生。退货行
- * 表达的是"这件商品在走退货流程"，钱仍然只能由退款行表达（V004 刻意没有金额列）。让退款去引用一笔<b>活动退货行</b>
- * 才是正确的长期形态，那属于后续任务；本次绝不放宽 {@code RefundService} 的 {@code REFUND_ONLY} 授权守卫 ——
- * 放宽它等于把"已签收订单被直接退款"这件事重新放回来。
+ * <p><b>RETURN_REFUND 的边界仍然不变</b>：{@code POST /returns} 只创建退货行，不在这里直接创建退款行。
+ * T054 新增的是“这一次退货动作若被规则标记为高风险，必须引用并重新校验精确绑定的 ApprovalRequest”，不是把
+ * 退货接口变成退款接口。资金写仍只能走自己的受保护路径。
  */
 @Service
 public class ReturnService {
@@ -243,7 +242,6 @@ public class ReturnService {
         }
         return idempotencyKey;
     }
-
 
     /**
      * 幂等重放判断。
