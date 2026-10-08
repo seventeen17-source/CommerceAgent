@@ -145,6 +145,10 @@ public class FixtureLoader {
 
     private void clearFixtureState() {
         jdbcTemplate.update("DELETE FROM commerce.audit_logs");
+        // T051：approval_requests 是运行产生的权威业务状态，并且同时外键引用 orders / users。
+        // reset 的语义是回到已知基线，因此必须在删除 orders/users 之前清掉审批记录；否则既会残留上一轮
+        // APPROVED/DENIED 结论，也会因为外键让后续清理失败。
+        jdbcTemplate.update("DELETE FROM commerce.approval_requests");
         // T021/T026：refund_requests 对 orders 有外键，因此必须在下游对象之后再删 orders，否则 fixture reset 会以
         // FK 违约失败。Eval reset 的语义是"业务状态回到基线"，退款这类写入结果必须一起清掉，否则"重置后重跑同一个
         // 用例"会因为上一轮的退款行而得到不同结论。
