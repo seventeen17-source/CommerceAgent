@@ -90,6 +90,8 @@ class SafeStopReason(StrEnum):
     ELIGIBILITY_APPROVAL_REQUIRED = "ELIGIBILITY_APPROVAL_REQUIRED"
     APPROVAL_REQUEST_FAILED = "APPROVAL_REQUEST_FAILED"
     APPROVAL_RESPONSE_INCONSISTENT = "APPROVAL_RESPONSE_INCONSISTENT"
+    APPROVAL_STATE_UNVERIFIED = "APPROVAL_STATE_UNVERIFIED"
+    APPROVAL_BINDING_MISMATCH = "APPROVAL_BINDING_MISMATCH"
     ELIGIBILITY_AMOUNT_UNBOUNDED = "ELIGIBILITY_AMOUNT_UNBOUNDED"
     WRITE_INTENT_NOT_DURABLE = "WRITE_INTENT_NOT_DURABLE"
     WRITE_FINGERPRINT_DRIFT = "WRITE_FINGERPRINT_DRIFT"
@@ -256,6 +258,12 @@ def safe_stop_reason_for(
             return SafeStopReason.ORDER_UNRESOLVED
 
     snapshot = state.eligibility
+    if state.approval is not None and state.approval.status == "APPROVED":
+        if not state.approval.binding_verified:
+            return SafeStopReason.APPROVAL_STATE_UNVERIFIED
+        if snapshot is not None and snapshot.approval_required:
+            if not _verified_approval_matches_current_eligibility(state):
+                return SafeStopReason.APPROVAL_BINDING_MISMATCH
     if snapshot is not None:
         action = snapshot.allowed_action
         if (
@@ -355,6 +363,21 @@ def route_after_execute(state: AgentState, decision: Decision | None = None) -> 
     return Node.DECIDE_EVIDENCE
 
 
+def _verified_approval_matches_current_eligibility(state: AgentState) -> bool:
+    approval = state.approval
+    eligibility = state.eligibility
+    if (
+        approval is None
+        or eligibility is None
+        or not approval.binding_verified
+        or approval.status != "APPROVED"
+        or approval.run_id != state.run_id
+        or approval.order_id != state.resolved_order_id
+        or approval.action_type != eligibility.allowed_action
+    ):
+        return False
+    return approval.amount == eligibility.max_refund_amount
+
 def route_after_eligibility(state: AgentState, decision: Decision | None = None) -> Node:
     """After Java's eligibility decision: write, retry the question, or finish without writing."""
     if state.is_terminal:
@@ -369,6 +392,14 @@ def route_after_eligibility(state: AgentState, decision: Decision | None = None)
         # finish quietly, which is the intended outcome for an incomplete routing table.
         return Node.SAFE_STOP
     if snapshot.eligible and snapshot.approval_required:
+        if _verified_approval_matches_current_eligibility(state):
+            if snapshot.allowed_action in REFUND_PERMITTING_ACTIONS:
+                return Node.REFUND_WRITE
+            if snapshot.allowed_action in RETURN_PERMITTING_ACTIONS:
+                return Node.RETURN_WRITE
+            return Node.SAFE_STOP
+        if state.approval is not None and state.approval.status == "APPROVED":
+            return Node.SAFE_STOP
         return Node.REQUEST_APPROVAL
     if snapshot.eligible and snapshot.allowed_action in REFUND_PERMITTING_ACTIONS:
         return Node.REFUND_WRITE
