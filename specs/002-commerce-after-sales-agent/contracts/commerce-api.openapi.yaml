@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.6
+  version: 0.2.7
   description: |
     ## Write-path idempotency (T021)
 
@@ -336,7 +336,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApprovalResult' }
+        '400':
+          $ref: '#/components/responses/Error'
+          description: INVALID_PARAMETER when action/amount/riskReason does not exactly match authoritative eligibility.
         '401': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: ACCESS_DENIED for a non-customer capability.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: ORDER_NOT_FOUND for both missing and cross-owner orders.
+        '409':
+          $ref: '#/components/responses/Error'
+          description: APPROVAL_CONFLICT when a concurrent/live request conflicts with this proposal.
+        '422':
+          $ref: '#/components/responses/Error'
+          description: ELIGIBILITY_DENIED or MANUAL_REVIEW_REQUIRED when deterministic rules do not produce an approval-requiring action.
+        '503':
+          $ref: '#/components/responses/Error'
+          description: Authoritative evidence required to evaluate the proposal is unavailable.
     get:
       summary: List approval requests visible to an authorized approver
       description: Requires APPROVER role. Used by the Human-in-the-loop approval center.
@@ -384,7 +402,12 @@ paths:
               schema: { $ref: '#/components/schemas/ApprovalResult' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '404':
+          $ref: '#/components/responses/Error'
+          description: APPROVAL_NOT_FOUND.
+        '409':
+          $ref: '#/components/responses/Error'
+          description: APPROVAL_CONFLICT for an opposite terminal decision, or APPROVAL_EXPIRED when the request can no longer be decided.
   /orders/{orderId}/after-sales:
     get:
       summary: Query current after-sales objects/status for verification and timeout recovery
@@ -615,15 +638,24 @@ components:
         status: { type: string }
     CreateApprovalRequest:
       type: object
+      additionalProperties: false
+      description: >-
+        A proposal only. Java re-runs deterministic eligibility and requires actionType, amount and
+        riskReason to exactly match its current authoritative decision before creating PENDING.
       required: [runId, orderId, actionType, riskReason]
       properties:
-        runId: { type: string }
-        orderId: { type: string }
-        actionType: { type: string }
+        runId: { type: string, format: uuid }
+        orderId: { type: string, minLength: 1, maxLength: 64 }
+        actionType:
+          type: string
+          enum: [REFUND_ONLY, RETURN, RETURN_REFUND]
         amount: { type: [number, 'null'] }
-        riskReason: { type: string }
+        riskReason: { type: string, minLength: 1, maxLength: 100 }
     ApprovalResult:
       type: object
+      description: >-
+        Authoritative approval record. Consumers must treat APPROVED as usable only together with
+        the exact runId/orderId/actionType/amount binding and must re-read it before a sensitive write.
       required: [approvalRequestId, runId, orderId, actionType, status]
       properties:
         approvalRequestId: { type: string }
