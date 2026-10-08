@@ -180,7 +180,7 @@ Agent Tool 是受控业务能力，不是任意 HTTP 访问。Python Agent 可�
 **V1 实现口径（T040/T041）**：
 - 输入里**没有金额**，而且这不是"暂时不用"：退货行没有金额列（V004），"退多少钱"在这条路径上无法表达；
 - **它只创建退货单。** `RETURN_REFUND` 的"退钱"不在这个 Tool 里发生 —— 退款需要它自己那条受保护的写路径与授权，否则就等于绕过"已签收订单不得被直接退款"这条 US2 守卫；
-- `approval_request_id` 当前仍 fail closed；**T054** 才把 Java 权威 ApprovalRequest 的 owner/status/run/order/action/amount 重读与绑定接入退款/退货写路径；
+- `approval_request_id` 已在 **T054** 接入真实 authority：只有当前 eligibility 确实要求审批、Java owner-scoped 重读得到 `APPROVED`，且 run/order/action/amount 与当前 proposed write 完整一致时才可写；否则 fail closed。最终校验发生在 Java protected-write 事务内，Agent 侧 resume 校验只是前置 guard；
 - 返回的 `return_deadline` 是**受理时冻结**的（规则窗口 + 运单签收时刻），不是读时重算的。
 
 ## T8 `create_support_ticket`
