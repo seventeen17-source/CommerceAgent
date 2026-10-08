@@ -18,8 +18,9 @@ import java.util.UUID;
  *   <li>{@code reasonCode} —— 描述性原因。参与幂等指纹，但<b>不影响</b>资格（资格是 T039 的确定性规则）。
  *   <li>{@code returnMethod} —— 可空。契约发布了这个字段，但 V1 不给它任何行为：只做形状校验，落库并参与幂等
  *       指纹（否则"同一个 key、换一种退货方式"会被静默当成同一次逻辑请求）。
- *   <li>{@code approvalRequestId} —— 可空。V1 没有权威审批记录可校验，因此任何非空值都会被拒绝（fail closed），
- *       而不是被原样存进退货行当作"已批准"的证据。US4/T049 会替换这条规则。
+ *   <li>{@code approvalRequestId} —— 可空且只是 locator。当前 eligibility 要求审批时，
+ *       {@link ReturnService} 会 owner-scoped 重读权威 ApprovalRequest，并校验 APPROVED + run/order/action/amount
+ *       binding；当前不要求审批时携带该字段反而会被拒绝，避免把 approval id 当通用 bearer token。
  *   <li>{@code runId} —— Agent run 的 UUID。它是<b>溯源</b>信息（写进退货行与审计的 run_id），不是身份：Java
  *       不能也不应该用它授权，因为 {@code agent.agent_runs} 属于另一个 schema 与另一个数据库角色。
  * </ul>
