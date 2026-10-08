@@ -79,7 +79,7 @@ def test_resume_request_cannot_forge_approval_status_or_role() -> None:
     with pytest.raises(ValidationError):
         ResumeRunRequest.model_validate(
             {
-                "approval_request_id": "approval-001",
+                "approvalRequestId": "approval-001",
                 "approval_status": "APPROVED",
             }
         )
