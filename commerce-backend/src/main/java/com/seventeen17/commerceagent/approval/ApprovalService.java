@@ -72,7 +72,7 @@ public class ApprovalService {
                 request.actionType(),
                 ApprovalStatus.PENDING);
         if (existing.isPresent()) {
-            return replayExisting(request, decision, riskReason, existing.get());
+            return replayExisting(principal, request, decision, riskReason, existing.get());
         }
 
         Instant now = clock.instant();
@@ -86,7 +86,18 @@ public class ApprovalService {
                 decision.ruleCode(),
                 riskReason,
                 now.plus(APPROVAL_TTL));
-        ApprovalRequest saved = approvalRepository.saveAndFlush(approval);
+        ApprovalRequest saved;
+        try {
+            saved = approvalRepository.saveAndFlush(approval);
+        } catch (org.springframework.dao.DataIntegrityViolationException exception) {
+            // V006's partial unique index is the final concurrency guard. We intentionally return a
+            // stable conflict here rather than leaking a PostgreSQL 23505 as INTERNAL_ERROR. The
+            // transaction is rolling back, so we do not try to query again inside it.
+            throw new BusinessException(
+                    ErrorCode.APPROVAL_CONFLICT,
+                    "A live approval for this run/order/action was created concurrently",
+                    exception);
+        }
 
         auditWriter.writeBusinessEvent(new AuditEvent(
                 AuditActorType.USER,
@@ -206,6 +217,7 @@ public class ApprovalService {
     }
 
     private static ApprovalResult replayExisting(
+            CommercePrincipal principal,
             CreateApprovalRequest request,
             EligibilityDecision decision,
             String riskReason,
@@ -213,7 +225,7 @@ public class ApprovalService {
         boolean sameAmount = sameAmount(existing.getAmount(), decision.maxRefundAmount());
         boolean sameReason = existing.getReasonCode().equals(riskReason);
         boolean sameRule = existing.getEligibilityRuleCode().equals(decision.ruleCode());
-        boolean sameUserFacingProposal = existing.getUserId() != null
+        boolean sameUserFacingProposal = existing.getUserId().equals(principal.userId())
                 && existing.getAction() == request.actionType()
                 && existing.getRunId().equals(request.runId().toString())
                 && existing.getOrderId().equals(request.orderId());
