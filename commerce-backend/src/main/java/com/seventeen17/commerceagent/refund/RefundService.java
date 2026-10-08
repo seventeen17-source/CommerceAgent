@@ -1,5 +1,7 @@
 package com.seventeen17.commerceagent.refund;
 
+import com.seventeen17.commerceagent.approval.ApprovalRequest;
+import com.seventeen17.commerceagent.approval.ApprovalService;
 import com.seventeen17.commerceagent.audit.AuditActorType;
 import com.seventeen17.commerceagent.audit.AuditEvent;
 import com.seventeen17.commerceagent.audit.AuditWriter;
@@ -87,6 +89,7 @@ public class RefundService {
     private final OrderRepository orderRepository;
     private final EligibilityService eligibilityService;
     private final RefundRequestRepository refundRequestRepository;
+    private final ApprovalService approvalService;
     private final AuditWriter auditWriter;
 
     public RefundService(
@@ -94,11 +97,13 @@ public class RefundService {
             OrderRepository orderRepository,
             EligibilityService eligibilityService,
             RefundRequestRepository refundRequestRepository,
+            ApprovalService approvalService,
             AuditWriter auditWriter) {
         this.orderService = orderService;
         this.orderRepository = orderRepository;
         this.eligibilityService = eligibilityService;
         this.refundRequestRepository = refundRequestRepository;
+        this.approvalService = approvalService;
         this.auditWriter = auditWriter;
     }
 
@@ -112,8 +117,6 @@ public class RefundService {
     public RefundResult createRefund(CommercePrincipal principal, String idempotencyKey, RefundCommand command) {
         requireCustomerCapability(principal);
         String key = requireValidIdempotencyKey(idempotencyKey);
-        requireRefundActionIsSupportedInThisVersion(command);
-
         RefundResult replayed = replayIfPresent(principal, key, command);
         if (replayed != null) {
             return replayed;
@@ -136,8 +139,8 @@ public class RefundService {
 
         // 写前重校验：资格是"某一时刻"的结论，进入事务后必须重新计算一次，而不是相信上游传下来的快照。
         EligibilityDecision decision = eligibilityService.evaluate(principal, command.orderId());
-        requireRefundAuthorized(decision);
         BigDecimal amount = requireAuthorizedWholeOrderAmount(command, decision.maxRefundAmount());
+        String approvalRequestId = requireRefundAuthorized(principal, command, decision, amount);
 
         RefundRequest refund = RefundRequest.create(
                 newRefundId(),
@@ -147,8 +150,7 @@ public class RefundService {
                 amount,
                 key,
                 decision.ruleCode(),
-                // V1 没有权威审批记录可绑定；带审批引用的请求已在前面被拒绝，因此这里恒为 null。
-                null,
+                approvalRequestId,
                 command.runId());
 
         persistRefund(refund);
@@ -228,19 +230,6 @@ public class RefundService {
         return idempotencyKey;
     }
 
-    /**
-     * V1 无法校验任何审批引用，因此带审批引用的请求一律拒绝。
-     *
-     * <p>两种错误看起来都像"挑剔"，其实是在防一件具体的事：把无法验证的 approvalRequestId **原样存进退款行**，
-     * 会让这张表里出现"看起来已获批准"的记录，而没有任何权威来源能证明它。宁可拒绝，也不留一条日后被误读的证据。
-     */
-    private static void requireRefundActionIsSupportedInThisVersion(RefundCommand command) {
-        if (command.approvalRequestId() != null) {
-            throw new BusinessException(
-                    ErrorCode.INVALID_PARAMETER,
-                    "This version cannot validate an approval reference, so it must not be presented");
-        }
-    }
 
     /**
      * 幂等重放判断。
@@ -264,7 +253,8 @@ public class RefundService {
         boolean sameReason = refund.getReasonCode().equals(command.reasonCode());
         boolean sameAmount =
                 !command.hasExplicitAmount() || command.requestedAmount().compareTo(refund.getAmount()) == 0;
-        if (!sameOrder || !sameReason || !sameAmount) {
+        boolean sameApproval = java.util.Objects.equals(refund.getApprovalRequestId(), command.approvalRequestId());
+        if (!sameOrder || !sameReason || !sameAmount || !sameApproval) {
             throw new BusinessException(
                     ErrorCode.IDEMPOTENCY_CONFLICT,
                     "This Idempotency-Key was already used for a different refund request");
@@ -279,14 +269,28 @@ public class RefundService {
      * 变成错误码；而且三种拒绝的原因对 Agent 的含义完全不同 —— 证据不足要转人工，规则拒绝要解释，需要审批要先去
      * 拿审批，不能合成一个笼统的"不行"。
      */
-    private static void requireRefundAuthorized(EligibilityDecision decision) {
+    private String requireRefundAuthorized(
+            CommercePrincipal principal,
+            RefundCommand command,
+            EligibilityDecision decision,
+            BigDecimal amount) {
         if (decision.eligible() && decision.allowedAction() == AllowedAction.REFUND_ONLY) {
-            if (decision.approvalRequired()) {
-                throw new BusinessException(
-                        ErrorCode.APPROVAL_REQUIRED,
-                        "Eligible, but an authoritative approval is required before this refund may be written");
+            if (!decision.approvalRequired()) {
+                if (command.approvalRequestId() != null) {
+                    throw new BusinessException(
+                            ErrorCode.INVALID_PARAMETER,
+                            "approvalRequestId is not accepted when current eligibility does not require approval");
+                }
+                return null;
             }
-            return;
+            ApprovalRequest approval = approvalService.requireApprovedForWrite(
+                    principal,
+                    command.approvalRequestId(),
+                    command.runId(),
+                    command.orderId(),
+                    AllowedAction.REFUND_ONLY,
+                    amount);
+            return approval.getId();
         }
         if (decision.allowedAction() == AllowedAction.MANUAL_REVIEW) {
             throw new BusinessException(
