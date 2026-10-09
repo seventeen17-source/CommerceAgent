@@ -8,8 +8,8 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from app.agent.graph import _entry_node
-from app.agent.routing import Node, route_after_eligibility
+from app.agent.graph import GraphUpdate, _entry_node, build_graph
+from app.agent.routing import Decision, Node, route_after_eligibility
 from app.agent.state import AgentState, ApprovalSnapshot, RunStatus, advance
 from app.api.runs import ResumeRunRequest, _verify_waiting_approval
 from app.clients.auth import AuthContext
@@ -250,6 +250,78 @@ def test_unverified_or_unresolved_approval_cannot_select_short_resume() -> None:
             approval=approval.model_copy(update={"binding_verified": True}),
         )
     }) is Node.UNDERSTAND
+
+
+@pytest.mark.asyncio
+async def test_compiled_resume_graph_rechecks_eligibility_before_write() -> None:
+    """The real LangGraph START edge must not call model/order/evidence on HITL resume."""
+    trace: list[Node] = []
+
+    async def unexpected(graph: Any) -> GraphUpdate:
+        raise AssertionError("verified resume must not re-run model/order/evidence")
+
+    async def check_eligibility(graph: Any) -> GraphUpdate:
+        trace.append(Node.CHECK_ELIGIBILITY)
+        state = advance(graph["state"], step_count=graph["state"].step_count + 1)
+        return {"state": state, "decision": Decision()}
+
+    async def refund_write(graph: Any) -> GraphUpdate:
+        trace.append(Node.REFUND_WRITE)
+        state = advance(
+            graph["state"],
+            step_count=graph["state"].step_count + 1,
+            write_intent={
+                "action": "CREATE_REFUND_REQUEST",
+                "target_id": "order-001",
+                "idempotency_key": "37087fe4af524f36b0ba02dd4e4d55ef",
+                "request_fingerprint": "a" * 64,
+            },
+            write={"status": "SUCCEEDED", "resource_id": "refund-001"},
+        )
+        return {"state": state, "decision": Decision()}
+
+    async def verify(graph: Any) -> GraphUpdate:
+        trace.append(Node.VERIFY)
+        state = advance(
+            graph["state"],
+            step_count=graph["state"].step_count + 1,
+            verification={"status": "VERIFIED_SUCCESS", "resource_id": "refund-001"},
+        )
+        return {"state": state, "decision": Decision()}
+
+    async def finalize(graph: Any) -> GraphUpdate:
+        trace.append(Node.FINALIZE)
+        return {"state": graph["state"], "decision": Decision()}
+
+    nodes = {node: unexpected for node in Node}
+    nodes[Node.CHECK_ELIGIBILITY] = check_eligibility
+    nodes[Node.REFUND_WRITE] = refund_write
+    nodes[Node.VERIFY] = verify
+    nodes[Node.FINALIZE] = finalize
+
+    base = waiting_state()
+    verified = advance(
+        base,
+        status=RunStatus.RUNNING,
+        step_count=7,
+        approval=ApprovalSnapshot(
+            approval_request_id="approval-001",
+            status="APPROVED",
+            run_id=RUN_ID,
+            order_id="order-001",
+            action_type="REFUND_ONLY",
+            amount=Decimal("399.00"),
+            binding_verified=True,
+        ),
+    )
+    finished = await build_graph(nodes).ainvoke({
+        "state": verified, "decision": Decision(), "understood": None, "resolution": None
+    })
+    assert trace == [
+        Node.CHECK_ELIGIBILITY, Node.REFUND_WRITE, Node.VERIFY, Node.FINALIZE
+    ]
+    assert finished["state"].verification.status.value == "VERIFIED_SUCCESS"
+    assert finished["state"].step_count == 10
 
 
 def test_fresh_eligibility_drift_after_resume_safe_stops_instead_of_writing() -> None:
