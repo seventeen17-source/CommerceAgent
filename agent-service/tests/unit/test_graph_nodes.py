@@ -361,6 +361,7 @@ def make_evidence_deps(*, model: Any, tools: Any) -> GraphDeps:
         evidence=tools,
         registry=ToolRegistry(),
         eligibility=unused,
+        approvals=unused,
         writes=unused,
         after_sales=unused,
         persist_intent=unused_persist,
