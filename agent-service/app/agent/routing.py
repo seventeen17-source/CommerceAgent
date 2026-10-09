@@ -275,6 +275,17 @@ def safe_stop_reason_for(
         if snapshot.eligible and action in NON_WRITE_ACTIONS:
             return SafeStopReason.ELIGIBILITY_INCONSISTENT
         if snapshot.eligible:
+            # T054: budget belongs to the entire run (including HITL resume). A protected
+            # write requires one step to issue the write and another to re-read Java authority.
+            # Refuse BEFORE the write if that verification cannot fit. Approval creation is
+            # not itself a refund/return; only reserve here when the next step can be a write.
+            may_write = not snapshot.approval_required or _verified_approval_matches_current_eligibility(state)
+            if (
+                may_write
+                and action in REFUND_PERMITTING_ACTIONS | RETURN_PERMITTING_ACTIONS
+                and state.step_count + 2 > state.max_steps
+            ):
+                return SafeStopReason.BUDGET_EXHAUSTED
             if action in MONEY_GRANTING_ACTIONS and snapshot.max_refund_amount is None:
                 # Java is the money authority and it did not bound the amount. An unbounded write
                 # is not something the Agent may decide for itself.
