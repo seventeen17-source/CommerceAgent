@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from app.agent.graph import GraphUpdate, _entry_node, build_graph
+from app.agent.graph import GraphUpdate, build_graph, _entry_node
 from app.agent.routing import Decision, Node, route_after_eligibility
 from app.agent.state import AgentState, ApprovalSnapshot, RunStatus, advance
 from app.api.runs import ResumeRunRequest, _verify_waiting_approval
