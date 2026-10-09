@@ -8,6 +8,7 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
+from app.agent.graph import _entry_node
 from app.agent.routing import Node, route_after_eligibility
 from app.agent.state import AgentState, ApprovalSnapshot, RunStatus, advance
 from app.api.runs import ResumeRunRequest, _verify_waiting_approval
@@ -203,6 +204,52 @@ async def test_pending_approval_does_not_claim_or_advance_the_run() -> None:
     assert caught.value.status_code == 409
     assert caught.value.detail == "APPROVAL_PENDING"
     assert store.saved_state is None
+
+
+def test_verified_approval_resume_enters_fresh_eligibility_without_reinterpreting() -> None:
+    """Only a restored Java-verified binding chooses the short HITL path."""
+    state = waiting_state()
+    initial = {"state": state}
+    assert _entry_node(initial) is Node.UNDERSTAND
+
+    verified = advance(
+        state,
+        status=RunStatus.RUNNING,
+        step_count=7,
+        approval=ApprovalSnapshot(
+            approval_request_id="approval-001",
+            status="APPROVED",
+            run_id=RUN_ID,
+            order_id="order-001",
+            action_type="REFUND_ONLY",
+            amount=Decimal("399.00"),
+            binding_verified=True,
+        ),
+    )
+    assert _entry_node({"state": verified}) is Node.CHECK_ELIGIBILITY
+    assert _entry_node({"state": advance(verified, step_count=12)}) is Node.SAFE_STOP
+
+
+def test_unverified_or_unresolved_approval_cannot_select_short_resume() -> None:
+    state = waiting_state()
+    approval = ApprovalSnapshot(
+        approval_request_id="approval-001",
+        status="APPROVED",
+        run_id=RUN_ID,
+        order_id="order-001",
+        action_type="REFUND_ONLY",
+        amount=Decimal("399.00"),
+        binding_verified=False,
+    )
+    assert _entry_node({"state": advance(state, status=RunStatus.RUNNING, approval=approval)}) is Node.UNDERSTAND
+    assert _entry_node({
+        "state": advance(
+            state,
+            status=RunStatus.RUNNING,
+            resolved_order_id=None,
+            approval=approval.model_copy(update={"binding_verified": True}),
+        )
+    }) is Node.UNDERSTAND
 
 
 def test_fresh_eligibility_drift_after_resume_safe_stops_instead_of_writing() -> None:
