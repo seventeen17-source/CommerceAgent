@@ -32,7 +32,7 @@ from app.agent.routing import (
     route_after_understand,
     route_after_write,
 )
-from app.agent.state import AgentState
+from app.agent.state import AgentState, RunStatus
 
 __all__ = ["CompiledGraph", "GraphNode", "GraphState", "GraphUpdate", "build_graph"]
 
@@ -132,6 +132,29 @@ def _edge(router: Callable[[AgentState, Decision | None], Node]) -> Callable[[Gr
     return decide
 
 
+def _entry_node(graph: GraphState) -> Node:
+    """Select the entry stage from durable authority, never from a caller-supplied claim.
+
+    Fresh runs and WAITING_USER follow the normal interpretation path. An approved HITL
+    resume carries an owner-scoped, Java-verified binding checkpointed by the API;
+    the order is already resolved, so only a fresh eligibility read is needed.
+    """
+    state = graph["state"]
+    if state.step_count >= state.max_steps:
+        return Node.SAFE_STOP
+    approval = state.approval
+    if (
+        state.status is RunStatus.RUNNING
+        and approval is not None
+        and approval.status == "APPROVED"
+        and approval.binding_verified
+        and state.resolved_order_id is not None
+        and state.write_intent is None
+    ):
+        return Node.CHECK_ELIGIBILITY
+    return Node.UNDERSTAND
+
+
 def build_graph(nodes: Mapping[Node, GraphNode]) -> CompiledGraph:
     """Wire the topology around the supplied node implementations.
 
@@ -150,7 +173,18 @@ def build_graph(nodes: Mapping[Node, GraphNode]) -> CompiledGraph:
         # caller of this function; the cast is confined to this one framework call.
         graph.add_node(node, cast(Any, implementation))
 
-    graph.add_edge(START, Node.UNDERSTAND)
+    # T054: a verified approval resume skips LLM re-interpretation, but never skips the
+    # fresh Java eligibility read. The verified flag is durable only after the owner-scoped
+    # approval GET and checkpoint in the resume API. Java remains the write authority.
+    graph.add_conditional_edges(
+        START,
+        _entry_node,
+        {
+            Node.UNDERSTAND: Node.UNDERSTAND,
+            Node.CHECK_ELIGIBILITY: Node.CHECK_ELIGIBILITY,
+            Node.SAFE_STOP: Node.SAFE_STOP,
+        },
+    )
     for source, router in _ROUTERS.items():
         graph.add_conditional_edges(
             source, _edge(router), {target: target for target in _CONDITIONAL_TARGETS[source]}
