@@ -131,6 +131,7 @@ def two_step_graph() -> CompiledGraph:
         Node.DECIDE_EVIDENCE: stand_in("decide_evidence"),
         Node.EXECUTE_EVIDENCE: stand_in("execute_evidence"),
         Node.CHECK_ELIGIBILITY: stand_in("check_eligibility"),
+        Node.REQUEST_APPROVAL: stand_in("request_approval"),
         Node.REFUND_WRITE: stand_in("refund_write"),
         Node.RETURN_WRITE: stand_in("return_write"),
         Node.VERIFY: stand_in("verify"),
