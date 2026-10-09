@@ -282,6 +282,8 @@ def safe_stop_reason_for(
             may_write = not snapshot.approval_required or _verified_approval_matches_current_eligibility(state)
             if (
                 may_write
+                and state.write_intent is None
+                and state.write.status is WriteStatus.NOT_ATTEMPTED
                 and action in REFUND_PERMITTING_ACTIONS | RETURN_PERMITTING_ACTIONS
                 and state.step_count + 2 > state.max_steps
             ):
