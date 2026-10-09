@@ -432,6 +432,7 @@ class TestT054VerificationBudget:
         state = make_state(
             step_count=11,
             max_steps=12,
+            eligibility=make_eligibility(),
             write={"status": WriteStatus.SUCCEEDED},
             write_intent=make_intent(),
         )
