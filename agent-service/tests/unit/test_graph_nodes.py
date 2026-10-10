@@ -793,7 +793,7 @@ class TestEligibilityNode:
         nodes = build_write_nodes(
             make_write_deps(
                 eligibility=FakeEligibilityTools(
-                    error_code="ELIGIBILITY_UNAVAILABLE", retryable=True
+                    error_code="DEPENDENCY_UNAVAILABLE", retryable=True
                 )
             )
         )
@@ -811,7 +811,7 @@ class TestEligibilityNode:
         nodes = build_write_nodes(
             make_write_deps(
                 eligibility=FakeEligibilityTools(
-                    error_code="ELIGIBILITY_UNAVAILABLE", retryable=True
+                    error_code="DEPENDENCY_UNAVAILABLE", retryable=True
                 )
             )
         )
