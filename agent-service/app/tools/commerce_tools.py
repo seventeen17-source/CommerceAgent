@@ -186,6 +186,15 @@ class CommerceTools:
                 retryable=False,
                 latencyMs=_elapsed_ms(started),
             )
+        if call.status_code != 201:
+            # An unexpected acknowledgement cannot establish a committed ticket under this API.
+            return ToolEnvelope[TicketResult](
+                success=False,
+                errorCode="WRITE_TIMEOUT_UNKNOWN",
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+                traceId=call.trace_id,
+            )
         return ToolEnvelope[TicketResult](
             success=True,
             data=call.value,
