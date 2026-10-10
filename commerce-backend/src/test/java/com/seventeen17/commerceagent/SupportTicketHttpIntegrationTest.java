@@ -198,6 +198,25 @@ class SupportTicketHttpIntegrationTest {
         assertEquals(0L, tickets);
     }
 
+    @Test
+    void rawBearerEvidenceIsRejectedWithoutPersistingTicket() throws Exception {
+        seedUser(CUSTOMER_ID, UserRole.CUSTOMER);
+        String token = localJwtIssuer.issue(CUSTOMER_ID);
+
+        mockMvc.perform(post("/api/v1/support-tickets")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(ticketBody(null).replace(
+                                "LOGISTICS status=IN_TRANSIT; stalledHours=unknown",
+                                "Bearer raw-secret-value")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("INVALID_PARAMETER"));
+
+        Long tickets = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM commerce.support_tickets WHERE user_id = ?", Long.class, CUSTOMER_ID);
+        assertEquals(0L, tickets);
+    }
+
     @AfterEach
     void removeT058Rows() {
         jdbcTemplate.update(
