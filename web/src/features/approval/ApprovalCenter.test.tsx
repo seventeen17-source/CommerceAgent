@@ -82,7 +82,7 @@ describe('ApprovalCenter', () => {
     fireEvent.click(screen.getByText('确认 DENY'))
 
     expect(await screen.findByText(/请求冲突/)).toBeTruthy()
-    expect(screen.getByText('Approve · 批准')).toBeTruthy()
+    expect(screen.queryByText('Approve · 批准')).toBeNull()
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
