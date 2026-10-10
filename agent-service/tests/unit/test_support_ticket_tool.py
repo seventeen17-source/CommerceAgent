@@ -9,7 +9,8 @@ import httpx
 import pytest
 
 from app.agent.nodes import build_lifecycle_nodes
-from app.agent.routing import Node, RunStatus, SafeStopReason
+from app.agent.routing import Node, SafeStopReason
+from app.agent.state import AgentState, RunStatus
 from app.agent.state import AgentState
 from app.clients.auth import AuthContext
 from app.clients.commerce_client import TRACE_ID_HEADER, CommerceClient
@@ -171,7 +172,11 @@ async def test_graph_captures_real_ticket_and_only_then_escalates() -> None:
     assert reports[0].tool_name == "create_support_ticket"
     assert tools.calls[0]["run_id"] == str(state.run_id)
     assert tools.calls[0]["order_id"] == "order-001"
-    assert "IN_TRANSIT" not in str(tools.calls[0])
+    summary = json.loads(str(tools.calls[0]["evidence_summary"]))
+    assert summary["eligibility"] == "MANUAL_REVIEW"
+    assert summary["evidence"][0]["facts"]["status"] == "IN_TRANSIT"
+    assert "user_request" not in summary
+    assert "token" not in str(summary).lower()
     ended = await lifecycle[Node.FINALIZE]({"state": update["state"]})
     assert ended["decision"].terminal.status is RunStatus.ESCALATED
 
