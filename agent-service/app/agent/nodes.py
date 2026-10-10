@@ -583,8 +583,7 @@ class SupportTicketTools(Protocol):
         category: str,
         reason_code: str,
         evidence_summary: str,
-    ) -> ToolEnvelope[TicketResult]:
-        ...
+    ) -> ToolEnvelope[TicketResult]: ...
 
 
 def build_lifecycle_nodes(
@@ -649,8 +648,7 @@ def build_lifecycle_nodes(
             facts = {
                 key: value
                 for key in ("status", "signed", "stalledHours", "lastMeaningfulEventAt")
-                if (value := item.data.get(key)) is not None
-                and isinstance(value, str | int | bool)
+                if (value := item.data.get(key)) is not None and isinstance(value, str | int | bool)
             }
             evidence_facts.append({"type": "LOGISTICS", "source": "get_logistics", "facts": facts})
             break
