@@ -263,9 +263,7 @@ async def test_write_ahead_intent_survives_delayed_boundary_and_interruption() -
     )
 
     class WriteThenInterrupt:
-        async def astream(
-            self, value: Any, *, stream_mode: str
-        ) -> AsyncIterator[dict[str, Any]]:
+        async def astream(self, value: Any, *, stream_mode: str) -> AsyncIterator[dict[str, Any]]:
             eligibility = advance(value["state"], step_count=1)
             yield {Node.CHECK_ELIGIBILITY: {"state": eligibility}}
 
@@ -277,9 +275,7 @@ async def test_write_ahead_intent_survives_delayed_boundary_and_interruption() -
                 Node.REFUND_WRITE: {
                     "state": advance(
                         persisted,
-                        write=WriteOutcome(
-                            status=WriteStatus.SUCCEEDED, resource_id="refund-001"
-                        ),
+                        write=WriteOutcome(status=WriteStatus.SUCCEEDED, resource_id="refund-001"),
                     )
                 }
             }
