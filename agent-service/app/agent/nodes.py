@@ -55,13 +55,15 @@ from app.agent.routing import (
     safe_stop_reason_for,
     terminal_decision_for,
 )
-from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, advance
-from app.agent.tool_tracing import TraceSink
+from app.agent.state import AgentState, RunStatus, ToolHistoryEntry, WriteIntent, WriteOutcome, advance
+from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.agent.verify_business_state import (
     AfterSalesReadTools,
     verify_refund_business_state,
     verify_return_business_state,
 )
+from app.tools.models import ToolEnvelope
+from app.clients.models import TicketResult
 from app.tools.registry import ToolRegistry
 
 __all__ = [
@@ -562,7 +564,23 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
     }
 
 
-def build_lifecycle_nodes() -> dict[Node, GraphNode]:
+class SupportTicketTools(Protocol):
+    """The single authenticated, state-changing T062 escalation capability."""
+
+    async def create_support_ticket(
+        self,
+        *,
+        run_id: str,
+        order_id: str | None,
+        category: str,
+        reason_code: str,
+        evidence_summary: str,
+    ) -> ToolEnvelope[TicketResult]: ...
+
+
+def build_lifecycle_nodes(
+    tools: SupportTicketTools | None = None, record_trace: TraceSink | None = None
+) -> dict[Node, GraphNode]:
     """Build the nodes that end one invocation.
 
     These take no dependencies at all, and that is the design: deciding that a run is over is a pure
@@ -594,21 +612,67 @@ def build_lifecycle_nodes() -> dict[Node, GraphNode]:
         return terminate(state, TerminalDecision(status=RunStatus.SAFE_STOP, reason=reason))
 
     async def escalate_or_safe_stop(graph: GraphState) -> GraphUpdate:
-        """Prepare a manual handoff without claiming a ticket that T062 has not created.
+        """Call Java exactly once, then checkpoint the result before finalizing.
 
-        T061 establishes an authoritative MANUAL_REVIEW decision and ends automation.
-        Only the T062 Tool may turn that intent into a committed ticket and ESCALATED.
+        LangGraph goes to FINALIZE on the next edge. The runtime checkpoints this
+        node's state at that boundary, before setting the terminal run status.
         """
         state = graph["state"]
         snapshot = state.eligibility
-        if snapshot is None or snapshot.allowed_action != "MANUAL_REVIEW":
+        if snapshot is None or snapshot.allowed_action != "MANUAL_REVIEW" or snapshot.eligible:
             raise ValueError("escalate_or_safe_stop requires authoritative MANUAL_REVIEW")
-        return terminate(
-            state,
-            TerminalDecision(
-                status=RunStatus.SAFE_STOP,
-                reason=SafeStopReason.MANUAL_REVIEW_REQUIRED,
+        if tools is None:
+            # Unit harnesses with no configured write dependency must not forge a ticket.
+            return GraphUpdate(state=state, decision=Decision())
+        if state.support_ticket_id is not None:
+            # A restored result never triggers another POST.
+            return GraphUpdate(state=state, decision=Decision())
+
+        # No raw LLM messages or arbitrary evidence.data go into the request.
+        # Use only the Java eligibility verdict and structured evidence type names.
+        evidence_types = sorted(
+            {item.evidence_type for item in state.evidence if item.evidence_type.isidentifier()}
+        )
+        summary = "eligibility=MANUAL_REVIEW; evidenceTypes=" + (
+            ",".join(evidence_types) if evidence_types else "NONE"
+        )
+        result = await tools.create_support_ticket(
+            run_id=str(state.run_id),
+            order_id=state.resolved_order_id,
+            category="AFTER_SALES_ESCALATION",
+            reason_code="MANUAL_REVIEW_REQUIRED",
+            evidence_summary=summary[:2000],
+        )
+        report_tool_call(
+            record_trace,
+            step_index=state.step_count,
+            tool_name="create_support_ticket",
+            envelope=result,
+            input_summary={
+                "runId": str(state.run_id),
+                "orderId": state.resolved_order_id,
+                "category": "AFTER_SALES_ESCALATION",
+                "reasonCode": "MANUAL_REVIEW_REQUIRED",
+                "evidenceTypes": evidence_types,
+            },
+        )
+        history = [
+            *state.tool_history,
+            ToolHistoryEntry(
+                step_index=state.step_count,
+                tool_name="create_support_ticket",
+                success=result.success,
+                error_code=result.error_code,
+                retryable=False,
+                trace_id=result.trace_id,
             ),
+        ]
+        ticket = result.data
+        if not result.success or ticket is None or ticket.status != "OPEN":
+            return GraphUpdate(state=advance(state, tool_history=history), decision=Decision())
+        return GraphUpdate(
+            state=advance(state, tool_history=history, support_ticket_id=ticket.ticket_id),
+            decision=Decision(),
         )
 
     async def waiting_user(graph: GraphState) -> GraphUpdate:
