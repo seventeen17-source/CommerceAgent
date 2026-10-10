@@ -658,12 +658,22 @@ components:
             was already told. Null means the accepted return carried no window.
     CreateTicketRequest:
       type: object
-      required: [category, evidenceSummary, runId]
+      additionalProperties: false
+      required: [category, reasonCode, evidenceSummary, runId]
       properties:
-        orderId: { type: [string, 'null'] }
-        category: { type: string }
-        evidenceSummary: { type: string }
-        runId: { type: string }
+        orderId: { type: [string, 'null'], maxLength: 64 }
+        category: { type: string, minLength: 1, maxLength: 64 }
+        reasonCode:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Machine-readable escalation reason; never hidden reasoning or free-form chain-of-thought.
+        evidenceSummary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Structured, reviewable evidence summary only; raw model reasoning and credentials are forbidden.
+        runId: { type: string, format: uuid }
     TicketResult:
       type: object
       properties:
