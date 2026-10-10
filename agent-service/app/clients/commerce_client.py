@@ -59,6 +59,7 @@ from app.clients.models import (
     CreateApprovalRequest,
     CreateRefundRequest,
     CreateReturnRequest,
+    CreateTicketRequest,
     CurrentPrincipal,
     EligibilityDecision,
     EligibilityRequest,
@@ -68,6 +69,7 @@ from app.clients.models import (
     OrderSummary,
     RefundResult,
     ReturnResult,
+    TicketResult,
 )
 
 if TYPE_CHECKING:
@@ -340,6 +342,19 @@ class CommerceClient:
         )
 
     # ---- write surface ---------------------------------------------------------------------
+
+    async def create_support_ticket(
+        self, auth: AuthContext, request: CreateTicketRequest
+    ) -> CommerceCall[TicketResult]:
+        """Single protected write; timeout is unknown, never permission for blind retry."""
+        return await self._request(
+            "POST",
+            "/support-tickets",
+            auth,
+            response_model=TicketResult,
+            request_is_safe=False,
+            json_body=request.model_dump(by_alias=True, mode="json"),
+        )
 
     async def create_approval(
         self,
