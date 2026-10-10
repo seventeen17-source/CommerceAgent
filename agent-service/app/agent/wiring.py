@@ -4,8 +4,8 @@ The graph is a pure function of its dependencies, and this module is the one pla
 built and bound: the caller's credential goes into the Tool layer, the model comes from settings,
 and the only per-run piece is the session that persists the walk.
 
-``CommerceTools`` deliberately fills six capability dependencies: orders, evidence,
-eligibility, approval creation, protected writes and the after-sales read. They are all the same
+``CommerceTools`` is one authenticated facade for orders, evidence, eligibility,
+approvals, protected writes, after-sales reads, and the manual support-ticket handoff. They are all the same
 authenticated HTTP facade, so the credential is bound in exactly one object - there is no second
 place for it to leak from, and no second place for it to drift. That one object satisfies the six
 narrow protocols through structural typing; mypy checks the wiring rather than a runtime cast.
