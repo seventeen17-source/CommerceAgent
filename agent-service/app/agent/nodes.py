@@ -628,6 +628,8 @@ def build_lifecycle_nodes(
             # A restored result never triggers another POST.
             return GraphUpdate(state=state, decision=Decision())
 
+        state = spend_one_step(state)
+
         # No raw LLM messages or arbitrary evidence.data go into the request.
         # Use only the Java eligibility verdict and structured evidence type names.
         evidence_types = sorted(
