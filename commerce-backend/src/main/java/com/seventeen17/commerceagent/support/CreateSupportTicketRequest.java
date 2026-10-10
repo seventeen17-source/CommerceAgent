@@ -10,6 +10,9 @@ import java.util.UUID;
 public record CreateSupportTicketRequest(
         @Size(max = 64) String orderId,
         @NotBlank @Size(max = 64) String category,
-        @NotBlank @Size(max = 100) @Pattern(regexp = "^[A-Z0-9_:-]+$") String reasonCode,
+
+        @NotBlank @Size(max = 100) @Pattern(regexp = "^[A-Z0-9_:-]+$")
+        String reasonCode,
+
         @NotBlank @Size(max = 2000) String evidenceSummary,
         @NotNull UUID runId) {}
