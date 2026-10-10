@@ -11,7 +11,6 @@ import pytest
 from app.agent.nodes import build_lifecycle_nodes
 from app.agent.routing import Node, SafeStopReason
 from app.agent.state import AgentState, RunStatus
-from app.agent.state import AgentState
 from app.clients.auth import AuthContext
 from app.clients.commerce_client import TRACE_ID_HEADER, CommerceClient
 from app.clients.models import TicketResult
@@ -35,7 +34,11 @@ def _state() -> AgentState:
                 "reason_codes": ["MANUAL_REVIEW_REQUIRED"],
             },
             "evidence": [
-                {"evidence_type": "LOGISTICS", "source": "get_logistics", "data": {"status": "IN_TRANSIT"}}
+                {
+                    "evidence_type": "LOGISTICS",
+                    "source": "get_logistics",
+                    "data": {"status": "IN_TRANSIT"},
+                }
             ],
             "step_count": 4,
         }
@@ -77,7 +80,11 @@ async def test_ticket_tool_forwards_principal_and_only_contract_fields() -> None
     assert seen[0].url.path == "/api/v1/support-tickets"
     assert seen[0].headers["authorization"] == "Bearer header.payload.signature"
     assert set(json.loads(seen[0].content)) == {
-        "runId", "orderId", "category", "reasonCode", "evidenceSummary"
+        "runId",
+        "orderId",
+        "category",
+        "reasonCode",
+        "evidenceSummary",
     }
 
 
