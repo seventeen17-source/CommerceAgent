@@ -206,6 +206,9 @@ class ApprovalResult(BaseModel):
     action_type: str = Field(alias="actionType", min_length=1, max_length=32)
     amount: Decimal | None = None
     risk_reason: str | None = Field(default=None, alias="riskReason", max_length=100)
+    eligibility_rule_code: str | None = Field(
+        default=None, alias="eligibilityRuleCode", max_length=100
+    )
     status: str = Field(min_length=1, max_length=32)
     decided_by: str | None = Field(default=None, alias="decidedBy", max_length=64)
     decided_at: datetime | None = Field(default=None, alias="decidedAt")
