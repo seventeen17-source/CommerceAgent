@@ -70,6 +70,6 @@ def build_agent_graph(
             **build_evidence_nodes(deps),
             **build_approval_nodes(deps),
             **build_write_nodes(deps),
-            **build_lifecycle_nodes(),
+            **build_lifecycle_nodes(tools, deps.record_trace),
         }
     )
