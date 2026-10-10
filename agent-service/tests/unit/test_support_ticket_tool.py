@@ -125,6 +125,24 @@ async def test_invalid_ticket_request_is_rejected_before_http() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unexpected_http_200_does_not_claim_ticket_created() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ticketId": "ticket-001", "status": "OPEN"})
+
+    async with _client(handler) as client:
+        result = await CommerceTools(client=client, auth=_AUTH).create_support_ticket(
+            run_id=str(uuid4()),
+            order_id=None,
+            category="AFTER_SALES_ESCALATION",
+            reason_code="MANUAL_REVIEW_REQUIRED",
+            evidence_summary="structured",
+        )
+    assert result.success is False
+    assert result.error_code == "WRITE_TIMEOUT_UNKNOWN"
+    assert result.data is None
+
+
+@pytest.mark.asyncio
 async def test_malformed_success_is_unknown_write_not_confirmed() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(201, json={"ticketId": "ticket-001", "status": 27})
