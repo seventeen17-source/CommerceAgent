@@ -28,15 +28,12 @@ public class ApprovalController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     ApprovalResult create(
-            @AuthenticationPrincipal CommercePrincipal principal,
-            @Valid @RequestBody CreateApprovalRequest request) {
+            @AuthenticationPrincipal CommercePrincipal principal, @Valid @RequestBody CreateApprovalRequest request) {
         return approvalService.createApproval(principal, request);
     }
 
     @GetMapping("/{approvalId}")
-    ApprovalResult getOwned(
-            @AuthenticationPrincipal CommercePrincipal principal,
-            @PathVariable String approvalId) {
+    ApprovalResult getOwned(@AuthenticationPrincipal CommercePrincipal principal, @PathVariable String approvalId) {
         return approvalService.getOwnedApproval(principal, approvalId);
     }
 

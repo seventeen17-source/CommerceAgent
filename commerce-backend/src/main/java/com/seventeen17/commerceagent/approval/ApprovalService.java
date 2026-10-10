@@ -69,10 +69,7 @@ public class ApprovalService {
 
         Instant now = clock.instant();
         Optional<ApprovalRequest> existing = approvalRepository.findByRunIdAndOrderIdAndActionAndStatus(
-                request.runId().toString(),
-                request.orderId(),
-                request.actionType(),
-                ApprovalStatus.PENDING);
+                request.runId().toString(), request.orderId(), request.actionType(), ApprovalStatus.PENDING);
         if (existing.isPresent() && !expireIfDue(existing.get(), now)) {
             return replayExisting(principal, request, decision, riskReason, existing.get());
         }
@@ -143,16 +140,14 @@ public class ApprovalService {
     }
 
     @Transactional(noRollbackFor = BusinessException.class)
-    public ApprovalResult decide(
-            CommercePrincipal principal, String approvalId, ApprovalDecision decision) {
+    public ApprovalResult decide(CommercePrincipal principal, String approvalId, ApprovalDecision decision) {
         ApprovalAuthorization.requireApprover(principal);
         ApprovalRequest approval = approvalRepository
                 .findByIdForUpdate(approvalId)
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.APPROVAL_NOT_FOUND, "Approval request was not found"));
+                .orElseThrow(
+                        () -> new BusinessException(ErrorCode.APPROVAL_NOT_FOUND, "Approval request was not found"));
 
-        ApprovalStatus target =
-                decision == ApprovalDecision.APPROVE ? ApprovalStatus.APPROVED : ApprovalStatus.DENIED;
+        ApprovalStatus target = decision == ApprovalDecision.APPROVE ? ApprovalStatus.APPROVED : ApprovalStatus.DENIED;
 
         if (approval.getStatus() == target) {
             // A browser retry/double-click of the same decision is idempotent.
@@ -259,14 +254,12 @@ public class ApprovalService {
         }
         if (!approval.binds(runId, orderId, action, amount)) {
             throw new BusinessException(
-                    ErrorCode.APPROVAL_CONFLICT,
-                    "Approval does not bind the proposed run/order/action/amount");
+                    ErrorCode.APPROVAL_CONFLICT, "Approval does not bind the proposed run/order/action/amount");
         }
         return approval;
     }
 
-    private static String requireExactApprovalProposal(
-            CreateApprovalRequest request, EligibilityDecision decision) {
+    private static String requireExactApprovalProposal(CreateApprovalRequest request, EligibilityDecision decision) {
         if (!decision.eligible()) {
             if (decision.allowedAction() == AllowedAction.MANUAL_REVIEW) {
                 throw new BusinessException(
@@ -274,13 +267,11 @@ public class ApprovalService {
                         "Eligibility requires manual review rather than an approval request");
             }
             throw new BusinessException(
-                    ErrorCode.ELIGIBILITY_DENIED,
-                    "Deterministic eligibility does not authorize the proposed action");
+                    ErrorCode.ELIGIBILITY_DENIED, "Deterministic eligibility does not authorize the proposed action");
         }
         if (!decision.approvalRequired()) {
             throw new BusinessException(
-                    ErrorCode.INVALID_PARAMETER,
-                    "Current authoritative eligibility does not require human approval");
+                    ErrorCode.INVALID_PARAMETER, "Current authoritative eligibility does not require human approval");
         }
         if (request.actionType() != decision.allowedAction()) {
             throw new BusinessException(
@@ -298,12 +289,10 @@ public class ApprovalService {
                 .filter(reason -> reason.startsWith("APPROVAL_"))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(
-                        ErrorCode.INTERNAL_ERROR,
-                        "approvalRequired=true without an authoritative approval reason"));
+                        ErrorCode.INTERNAL_ERROR, "approvalRequired=true without an authoritative approval reason"));
         if (!authoritativeRiskReason.equals(request.riskReason())) {
             throw new BusinessException(
-                    ErrorCode.INVALID_PARAMETER,
-                    "riskReason must match the authoritative approval reason");
+                    ErrorCode.INVALID_PARAMETER, "riskReason must match the authoritative approval reason");
         }
         return authoritativeRiskReason;
     }

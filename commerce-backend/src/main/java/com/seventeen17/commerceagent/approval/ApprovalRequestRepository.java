@@ -23,9 +23,7 @@ public interface ApprovalRequestRepository extends JpaRepository<ApprovalRequest
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from ApprovalRequest a where a.id = :id and a.userId = :userId")
-    Optional<ApprovalRequest> findByIdAndUserIdForUpdate(
-            @Param("id") String id, @Param("userId") String userId);
-
+    Optional<ApprovalRequest> findByIdAndUserIdForUpdate(@Param("id") String id, @Param("userId") String userId);
 
     Optional<ApprovalRequest> findByRunIdAndOrderIdAndActionAndStatus(
             String runId, String orderId, AllowedAction action, ApprovalStatus status);

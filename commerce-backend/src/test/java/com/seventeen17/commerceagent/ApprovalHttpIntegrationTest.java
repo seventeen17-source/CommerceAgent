@@ -28,13 +28,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
@@ -100,19 +99,17 @@ class ApprovalHttpIntegrationTest {
                         + "(SELECT id FROM commerce.approval_requests WHERE order_id IN (?, ?))",
                 ORDER_ID,
                 OTHER_ORDER_ID);
-        approvalRepository.deleteAll(
-                approvalRepository.findAll().stream()
-                        .filter(row -> row.getOrderId().equals(ORDER_ID) || row.getOrderId().equals(OTHER_ORDER_ID))
-                        .toList());
-        shipmentRepository.deleteAll(
-                shipmentRepository.findAll().stream()
-                        .filter(row -> row.getOrderId().equals(ORDER_ID) || row.getOrderId().equals(OTHER_ORDER_ID))
-                        .toList());
+        approvalRepository.deleteAll(approvalRepository.findAll().stream()
+                .filter(row ->
+                        row.getOrderId().equals(ORDER_ID) || row.getOrderId().equals(OTHER_ORDER_ID))
+                .toList());
+        shipmentRepository.deleteAll(shipmentRepository.findAll().stream()
+                .filter(row ->
+                        row.getOrderId().equals(ORDER_ID) || row.getOrderId().equals(OTHER_ORDER_ID))
+                .toList());
         orderRepository.deleteById(ORDER_ID);
         orderRepository.deleteById(OTHER_ORDER_ID);
-        ruleRepository
-                .findByRuleCodeAndVersion(RULE_CODE, 1)
-                .ifPresent(ruleRepository::delete);
+        ruleRepository.findByRuleCodeAndVersion(RULE_CODE, 1).ifPresent(ruleRepository::delete);
         userRepository.deleteById(CUSTOMER_ID);
         userRepository.deleteById(OTHER_CUSTOMER_ID);
         userRepository.deleteById(APPROVER_ID);
@@ -234,8 +231,7 @@ class ApprovalHttpIntegrationTest {
         String customerToken = tokenWithRole(CUSTOMER_ID, UserRole.CUSTOMER);
         String approverToken = tokenWithRole(APPROVER_ID, UserRole.APPROVER);
 
-        mockMvc.perform(get("/api/v1/approvals")
-                        .header("Authorization", "Bearer " + customerToken))
+        mockMvc.perform(get("/api/v1/approvals").header("Authorization", "Bearer " + customerToken))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("ACCESS_DENIED"));
 
@@ -281,7 +277,13 @@ class ApprovalHttpIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("ACCESS_DENIED"));
 
-        assertEquals("PENDING", approvalRepository.findById(approvalId).orElseThrow().getStatus().name());
+        assertEquals(
+                "PENDING",
+                approvalRepository
+                        .findById(approvalId)
+                        .orElseThrow()
+                        .getStatus()
+                        .name());
     }
 
     @Test
@@ -302,7 +304,13 @@ class ApprovalHttpIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.errorCode").value("APPROVAL_CONFLICT"));
 
-        assertEquals("APPROVED", approvalRepository.findById(approvalId).orElseThrow().getStatus().name());
+        assertEquals(
+                "APPROVED",
+                approvalRepository
+                        .findById(approvalId)
+                        .orElseThrow()
+                        .getStatus()
+                        .name());
     }
 
     @Test
@@ -316,7 +324,13 @@ class ApprovalHttpIntegrationTest {
                 .andExpect(jsonPath("$.status").value("DENIED"))
                 .andExpect(jsonPath("$.decidedBy").value(APPROVER_ID));
 
-        assertEquals("DENIED", approvalRepository.findById(approvalId).orElseThrow().getStatus().name());
+        assertEquals(
+                "DENIED",
+                approvalRepository
+                        .findById(approvalId)
+                        .orElseThrow()
+                        .getStatus()
+                        .name());
     }
 
     @Test
@@ -334,7 +348,13 @@ class ApprovalHttpIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.errorCode").value("APPROVAL_EXPIRED"));
 
-        assertEquals("EXPIRED", approvalRepository.findById(approvalId).orElseThrow().getStatus().name());
+        assertEquals(
+                "EXPIRED",
+                approvalRepository
+                        .findById(approvalId)
+                        .orElseThrow()
+                        .getStatus()
+                        .name());
         assertEquals(
                 1,
                 auditRepository
@@ -373,12 +393,11 @@ class ApprovalHttpIntegrationTest {
                         .content(createBody(ORDER_ID, "REFUND_ONLY", "399.00", "APPROVAL_REQUIRED_BY_AMOUNT")))
                 .andExpect(status().isCreated())
                 .andReturn();
-        return com.jayway.jsonpath.JsonPath.read(
-                result.getResponse().getContentAsString(), "$.approvalRequestId");
+        return com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.approvalRequestId");
     }
 
-    private org.springframework.test.web.servlet.ResultActions decide(
-            String token, String approvalId, String decision) throws Exception {
+    private org.springframework.test.web.servlet.ResultActions decide(String token, String approvalId, String decision)
+            throws Exception {
         return mockMvc.perform(post("/api/v1/approvals/{approvalId}/decision", approvalId)
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -430,12 +449,14 @@ class ApprovalHttpIntegrationTest {
     }
 
     private void seedUser(String userId, UserRole role) {
-        userRepository.findById(userId).ifPresentOrElse(
-                user -> {
-                    user.setRole(role);
-                    userRepository.saveAndFlush(user);
-                },
-                () -> userRepository.saveAndFlush(User.create(userId, userId, role)));
+        userRepository
+                .findById(userId)
+                .ifPresentOrElse(
+                        user -> {
+                            user.setRole(role);
+                            userRepository.saveAndFlush(user);
+                        },
+                        () -> userRepository.saveAndFlush(User.create(userId, userId, role)));
     }
 
     private int countTestApprovals() {

@@ -101,14 +101,11 @@ class ApprovalWriteBindingIntegrationTest {
         refundService.createRefund(
                 OWNER,
                 "t054refundkey",
-                new RefundCommand(
-                        "t054-refund-order",
-                        "STALLED_LOGISTICS",
-                        null,
-                        "t054-refund-approval",
-                        RUN_ID));
+                new RefundCommand("t054-refund-order", "STALLED_LOGISTICS", null, "t054-refund-approval", RUN_ID));
 
-        var refund = refundRepository.findByUserIdAndIdempotencyKey(OWNER_ID, "t054refundkey").orElseThrow();
+        var refund = refundRepository
+                .findByUserIdAndIdempotencyKey(OWNER_ID, "t054refundkey")
+                .orElseThrow();
         assertEquals("t054-refund-approval", refund.getApprovalRequestId());
     }
 
@@ -129,11 +126,7 @@ class ApprovalWriteBindingIntegrationTest {
                         OWNER,
                         "t054crossrun",
                         new RefundCommand(
-                                "t054-cross-run-order",
-                                "STALLED_LOGISTICS",
-                                null,
-                                "t054-cross-run-approval",
-                                RUN_ID)));
+                                "t054-cross-run-order", "STALLED_LOGISTICS", null, "t054-cross-run-approval", RUN_ID)));
 
         assertEquals(ErrorCode.APPROVAL_CONFLICT, failure.getErrorCode());
         assertEquals(0, countRefunds("t054-cross-run-order"));
@@ -215,12 +208,7 @@ class ApprovalWriteBindingIntegrationTest {
         returnService.createReturn(
                 OWNER,
                 "t054returnkey",
-                new ReturnCommand(
-                        "t054-return-order",
-                        "DELIVERED_RETURN",
-                        null,
-                        "t054-return-approval",
-                        RUN_ID));
+                new ReturnCommand("t054-return-order", "DELIVERED_RETURN", null, "t054-return-approval", RUN_ID));
 
         var request = returnRepository
                 .findByUserIdAndIdempotencyKey(OWNER_ID, "t054returnkey")
@@ -267,9 +255,18 @@ class ApprovalWriteBindingIntegrationTest {
         shipmentRepository.saveAndFlush(shipment);
         if (ruleRepository.findByRuleCodeAndVersion("T054-REFUND", 1).isEmpty()) {
             ruleRepository.saveAndFlush(AfterSalesRule.create(
-                    "T054-REFUND", 1, "T054_REFUND", OrderStatus.SHIPPED, 48, 7,
-                    new BigDecimal("500.00"), new BigDecimal("300.00"),
-                    AllowedAction.REFUND_ONLY, true, NOW.minus(Duration.ofDays(30)), null));
+                    "T054-REFUND",
+                    1,
+                    "T054_REFUND",
+                    OrderStatus.SHIPPED,
+                    48,
+                    7,
+                    new BigDecimal("500.00"),
+                    new BigDecimal("300.00"),
+                    AllowedAction.REFUND_ONLY,
+                    true,
+                    NOW.minus(Duration.ofDays(30)),
+                    null));
         }
     }
 
@@ -285,9 +282,18 @@ class ApprovalWriteBindingIntegrationTest {
         shipmentRepository.saveAndFlush(shipment);
         if (ruleRepository.findByRuleCodeAndVersion("T054-RETURN", 1).isEmpty()) {
             ruleRepository.saveAndFlush(AfterSalesRule.create(
-                    "T054-RETURN", 1, "T054_RETURN", OrderStatus.DELIVERED, null, 7,
-                    new BigDecimal("500.00"), new BigDecimal("300.00"),
-                    AllowedAction.RETURN_REFUND, true, NOW.minus(Duration.ofDays(30)), null));
+                    "T054-RETURN",
+                    1,
+                    "T054_RETURN",
+                    OrderStatus.DELIVERED,
+                    null,
+                    7,
+                    new BigDecimal("500.00"),
+                    new BigDecimal("300.00"),
+                    AllowedAction.RETURN_REFUND,
+                    true,
+                    NOW.minus(Duration.ofDays(30)),
+                    null));
         }
     }
 
@@ -301,12 +307,7 @@ class ApprovalWriteBindingIntegrationTest {
     }
 
     private void seedApproved(
-            String id,
-            String runId,
-            String orderId,
-            AllowedAction action,
-            BigDecimal amount,
-            String ruleCode) {
+            String id, String runId, String orderId, AllowedAction action, BigDecimal amount, String ruleCode) {
         ApprovalRequest approval = ApprovalRequest.pending(
                 id,
                 runId,
@@ -335,15 +336,12 @@ class ApprovalWriteBindingIntegrationTest {
 
     @AfterEach
     void cleanUp() {
-        jdbcTemplate.update(
-                "DELETE FROM commerce.audit_logs WHERE resource_id IN "
-                        + "(SELECT id FROM commerce.refund_requests WHERE order_id LIKE 't054-%')");
-        jdbcTemplate.update(
-                "DELETE FROM commerce.audit_logs WHERE resource_id IN "
-                        + "(SELECT id FROM commerce.return_requests WHERE order_id LIKE 't054-%')");
-        jdbcTemplate.update(
-                "DELETE FROM commerce.audit_logs WHERE resource_id IN "
-                        + "(SELECT id FROM commerce.approval_requests WHERE order_id LIKE 't054-%')");
+        jdbcTemplate.update("DELETE FROM commerce.audit_logs WHERE resource_id IN "
+                + "(SELECT id FROM commerce.refund_requests WHERE order_id LIKE 't054-%')");
+        jdbcTemplate.update("DELETE FROM commerce.audit_logs WHERE resource_id IN "
+                + "(SELECT id FROM commerce.return_requests WHERE order_id LIKE 't054-%')");
+        jdbcTemplate.update("DELETE FROM commerce.audit_logs WHERE resource_id IN "
+                + "(SELECT id FROM commerce.approval_requests WHERE order_id LIKE 't054-%')");
         jdbcTemplate.update("DELETE FROM commerce.refund_requests WHERE order_id LIKE 't054-%'");
         jdbcTemplate.update("DELETE FROM commerce.return_requests WHERE order_id LIKE 't054-%'");
         jdbcTemplate.update("DELETE FROM commerce.approval_requests WHERE order_id LIKE 't054-%'");

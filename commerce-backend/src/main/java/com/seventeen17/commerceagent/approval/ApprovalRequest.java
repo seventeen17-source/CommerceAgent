@@ -168,7 +168,8 @@ public class ApprovalRequest {
      * <p>{@link BigDecimal#compareTo(BigDecimal)} is intentional: {@code 500.0} and {@code 500.00}
      * are the same amount even though {@code BigDecimal.equals} would reject the different scale.
      */
-    public boolean binds(String proposedRunId, String proposedOrderId, AllowedAction proposedAction, BigDecimal proposedAmount) {
+    public boolean binds(
+            String proposedRunId, String proposedOrderId, AllowedAction proposedAction, BigDecimal proposedAmount) {
         if (!Objects.equals(runId, proposedRunId)
                 || !Objects.equals(orderId, proposedOrderId)
                 || action != proposedAction) {
@@ -180,18 +181,59 @@ public class ApprovalRequest {
         return amount.compareTo(proposedAmount) == 0;
     }
 
-    public String getId() { return id; }
-    public String getRunId() { return runId; }
-    public String getOrderId() { return orderId; }
-    public String getUserId() { return userId; }
-    public AllowedAction getAction() { return action; }
-    public BigDecimal getAmount() { return amount; }
-    public ApprovalStatus getStatus() { return status; }
-    public String getEligibilityRuleCode() { return eligibilityRuleCode; }
-    public String getReasonCode() { return reasonCode; }
-    public String getDecidedBy() { return decidedBy; }
-    public Instant getDecidedAt() { return decidedAt; }
-    public Instant getExpiresAt() { return expiresAt; }
-    public Instant getCreatedAt() { return createdAt; }
-    public Instant getUpdatedAt() { return updatedAt; }
+    public String getId() {
+        return id;
+    }
+
+    public String getRunId() {
+        return runId;
+    }
+
+    public String getOrderId() {
+        return orderId;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public AllowedAction getAction() {
+        return action;
+    }
+
+    public BigDecimal getAmount() {
+        return amount;
+    }
+
+    public ApprovalStatus getStatus() {
+        return status;
+    }
+
+    public String getEligibilityRuleCode() {
+        return eligibilityRuleCode;
+    }
+
+    public String getReasonCode() {
+        return reasonCode;
+    }
+
+    public String getDecidedBy() {
+        return decidedBy;
+    }
+
+    public Instant getDecidedAt() {
+        return decidedAt;
+    }
+
+    public Instant getExpiresAt() {
+        return expiresAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
 }

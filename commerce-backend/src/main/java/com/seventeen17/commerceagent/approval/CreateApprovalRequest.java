@@ -22,7 +22,6 @@ public record CreateApprovalRequest(
         @NotBlank @Size(max = 64) String orderId,
         @NotNull AllowedAction actionType,
         @Positive BigDecimal amount,
-        @NotBlank
-                @Size(max = 100)
-                @Pattern(regexp = "^[A-Z0-9_:-]+$")
-                String riskReason) {}
+
+        @NotBlank @Size(max = 100) @Pattern(regexp = "^[A-Z0-9_:-]+$")
+        String riskReason) {}

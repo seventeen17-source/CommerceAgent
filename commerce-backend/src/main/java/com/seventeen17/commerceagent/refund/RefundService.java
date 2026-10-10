@@ -282,10 +282,7 @@ public class RefundService {
     }
 
     private String requireRefundApproval(
-            CommercePrincipal principal,
-            RefundCommand command,
-            EligibilityDecision decision,
-            BigDecimal amount) {
+            CommercePrincipal principal, RefundCommand command, EligibilityDecision decision, BigDecimal amount) {
         if (!decision.approvalRequired()) {
             if (command.approvalRequestId() != null) {
                 throw new BusinessException(

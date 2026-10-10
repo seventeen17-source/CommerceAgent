@@ -19,8 +19,7 @@ class ApprovalSecurityContractTest {
 
     private static final Instant EXPIRES_AT = Instant.parse("2026-10-09T12:00:00Z");
     private static final Instant DECIDED_AT = Instant.parse("2026-10-08T12:00:00Z");
-    private static final CommercePrincipal APPROVER =
-            new CommercePrincipal("approver-001", UserRole.APPROVER);
+    private static final CommercePrincipal APPROVER = new CommercePrincipal("approver-001", UserRole.APPROVER);
 
     @Test
     void pendingCanBecomeApprovedAndRecordsWhoDecided() {
