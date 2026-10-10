@@ -17,7 +17,6 @@ import com.seventeen17.commerceagent.user.UserRole;
 import java.math.BigDecimal;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,12 +31,9 @@ import org.springframework.test.web.servlet.MvcResult;
 /**
  * T058 executable contract for SupportTicket creation, ownership, and audit.
  *
- * <p>The production table/entity belong to T059 and the protected API belongs to T060. Keeping
- * these tests disabled until those tasks exist gives the future implementation a precise target
- * without making today's Java build fail to compile against classes that deliberately do not exist
- * yet.
+ * <p>Enabled in T060 after the production table and API were implemented. The HTTP boundary,
+ * PostgreSQL business rows, and committed audit facts are checked together.
  */
-@Disabled("T059/T060 must provide commerce.support_tickets and POST /api/v1/support-tickets")
 @ActiveProfiles("test")
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest
@@ -167,11 +163,45 @@ class SupportTicketHttpIntegrationTest {
                 .andExpect(jsonPath("$.errorCode").value("ACCESS_DENIED"));
     }
 
+    @Test
+    void unresolvedOrderStillAllowsSafeEscalation() throws Exception {
+        seedUser(CUSTOMER_ID, UserRole.CUSTOMER);
+        String token = localJwtIssuer.issue(CUSTOMER_ID);
+
+        mockMvc.perform(post("/api/v1/support-tickets")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(ticketBody(null)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("OPEN"));
+
+        Long tickets = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM commerce.support_tickets WHERE user_id = ? AND order_id IS NULL",
+                Long.class,
+                CUSTOMER_ID);
+        assertEquals(1L, tickets);
+    }
+
+    @Test
+    void blankReasonCodeCannotCreateTicket() throws Exception {
+        seedUser(CUSTOMER_ID, UserRole.CUSTOMER);
+        String token = localJwtIssuer.issue(CUSTOMER_ID);
+
+        mockMvc.perform(post("/api/v1/support-tickets")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(ticketBody(null).replace("MANUAL_REVIEW_REQUIRED", "")))
+                .andExpect(status().isBadRequest());
+
+        Long tickets = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM commerce.support_tickets WHERE user_id = ?", Long.class, CUSTOMER_ID);
+        assertEquals(0L, tickets);
+    }
+
     @AfterEach
     void removeT058Rows() {
         jdbcTemplate.update(
                 "DELETE FROM commerce.audit_logs WHERE resource_id LIKE 't058-%' OR actor_id LIKE 't058-%'");
-        // T059 will create this table and must add it to FixtureLoader reset before these tests are enabled.
         jdbcTemplate.update("DELETE FROM commerce.support_tickets WHERE user_id LIKE 't058-%'");
         jdbcTemplate.update("DELETE FROM commerce.order_items WHERE order_id LIKE 't058-%'");
         jdbcTemplate.update("DELETE FROM commerce.orders WHERE id LIKE 't058-%'");
