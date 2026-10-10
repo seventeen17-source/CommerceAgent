@@ -59,6 +59,28 @@ COMMERCE_DSN = (
 )
 
 
+def agent_trace_connect_kwargs() -> dict[str, Any]:
+    """Connection kwargs for reading the Agent-owned trace tables during eval.
+
+    The Docker database is published only on 127.0.0.1. On this Windows host, localhost resolves
+    to ::1 first, so psycopg waits for the IPv6 connect timeout before falling back to IPv4 on
+    every trace query. The integration-test harness already pins the same measured fact. Keep all
+    configured credentials/port/db values, but normalize only the default local host name.
+    """
+    from app.config.settings import Settings  # type: ignore[import-not-found]
+
+    settings = Settings()
+    host = "127.0.0.1" if settings.postgres_host == "localhost" else settings.postgres_host
+    return {
+        "host": host,
+        "port": settings.postgres_port,
+        "dbname": settings.postgres_db,
+        "user": settings.agent_app_user,
+        "password": settings.agent_app_password,
+        "connect_timeout": 5,
+    }
+
+
 @dataclass(frozen=True)
 class Outcome:
     case_id: str
@@ -319,10 +341,9 @@ def tool_call_count(run_id: str, tool_name: str) -> int:
     a run that never got out of bed. The Tool trace can.
     """
     import psycopg
-    from app.config.settings import Settings  # type: ignore[import-not-found]
 
     with (
-        psycopg.connect(Settings().agent_database_url, connect_timeout=5) as connection,
+        psycopg.connect(**agent_trace_connect_kwargs()) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -341,10 +362,9 @@ def recovery_read_happened(run_id: str) -> bool:
     evidence: the write first reported that it did not know, and only then did the run go and ask.
     """
     import psycopg
-    from app.config.settings import Settings  # type: ignore[import-not-found]
 
     with (
-        psycopg.connect(Settings().agent_database_url, connect_timeout=5) as connection,
+        psycopg.connect(**agent_trace_connect_kwargs()) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
