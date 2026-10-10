@@ -41,6 +41,7 @@ from app.agent.execute_write import (
     return_write_intent,
     write_may_already_have_committed,
 )
+from app.agent.failure_policy import may_retry_read
 from app.agent.graph import GraphNode, GraphState, GraphUpdate
 from app.agent.order_resolution import OrderReadTools, resolve_single_order
 from app.agent.request_understanding import RequestUnderstandingModel, understand_request
@@ -264,7 +265,7 @@ def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         )
         history = [*state.tool_history, result.history]
         if result.evidence is None:
-            if result.history.retryable and state.retry_count < state.max_retries:
+            if may_retry_read(result.history, state):
                 # Consume the run's retry budget and report that another attempt is warranted. The
                 # router sends the run back to *this* node with the same authorized read, so a
                 # transient failure costs no model call to re-reach the same conclusion.
@@ -366,7 +367,7 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         )
         history = [*state.tool_history, result.history]
         if result.eligibility is None:
-            if result.history.retryable and state.retry_count < state.max_retries:
+            if may_retry_read(result.history, state):
                 moved = advance(state, retry_count=state.retry_count + 1, tool_history=history)
                 return GraphUpdate(state=moved, decision=Decision(retry_current_stage=True))
             # Java could not answer and we are out of attempts. Finishing here would report "not
