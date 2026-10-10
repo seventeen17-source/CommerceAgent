@@ -7,12 +7,11 @@ from uuid import UUID
 import pytest
 
 from app.agent.nodes import GraphDeps, build_approval_nodes, build_lifecycle_nodes
-from app.agent.routing import Decision, Node, SafeStopReason, route_after_request_approval
+from app.agent.routing import Node, SafeStopReason, route_after_request_approval
 from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome
 from app.clients.models import ApprovalResult
 from app.tools.models import ToolEnvelope
 from app.tools.registry import ToolRegistry
-
 
 RUN_ID = UUID("52000000-0000-4000-8000-000000000001")
 
