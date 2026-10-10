@@ -210,9 +210,10 @@ class SupportTicketHttpIntegrationTest {
         mockMvc.perform(post("/api/v1/support-tickets")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(ticketBody(null).replace(
-                                "LOGISTICS status=IN_TRANSIT; stalledHours=unknown",
-                                "Bearer raw-secret-value")))
+                        .content(ticketBody(null)
+                                .replace(
+                                        "LOGISTICS status=IN_TRANSIT; stalledHours=unknown",
+                                        "Bearer raw-secret-value")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("INVALID_PARAMETER"));
 
