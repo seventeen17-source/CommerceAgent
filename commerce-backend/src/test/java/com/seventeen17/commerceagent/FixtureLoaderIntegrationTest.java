@@ -112,6 +112,42 @@ class FixtureLoaderIntegrationTest {
     }
 
     @Test
+    void resetPreservesNonFixtureBusinessRowsThatShareTheFixturePrincipal() throws Exception {
+        seedAuthenticatedUser();
+        String token = localJwtIssuer.issue("customer-001");
+        jdbcTemplate.update("""
+                INSERT INTO commerce.orders
+                    (id, user_id, status, total_amount, currency, created_at, shipped_at, version)
+                VALUES
+                    ('external-live-order', 'customer-001', 'SHIPPED', 1.00, 'USD',
+                     now() - interval '2 days', now() - interval '1 day', 0)
+                ON CONFLICT (id) DO NOTHING
+                """);
+
+        try {
+            performReset(token);
+
+            assertEquals(
+                    1,
+                    count("""
+                            SELECT COUNT(*) FROM commerce.orders
+                             WHERE id = 'external-live-order' AND user_id = 'customer-001'
+                            """));
+            assertEquals(
+                    1,
+                    count("""
+                            SELECT COUNT(*) FROM commerce.users
+                             WHERE id = 'customer-001'
+                               AND username = 'customer-001'
+                               AND role = 'CUSTOMER'
+                               AND status = 'ACTIVE'
+                            """));
+        } finally {
+            jdbcTemplate.update("DELETE FROM commerce.orders WHERE id = 'external-live-order'");
+        }
+    }
+
+    @Test
     void unknownCaseUsesContractError() throws Exception {
         seedAuthenticatedUser();
         String token = localJwtIssuer.issue("customer-001");
