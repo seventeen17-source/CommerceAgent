@@ -253,6 +253,43 @@ class FixtureLoaderIntegrationTest {
                         """));
     }
 
+    @Test
+    void theApprovalHighRiskCaseSeedsOneEligibleOrderAboveTheApprovalThreshold() throws Exception {
+        seedAuthenticatedUser();
+        String token = localJwtIssuer.issue("customer-001");
+
+        mockMvc.perform(post("/internal/eval/fixtures/approval-high-risk-001/reset")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetVersion\":\"v1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("approval-high-risk-001"))
+                .andExpect(jsonPath("$.fixtureVersion").value("t056-approval-high-risk-001-v1"));
+
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.orders
+                         WHERE id = 'order-004'
+                           AND user_id = 'customer-001'
+                           AND status = 'SHIPPED'
+                           AND total_amount = 399.00
+                        """));
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.shipments
+                         WHERE order_id = 'order-004'
+                           AND status = 'IN_TRANSIT'
+                           AND last_event_at < now() - interval '48 hours'
+                        """));
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.after_sales_rules
+                         WHERE rule_code = 'LOGISTICS_STALLED_REFUND'
+                           AND active = TRUE
+                           AND allowed_action = 'REFUND_ONLY'
+                           AND approval_threshold = 300.00
+                        """));
+        assertEquals(0, count("SELECT COUNT(*) FROM commerce.approval_requests"));
+        assertEquals(0, count("SELECT COUNT(*) FROM commerce.refund_requests WHERE order_id = 'order-004'"));
+    }
+
     private void performReset(String token) throws Exception {
         mockMvc.perform(post("/internal/eval/fixtures/refund-logistics-001/reset")
                         .header("Authorization", "Bearer " + token)
