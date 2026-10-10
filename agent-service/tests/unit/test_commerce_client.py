@@ -267,6 +267,7 @@ async def test_get_approval_is_owner_scoped_read_with_path_safety() -> None:
             await client.get_approval(_AUTH, "../approval-other")
     assert len(seen) == calls_before
 
+
 # ---- answered vs did not answer ------------------------------------------------------------
 
 
