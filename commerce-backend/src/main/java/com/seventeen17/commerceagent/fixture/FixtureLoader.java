@@ -157,6 +157,9 @@ public class FixtureLoader {
         // reset 的语义是回到已知基线，因此必须在删除 orders/users 之前清掉审批记录；否则既会残留上一轮
         // APPROVED/DENIED 结论，也会因为外键让后续清理失败。
         jdbcTemplate.update("DELETE FROM commerce.approval_requests");
+        // T059：SupportTicket 既引用 user，也可能引用 order。它是运行产生的人工接管状态，不是 fixture 起点；
+        // reset 必须先清掉，否则既会把上一轮 escalation 带进下一轮，也会因外键阻止 orders/users 清理。
+        jdbcTemplate.update("DELETE FROM commerce.support_tickets");
         // T021/T026：refund_requests 对 orders 有外键，因此必须在下游对象之后再删 orders，否则 fixture reset 会以
         // FK 违约失败。Eval reset 的语义是"业务状态回到基线"，退款这类写入结果必须一起清掉，否则"重置后重跑同一个
         // 用例"会因为上一轮的退款行而得到不同结论。
