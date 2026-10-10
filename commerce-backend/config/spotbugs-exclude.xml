@@ -71,6 +71,18 @@
 		<Field name="auditWriter"/>
 		<Bug pattern="EI_EXPOSE_REP2"/>
 	</Match>
+	<!--
+		T060: SupportTicketService receives the Spring-managed AuditWriter via constructor injection.
+		The collaborator is stored in a private final field and only used for transactional
+		writeBusinessEvent calls. No accessor returns this reference, so this is the same
+		framework injection false positive as the existing Refund/Return/Approval exemptions.
+		Keep the filter limited to this exact class, field, and bug pattern.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.support.SupportTicketService"/>
+		<Field name="auditWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
 	<Match>
 		<Class name="com.seventeen17.commerceagent.fixture.FixtureLoader"/>
 		<Field name="jdbcTemplate"/>
