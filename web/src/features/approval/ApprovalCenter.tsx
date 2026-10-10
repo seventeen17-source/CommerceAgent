@@ -12,6 +12,7 @@ export type ApprovalRecord = {
   actionType: string
   amount: number | null
   riskReason: string
+  eligibilityRuleCode: string
   status: string
   decidedBy: string | null
   decidedAt: string | null
@@ -190,7 +191,7 @@ export function ApprovalCenter() {
                 <dt>审批动作</dt><dd style={{ margin: 0 }}>{selected.actionType}</dd>
                 <dt>金额</dt><dd style={{ margin: 0 }}>{formatAmount(selected.amount)}</dd>
                 <dt>风险原因</dt><dd style={{ margin: 0 }}>{selected.riskReason}</dd>
-                <dt>证据</dt><dd style={{ margin: 0 }}>当前 Approval API 未提供独立证据明细；请核对权威订单及物流记录，不要仅据此页面推断。</dd>
+                <dt>证据</dt><dd style={{ margin: 0 }}>资格规则：{selected.eligibilityRuleCode}；风险原因：{selected.riskReason}</dd>
                 <dt>状态</dt><dd style={{ margin: 0 }}>{selected.status}</dd>
                 <dt>审批 ID</dt><dd style={{ margin: 0 }}>{selected.approvalRequestId}</dd>
                 <dt>Run ID</dt><dd style={{ margin: 0 }}>{selected.runId}</dd>
