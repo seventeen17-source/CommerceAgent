@@ -1,7 +1,6 @@
 package com.seventeen17.commerceagent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -137,7 +136,9 @@ class SupportTicketHttpIntegrationTest {
                 com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.ticketId");
 
         Map<String, Object> audit = jdbcTemplate.queryForMap("""
-                SELECT actor_id, action, resource_type, resource_id, metadata
+                SELECT actor_id, action, resource_type, resource_id, run_id, result,
+                       metadata_json ->> 'category' AS category,
+                       metadata_json ->> 'reasonCode' AS reason_code
                   FROM commerce.audit_logs
                  WHERE action = 'SUPPORT_TICKET_CREATED'
                    AND resource_id = ?
@@ -147,7 +148,10 @@ class SupportTicketHttpIntegrationTest {
         assertEquals("SUPPORT_TICKET_CREATED", audit.get("action"));
         assertEquals("SUPPORT_TICKET", audit.get("resource_type"));
         assertEquals(ticketId, audit.get("resource_id"));
-        assertNotNull(audit.get("metadata"));
+        assertEquals(RUN_ID, audit.get("run_id").toString());
+        assertEquals("SUCCESS", audit.get("result"));
+        assertEquals("AFTER_SALES_ESCALATION", audit.get("category"));
+        assertEquals("MANUAL_REVIEW_REQUIRED", audit.get("reason_code"));
     }
 
     @Test
