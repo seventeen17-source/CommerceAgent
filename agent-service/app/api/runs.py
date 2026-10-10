@@ -143,9 +143,7 @@ class ResumeRunRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    approval_request_id: str | None = Field(
-        default=None, alias="approvalRequestId", max_length=128
-    )
+    approval_request_id: str | None = Field(default=None, alias="approvalRequestId", max_length=128)
 
 
 class AgentRunView(BaseModel):
@@ -630,16 +628,18 @@ async def _verify_waiting_approval(
     state = _payload_of(record)
     stored = state.approval
     if stored is None or stored.approval_request_id is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_REFERENCE_MISSING")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_REFERENCE_MISSING"
+        )
 
     claimed = None if body is None else body.approval_request_id
     if claimed is not None and claimed != stored.approval_request_id:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_REFERENCE_MISMATCH")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_REFERENCE_MISMATCH"
+        )
 
     try:
-        authoritative = (
-            await client.get_approval(call.auth, stored.approval_request_id)
-        ).value
+        authoritative = (await client.get_approval(call.auth, stored.approval_request_id)).value
     except UnsafeRequestParameterError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_REFERENCE_INVALID"
@@ -666,7 +666,9 @@ async def _verify_waiting_approval(
         and authoritative.amount == eligibility.max_refund_amount
     )
     if not binding_matches:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_BINDING_MISMATCH")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_BINDING_MISMATCH"
+        )
 
     if authoritative.status == "PENDING":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="APPROVAL_PENDING")
@@ -700,6 +702,7 @@ async def _verify_waiting_approval(
         )
     except (RunVersionConflictError, TerminalRunError, RunStoreError) as exc:
         raise _http_error_for(exc, str(record.run_id)) from exc
+
 
 def _owned_run(store: RunStore, raw_run_id: str, call: AuthenticatedCall) -> RunRecord:
     """Read a run the caller owns, or raise the status that says why not.
