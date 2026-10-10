@@ -292,11 +292,7 @@ public class FixtureLoader {
                 "ELECTRONICS",
                 "399.00");
         upsertShipment(
-                APPROVAL_HIGH_RISK_SHIPMENT_ID,
-                APPROVAL_HIGH_RISK_ORDER_ID,
-                "SYNTHETIC",
-                "TRACK-004",
-                "IN_TRANSIT");
+                APPROVAL_HIGH_RISK_SHIPMENT_ID, APPROVAL_HIGH_RISK_ORDER_ID, "SYNTHETIC", "TRACK-004", "IN_TRANSIT");
         ensureLogisticsEvent(
                 APPROVAL_HIGH_RISK_SHIPMENT_ID,
                 "IN_TRANSIT",

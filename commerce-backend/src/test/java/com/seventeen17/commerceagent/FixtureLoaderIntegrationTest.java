@@ -127,15 +127,11 @@ class FixtureLoaderIntegrationTest {
         try {
             performReset(token);
 
-            assertEquals(
-                    1,
-                    count("""
+            assertEquals(1, count("""
                             SELECT COUNT(*) FROM commerce.orders
                              WHERE id = 'external-live-order' AND user_id = 'customer-001'
                             """));
-            assertEquals(
-                    1,
-                    count("""
+            assertEquals(1, count("""
                             SELECT COUNT(*) FROM commerce.users
                              WHERE id = 'customer-001'
                                AND username = 'customer-001'
