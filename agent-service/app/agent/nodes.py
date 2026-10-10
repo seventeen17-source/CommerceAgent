@@ -592,6 +592,24 @@ def build_lifecycle_nodes() -> dict[Node, GraphNode]:
             raise ValueError("safe_stop was reached without a declared safety reason")
         return terminate(state, TerminalDecision(status=RunStatus.SAFE_STOP, reason=reason))
 
+    async def escalate_or_safe_stop(graph: GraphState) -> GraphUpdate:
+        """Prepare a manual handoff without claiming a ticket that T062 has not created.
+
+        T061 establishes an authoritative MANUAL_REVIEW decision and ends automation.
+        Only the T062 Tool may turn that intent into a committed ticket and ESCALATED.
+        """
+        state = graph["state"]
+        snapshot = state.eligibility
+        if snapshot is None or snapshot.allowed_action != "MANUAL_REVIEW":
+            raise ValueError("escalate_or_safe_stop requires authoritative MANUAL_REVIEW")
+        return terminate(
+            state,
+            TerminalDecision(
+                status=RunStatus.SAFE_STOP,
+                reason=SafeStopReason.MANUAL_REVIEW_REQUIRED,
+            ),
+        )
+
     async def waiting_user(graph: GraphState) -> GraphUpdate:
         """End this invocation waiting for the user. The run stays resumable."""
         return terminate(graph["state"], TerminalDecision(status=RunStatus.WAITING_USER))
@@ -610,6 +628,7 @@ def build_lifecycle_nodes() -> dict[Node, GraphNode]:
     return {
         Node.FINALIZE: finalize,
         Node.SAFE_STOP: safe_stop,
+        Node.ESCALATE_OR_SAFE_STOP: escalate_or_safe_stop,
         Node.WAITING_USER: waiting_user,
         Node.WAITING_APPROVAL: waiting_approval,
     }
