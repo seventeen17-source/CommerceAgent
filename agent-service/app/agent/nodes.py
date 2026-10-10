@@ -575,18 +575,17 @@ class SupportTicketTools(Protocol):
         category: str,
         reason_code: str,
         evidence_summary: str,
-    ) -> ToolEnvelope[TicketResult]: ...
+    ) -> ToolEnvelope[TicketResult]:
+        ...
 
 
 def build_lifecycle_nodes(
     tools: SupportTicketTools | None = None, record_trace: TraceSink | None = None
 ) -> dict[Node, GraphNode]:
-    """Build the nodes that end one invocation.
+    """Build termination nodes and the one authenticated manual-handoff write.
 
-    These take no dependencies at all, and that is the design: deciding that a run is over is a pure
-    function of the facts already in ``AgentState`` plus the control-plane reason a router refused
-    to continue. Persisting the decision is the wrapper's job, so no node here holds a store - which
-    is also why they are testable without a database.
+    Finalization stays pure. The optional T062 Tool is only invoked for authoritative
+    MANUAL_REVIEW, and its outcome is checkpointed before the lifecycle transition.
     """
 
     def terminate(state: AgentState, terminal: TerminalDecision) -> GraphUpdate:
