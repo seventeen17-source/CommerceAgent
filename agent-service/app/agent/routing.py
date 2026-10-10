@@ -78,6 +78,7 @@ class Node(StrEnum):
     WAITING_USER = "waiting_user"
     WAITING_APPROVAL = "waiting_approval"
     SAFE_STOP = "safe_stop"
+    ESCALATE_OR_SAFE_STOP = "escalate_or_safe_stop"
 
 
 class SafeStopReason(StrEnum):
@@ -430,6 +431,8 @@ def route_after_eligibility(state: AgentState, decision: Decision | None = None)
         # ``RETURN_REFUND`` here rather than to the refund write is the whole point of US2: the two
         # halves of "return and refund" are separate authorised writes.
         return Node.RETURN_WRITE
+    if snapshot.allowed_action == "MANUAL_REVIEW":
+        return Node.ESCALATE_OR_SAFE_STOP
     return Node.FINALIZE
 
 
