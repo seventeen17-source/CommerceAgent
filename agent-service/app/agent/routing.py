@@ -51,8 +51,8 @@ __all__ = [
     "handoff_reason_for",
     "route_after_decision",
     "route_after_eligibility",
-    "route_after_request_approval",
     "route_after_execute",
+    "route_after_request_approval",
     "route_after_resolve_order",
     "route_after_understand",
     "route_after_write",
@@ -279,7 +279,10 @@ def safe_stop_reason_for(
             # write requires one step to issue the write and another to re-read Java authority.
             # Refuse BEFORE the write if that verification cannot fit. Approval creation is
             # not itself a refund/return; only reserve here when the next step can be a write.
-            may_write = not snapshot.approval_required or _verified_approval_matches_current_eligibility(state)
+            may_write = (
+                not snapshot.approval_required
+                or _verified_approval_matches_current_eligibility(state)
+            )
             if (
                 may_write
                 and state.write_intent is None
@@ -391,6 +394,7 @@ def _verified_approval_matches_current_eligibility(state: AgentState) -> bool:
         return False
     return approval.amount == eligibility.max_refund_amount
 
+
 def route_after_eligibility(state: AgentState, decision: Decision | None = None) -> Node:
     """After Java's eligibility decision: write, retry the question, or finish without writing."""
     if state.is_terminal:
@@ -424,9 +428,7 @@ def route_after_eligibility(state: AgentState, decision: Decision | None = None)
     return Node.FINALIZE
 
 
-def route_after_request_approval(
-    state: AgentState, decision: Decision | None = None
-) -> Node:
+def route_after_request_approval(state: AgentState, decision: Decision | None = None) -> Node:
     """After creating the authoritative approval: park the run or fail closed."""
     if state.is_terminal:
         return Node.FINALIZE
