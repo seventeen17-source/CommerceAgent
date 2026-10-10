@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from json import dumps
 from typing import Protocol
 
 from app.agent.approval_execution import ApprovalTools, request_human_approval
@@ -633,16 +634,41 @@ def build_lifecycle_nodes(
         # Use only the Java eligibility verdict and structured evidence type names.
         evidence_types = sorted(
             {item.evidence_type for item in state.evidence if item.evidence_type.isidentifier()}
+        )[:8]
+        evidence_facts: list[dict[str, object]] = []
+        for item in state.evidence:
+            if item.evidence_type != "LOGISTICS" or item.source != "get_logistics":
+                continue
+            facts = {
+                key: value
+                for key in ("status", "signed", "stalledHours", "lastMeaningfulEventAt")
+                if (value := item.data.get(key)) is not None
+                and isinstance(value, str | int | bool)
+            }
+            evidence_facts.append({"type": "LOGISTICS", "source": "get_logistics", "facts": facts})
+            break
+        summary = dumps(
+            {
+                "eligibility": "MANUAL_REVIEW",
+                "reasonCode": "MANUAL_REVIEW_REQUIRED",
+                "evidenceTypes": evidence_types,
+                "evidence": evidence_facts,
+            },
+            separators=(",", ":"),
+            ensure_ascii=True,
         )
-        summary = "eligibility=MANUAL_REVIEW; evidenceTypes=" + (
-            ",".join(evidence_types) if evidence_types else "NONE"
-        )
+        if len(summary) > 2000:
+            # Never truncate a JSON document into an invalid partial fact.
+            summary = dumps(
+                {"eligibility": "MANUAL_REVIEW", "reasonCode": "MANUAL_REVIEW_REQUIRED"},
+                separators=(",", ":"),
+            )
         result = await tools.create_support_ticket(
             run_id=str(state.run_id),
             order_id=state.resolved_order_id,
             category="AFTER_SALES_ESCALATION",
             reason_code="MANUAL_REVIEW_REQUIRED",
-            evidence_summary=summary[:2000],
+            evidence_summary=summary,
         )
         report_tool_call(
             record_trace,
