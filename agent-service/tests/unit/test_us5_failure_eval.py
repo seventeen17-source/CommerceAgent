@@ -21,11 +21,7 @@ from app.clients.models import TicketResult
 from app.tools.models import ToolEnvelope
 
 _DATASET = (
-    Path(__file__).resolve().parents[3]
-    / "eval"
-    / "datasets"
-    / "dev"
-    / "us5_failure_recovery.json"
+    Path(__file__).resolve().parents[3] / "eval" / "datasets" / "dev" / "us5_failure_recovery.json"
 )
 _DOCUMENT = json.loads(_DATASET.read_text(encoding="utf-8"))
 CASES: list[dict[str, object]] = _DOCUMENT["cases"]
