@@ -689,7 +689,7 @@ components:
       description: >-
         Authoritative approval record. Consumers must treat APPROVED as usable only together with
         the exact runId/orderId/actionType/amount binding and must re-read it before a sensitive write.
-      required: [approvalRequestId, runId, orderId, actionType, status, requestedAt, expiresAt]
+      required: [approvalRequestId, runId, orderId, actionType, eligibilityRuleCode, status, requestedAt, expiresAt]
       properties:
         approvalRequestId: { type: string }
         runId: { type: string }
@@ -697,6 +697,9 @@ components:
         actionType: { type: string }
         amount: { type: [number, 'null'] }
         riskReason: { type: [string, 'null'] }
+        eligibilityRuleCode:
+          type: string
+          description: Deterministic Java eligibility rule that produced this approval requirement; display evidence only, never an approval token or replacement for write-time revalidation.
         status:
           type: string
           description: Java-owned forward-compatible approval status. Known V1 values are PENDING, APPROVED, DENIED, EXPIRED; consumers must fail closed on unknown values.
