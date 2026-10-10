@@ -82,13 +82,11 @@ class SupportTicketHttpIntegrationTest {
 
         String ticketId =
                 com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.ticketId");
-        Map<String, Object> row = jdbcTemplate.queryForMap(
-                """
+        Map<String, Object> row = jdbcTemplate.queryForMap("""
                 SELECT user_id, order_id, category, reason_code, evidence_summary, status, run_id
                   FROM commerce.support_tickets
                  WHERE id = ?
-                """,
-                ticketId);
+                """, ticketId);
 
         assertEquals(CUSTOMER_ID, row.get("user_id"));
         assertEquals(OWN_ORDER_ID, row.get("order_id"));
@@ -142,14 +140,12 @@ class SupportTicketHttpIntegrationTest {
         String ticketId =
                 com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.ticketId");
 
-        Map<String, Object> audit = jdbcTemplate.queryForMap(
-                """
+        Map<String, Object> audit = jdbcTemplate.queryForMap("""
                 SELECT actor_id, action, resource_type, resource_id, metadata
                   FROM commerce.audit_logs
                  WHERE action = 'SUPPORT_TICKET_CREATED'
                    AND resource_id = ?
-                """,
-                ticketId);
+                """, ticketId);
 
         assertEquals(CUSTOMER_ID, audit.get("actor_id"));
         assertEquals("SUPPORT_TICKET_CREATED", audit.get("action"));
@@ -184,8 +180,7 @@ class SupportTicketHttpIntegrationTest {
 
     private void seedOrder(String orderId, String ownerId) {
         seedUser(ownerId, UserRole.CUSTOMER);
-        Order order =
-                Order.create(orderId, ownerId, OrderStatus.SHIPPED, new BigDecimal("199.00"), "USD");
+        Order order = Order.create(orderId, ownerId, OrderStatus.SHIPPED, new BigDecimal("199.00"), "USD");
         order.addItem(OrderItem.create(
                 orderId + "-item",
                 orderId + "-product",
