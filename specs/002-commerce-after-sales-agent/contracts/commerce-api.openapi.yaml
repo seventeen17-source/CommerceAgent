@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.9
+  version: 0.2.10
   description: |
     ## Write-path idempotency (T021)
 
@@ -308,6 +308,12 @@ paths:
   /support-tickets:
     post:
       summary: Create after-sales escalation ticket
+      description: |
+        CUSTOMER-only endpoint. Java derives the owner from the authenticated principal.
+        When orderId is present, its ownership is checked with the same 404 concealment as
+        order reads. Null orderId permits escalation before the order is resolved.
+        The ticket and its SUPPORT_TICKET_CREATED business audit commit atomically.
+        runId is provenance only; it cannot authorize a ticket or establish ownership.
       requestBody:
         required: true
         content:
@@ -319,8 +325,16 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TicketResult' }
+        '400':
+          $ref: '#/components/responses/Error'
+          description: INVALID_PARAMETER or request validation failure.
         '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: ACCESS_DENIED for a non-customer.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: ORDER_NOT_FOUND for both missing and cross-owner orders.
   /approvals:
     post:
       summary: Create approval request
