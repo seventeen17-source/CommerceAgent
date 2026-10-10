@@ -485,7 +485,8 @@ def terminal_decision_for(state: AgentState) -> TerminalDecision:
             status=RunStatus.SAFE_STOP, reason=SafeStopReason.REPEATED_NO_PROGRESS
         )
     if state.eligibility is not None and state.eligibility.allowed_action == "MANUAL_REVIEW":
-        # T062 owns authoritative ticket creation; T061 cannot claim ESCALATED yet.
+        if state.support_ticket_id is not None:
+            return TerminalDecision(status=RunStatus.ESCALATED)
         return TerminalDecision(
             status=RunStatus.SAFE_STOP, reason=SafeStopReason.MANUAL_REVIEW_REQUIRED
         )
