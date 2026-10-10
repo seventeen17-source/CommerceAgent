@@ -22,6 +22,7 @@ from app.agent.routing import (
     terminal_decision_for,
 )
 from app.agent.failure_policy import may_retry_read, normalize_tool_error, repeated_no_progress
+from app.agent.nodes import build_lifecycle_nodes
 from app.agent.state import (
     AgentState,
     EvidenceItem,
@@ -196,3 +197,26 @@ def test_no_progress_requires_consecutive_failures_of_same_fixed_read() -> None:
     assert safe_stop_reason_for(state) is SafeStopReason.REPEATED_NO_PROGRESS
     success = second.model_copy(update={"success": True})
     assert repeated_no_progress(make_state(tool_history=[first, success])) is False
+
+@pytest.mark.asyncio
+async def test_manual_handoff_node_cannot_forge_committed_ticket() -> None:
+    state = make_state(
+        eligibility={
+            "eligible": False,
+            "allowed_action": "MANUAL_REVIEW",
+            "approval_required": False,
+            "reason_codes": ["MANUAL_REVIEW_REQUIRED"],
+        }
+    )
+    result = await build_lifecycle_nodes()[Node.ESCALATE_OR_SAFE_STOP]({"state": state})
+    terminal = result["decision"].terminal
+    assert terminal is not None
+    assert terminal.status is RunStatus.SAFE_STOP
+    assert terminal.reason is SafeStopReason.MANUAL_REVIEW_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_manual_handoff_node_rejects_unverified_review_intent() -> None:
+    state = make_state()
+    with pytest.raises(ValueError, match="authoritative MANUAL_REVIEW"):
+        await build_lifecycle_nodes()[Node.ESCALATE_OR_SAFE_STOP]({"state": state})
