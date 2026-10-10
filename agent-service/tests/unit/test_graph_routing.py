@@ -338,10 +338,16 @@ class TestRouteAfterEligibility:
         decision = Decision(retry_current_stage=True)
         assert route_after_eligibility(state, decision) is Node.CHECK_ELIGIBILITY
 
-    @pytest.mark.parametrize("action", ["MANUAL_REVIEW", "DENY"])
-    def test_non_write_actions_finish_without_writing(self, action: str) -> None:
-        state = make_state(eligibility=make_eligibility(eligible=False, allowed_action=action))
+    def test_definitive_denial_finishes_without_writing(self) -> None:
+        state = make_state(eligibility=make_eligibility(eligible=False, allowed_action="DENY"))
         assert route_after_eligibility(state) is Node.FINALIZE
+
+    def test_manual_review_requires_explicit_safe_handoff_node(self) -> None:
+        state = make_state(eligibility=make_eligibility(eligible=False, allowed_action="MANUAL_REVIEW"))
+        assert route_after_eligibility(state) is Node.ESCALATE_OR_SAFE_STOP
+        terminal = terminal_decision_for(state)
+        assert terminal.status is RunStatus.SAFE_STOP
+        assert terminal.reason is SafeStopReason.MANUAL_REVIEW_REQUIRED
 
     def test_unknown_java_action_refuses_instead_of_coercing_it(self) -> None:
         state = make_state(eligibility=make_eligibility(allowed_action="PARTIAL_REFUND"))
