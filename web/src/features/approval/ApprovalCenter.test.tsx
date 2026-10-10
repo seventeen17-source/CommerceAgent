@@ -10,6 +10,7 @@ const pending: ApprovalRecord = {
   actionType: 'REFUND_ONLY',
   amount: 399,
   riskReason: 'APPROVAL_REQUIRED_BY_AMOUNT',
+  eligibilityRuleCode: 'LOGISTICS_STALLED_REFUND',
   status: 'PENDING',
   decidedBy: null,
   decidedAt: null,
@@ -36,7 +37,7 @@ describe('ApprovalCenter', () => {
 
     expect(await screen.findByText('APPROVAL_REQUIRED_BY_AMOUNT')).toBeTruthy()
     expect(screen.getAllByText('us4-live-004').length).toBeGreaterThan(0)
-    expect(screen.getByText(/未提供独立证据明细/)).toBeTruthy()
+    expect(screen.getByText(/LOGISTICS_STALLED_REFUND/)).toBeTruthy()
     expect(fetch).toHaveBeenCalledWith(
       '/commerce/approvals?status=PENDING',
       expect.objectContaining({ headers: { Authorization: 'Bearer secret' } }),
