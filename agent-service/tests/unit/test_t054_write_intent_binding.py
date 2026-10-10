@@ -12,7 +12,6 @@ from app.agent.execute_write import (
 )
 from app.agent.state import AgentState, ApprovalSnapshot, advance
 
-
 RUN_ID = UUID("54000000-0000-4000-8000-000000000001")
 
 
