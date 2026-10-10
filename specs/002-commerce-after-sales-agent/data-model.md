@@ -191,7 +191,7 @@ Python **不得直接读写 `commerce` 业务表**；它访问权威业务状态
 - `user_id`
 - `order_id` nullable
 - `category`
-- `reason`
+- `reason_code`
 - `evidence_summary`
 - `status`: `OPEN | IN_PROGRESS | RESOLVED | CLOSED`
 - `run_id`
