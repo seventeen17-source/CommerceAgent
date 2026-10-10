@@ -17,6 +17,8 @@ from app.clients.errors import (
 )
 from app.clients.models import (
     AfterSalesStatus,
+    ApprovalResult,
+    CreateApprovalRequest,
     CreateRefundRequest,
     CreateReturnRequest,
     EligibilityDecision,
@@ -75,6 +77,65 @@ class CommerceTools:
         return await _read_tool(
             self._client.check_eligibility(self._auth, request),
             started=started,
+        )
+
+    async def request_human_approval(
+        self,
+        *,
+        run_id: str,
+        order_id: str,
+        action_type: str,
+        amount: Decimal | None,
+        risk_reason: str,
+    ) -> ToolEnvelope[ApprovalResult]:
+        """Create one authoritative PENDING approval request in Java.
+
+        The signature deliberately has no status, approver, expiry, user id, token, or URL. The
+        Agent can only submit the exact proposal it already received from Java eligibility; Java
+        re-runs that decision and either returns a real ApprovalRequest or refuses the call.
+        """
+        started = perf_counter()
+        try:
+            request = CreateApprovalRequest.model_validate(
+                {
+                    "runId": run_id,
+                    "orderId": order_id,
+                    "actionType": action_type,
+                    "amount": amount,
+                    "riskReason": risk_reason,
+                }
+            )
+            call = await self._client.create_approval(self._auth, request)
+        except ValidationError:
+            return _invalid_parameter(started)
+        except UnsafeRequestParameterError as exc:
+            return ToolEnvelope[ApprovalResult](
+                success=False,
+                errorCode=exc.error_code,
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+            )
+        except CommerceApiError as exc:
+            return ToolEnvelope[ApprovalResult](
+                success=False,
+                errorCode=exc.error_code,
+                retryable=exc.retryable,
+                latencyMs=_elapsed_ms(started),
+                traceId=exc.trace_id,
+            )
+        except CommerceTransportError:
+            return ToolEnvelope[ApprovalResult](
+                success=False,
+                errorCode="WRITE_TIMEOUT_UNKNOWN",
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+            )
+
+        return ToolEnvelope[ApprovalResult](
+            success=True,
+            data=call.value,
+            latencyMs=_elapsed_ms(started),
+            traceId=call.trace_id,
         )
 
     async def get_after_sales_status(

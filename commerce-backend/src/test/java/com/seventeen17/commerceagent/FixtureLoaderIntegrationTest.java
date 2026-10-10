@@ -83,9 +83,24 @@ class FixtureLoaderIntegrationTest {
                 Map.of("traceId", "fixture-test")));
         assertNotEquals(0, auditLogRepository.count());
 
+        // T051: approval is a run-produced business fact just like refund/return state. If reset does
+        // not clear it, the next Eval run inherits a human decision from the previous world.
+        jdbcTemplate.update("""
+                INSERT INTO commerce.approval_requests
+                    (id, run_id, order_id, user_id, action, amount, status,
+                     eligibility_rule_code, reason_code, expires_at)
+                VALUES
+                    ('approval-fixture-001', 'run-fixture-001', 'order-001', 'customer-001',
+                     'REFUND_ONLY', 199.00, 'PENDING',
+                     'LOGISTICS_STALLED_REFUND', 'APPROVAL_REQUIRED_BY_AMOUNT',
+                     now() + interval '1 hour')
+                """);
+        assertEquals(1, count("SELECT COUNT(*) FROM commerce.approval_requests"));
+
         jdbcTemplate.update("UPDATE commerce.orders SET status = 'CANCELLED' WHERE id = 'order-001'");
         performReset(token);
 
+        assertEquals(0, count("SELECT COUNT(*) FROM commerce.approval_requests"));
         assertEquals(
                 "SHIPPED",
                 jdbcTemplate.queryForObject("SELECT status FROM commerce.orders WHERE id = 'order-001'", String.class));
@@ -94,6 +109,38 @@ class FixtureLoaderIntegrationTest {
                         SELECT to_char(last_event_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') || '+00'
                         FROM commerce.shipments WHERE id = 'shipment-001'
                         """, String.class));
+    }
+
+    @Test
+    void resetPreservesNonFixtureBusinessRowsThatShareTheFixturePrincipal() throws Exception {
+        seedAuthenticatedUser();
+        String token = localJwtIssuer.issue("customer-001");
+        jdbcTemplate.update("""
+                INSERT INTO commerce.orders
+                    (id, user_id, status, total_amount, currency, created_at, shipped_at, version)
+                VALUES
+                    ('external-live-order', 'customer-001', 'SHIPPED', 1.00, 'USD',
+                     now() - interval '2 days', now() - interval '1 day', 0)
+                ON CONFLICT (id) DO NOTHING
+                """);
+
+        try {
+            performReset(token);
+
+            assertEquals(1, count("""
+                            SELECT COUNT(*) FROM commerce.orders
+                             WHERE id = 'external-live-order' AND user_id = 'customer-001'
+                            """));
+            assertEquals(1, count("""
+                            SELECT COUNT(*) FROM commerce.users
+                             WHERE id = 'customer-001'
+                               AND username = 'customer-001'
+                               AND role = 'CUSTOMER'
+                               AND status = 'ACTIVE'
+                            """));
+        } finally {
+            jdbcTemplate.update("DELETE FROM commerce.orders WHERE id = 'external-live-order'");
+        }
     }
 
     @Test
@@ -194,6 +241,85 @@ class FixtureLoaderIntegrationTest {
                          WHERE active = TRUE AND required_order_status = 'DELIVERED'
                            AND (product_category IS NULL OR product_category = 'APPAREL')
                         """));
+    }
+
+    @Test
+    void theClueNarrowingCaseSeedsThreeWritableOrdersAndOnlyOneDescribedByTheClue() throws Exception {
+        seedAuthenticatedUser();
+        String token = localJwtIssuer.issue("customer-001");
+
+        mockMvc.perform(post("/internal/eval/fixtures/order-clue-narrow-001/reset")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetVersion\":\"v1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("order-clue-narrow-001"))
+                .andExpect(jsonPath("$.fixtureVersion").value("t048b-order-clue-narrow-001-v1"));
+
+        // Three delivered orders, of which *exactly one* answers to the clue. "Exactly one" is the whole
+        // case: with two matching orders it would be the ambiguity case again, and with one order in total
+        // there would be nothing for a filter to do. The other two are not decoration -- they are what
+        // makes a COMPLETED run count as evidence that filtering happened.
+        assertEquals(3, count("""
+                        SELECT COUNT(*) FROM commerce.orders
+                         WHERE id IN ('order-101','order-201','order-202') AND status = 'DELIVERED'
+                        """));
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.order_items
+                         WHERE order_id IN ('order-101','order-201','order-202') AND product_name LIKE '%耳机%'
+                        """));
+        // Signed inside the window *relative to the reset* -- a literal timestamp is what rots, and every
+        // one of the three has to be inside it, or "the filter chose" could be explained by eligibility.
+        assertEquals(3, count("""
+                        SELECT COUNT(*) FROM commerce.shipments
+                         WHERE order_id IN ('order-101','order-201','order-202')
+                           AND signed_at > now() - interval '7 days'
+                        """));
+        // Exactly one active rule may cover them. Two matching ruleCodes is a CONFLICTING_RULES refusal by
+        // design, and that is what turned T042's second real run into a failure of the *fixture*: one
+        // decoy would then be refusable for a reason that has nothing to do with the clue.
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.after_sales_rules
+                         WHERE active = TRUE AND required_order_status = 'DELIVERED'
+                           AND (product_category IS NULL OR product_category = 'APPAREL')
+                        """));
+    }
+
+    @Test
+    void theApprovalHighRiskCaseSeedsOneEligibleOrderAboveTheApprovalThreshold() throws Exception {
+        seedAuthenticatedUser();
+        String token = localJwtIssuer.issue("customer-001");
+
+        mockMvc.perform(post("/internal/eval/fixtures/approval-high-risk-001/reset")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetVersion\":\"v1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.caseId").value("approval-high-risk-001"))
+                .andExpect(jsonPath("$.fixtureVersion").value("t056-approval-high-risk-001-v1"));
+
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.orders
+                         WHERE id = 'order-004'
+                           AND user_id = 'customer-001'
+                           AND status = 'SHIPPED'
+                           AND total_amount = 399.00
+                        """));
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.shipments
+                         WHERE order_id = 'order-004'
+                           AND status = 'IN_TRANSIT'
+                           AND last_event_at < now() - interval '48 hours'
+                        """));
+        assertEquals(1, count("""
+                        SELECT COUNT(*) FROM commerce.after_sales_rules
+                         WHERE rule_code = 'LOGISTICS_STALLED_REFUND'
+                           AND active = TRUE
+                           AND allowed_action = 'REFUND_ONLY'
+                           AND approval_threshold = 300.00
+                        """));
+        assertEquals(0, count("SELECT COUNT(*) FROM commerce.approval_requests"));
+        assertEquals(0, count("SELECT COUNT(*) FROM commerce.refund_requests WHERE order_id = 'order-004'"));
     }
 
     private void performReset(String token) throws Exception {

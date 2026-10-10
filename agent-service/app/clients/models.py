@@ -32,11 +32,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "AfterSalesStatus",
+    "ApprovalResult",
+    "CreateApprovalRequest",
     "CreateRefundRequest",
     "CreateReturnRequest",
     "CurrentPrincipal",
@@ -168,6 +171,49 @@ class EligibilityDecision(BaseModel):
         if (self.rule_code is None) != (self.rule_version is None):
             raise ValueError("ruleCode and ruleVersion are cited together or not at all")
         return self
+
+
+class CreateApprovalRequest(BaseModel):
+    """``POST /approvals`` proposal built from Java-owned eligibility facts.
+
+    The Agent may ask Java to create a PENDING approval, but it cannot choose a status, approver or
+    expiry. Those fields do not exist on this request type. Java re-runs eligibility and rejects any
+    action/amount/riskReason drift before persisting the record.
+    """
+
+    model_config = _REQUEST
+
+    run_id: UUID = Field(alias="runId")
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    action_type: str = Field(alias="actionType", min_length=1, max_length=32)
+    amount: Decimal | None = None
+    risk_reason: str = Field(alias="riskReason", min_length=1, max_length=100)
+
+
+class ApprovalResult(BaseModel):
+    """Authoritative ApprovalRequest projection returned by Java.
+
+    ``status`` remains an open string because Java owns that state machine. T053 only accepts
+    ``PENDING`` after creation; T054 will re-read this object and fail closed on every status it
+    does not explicitly understand.
+    """
+
+    model_config = _RESPONSE
+
+    approval_request_id: str = Field(alias="approvalRequestId", min_length=1, max_length=64)
+    run_id: UUID = Field(alias="runId")
+    order_id: str = Field(alias="orderId", min_length=1, max_length=64)
+    action_type: str = Field(alias="actionType", min_length=1, max_length=32)
+    amount: Decimal | None = None
+    risk_reason: str | None = Field(default=None, alias="riskReason", max_length=100)
+    eligibility_rule_code: str | None = Field(
+        default=None, alias="eligibilityRuleCode", max_length=100
+    )
+    status: str = Field(min_length=1, max_length=32)
+    decided_by: str | None = Field(default=None, alias="decidedBy", max_length=64)
+    decided_at: datetime | None = Field(default=None, alias="decidedAt")
+    requested_at: datetime = Field(alias="requestedAt")
+    expires_at: datetime = Field(alias="expiresAt")
 
 
 class CreateRefundRequest(BaseModel):

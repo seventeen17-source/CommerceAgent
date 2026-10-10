@@ -12,26 +12,27 @@ from app.tools import REGISTERED_TOOL_NAMES, CommerceTools, ToolEnvelope, ToolRe
 _FAKE_JWT = "header.payload.signature"
 
 
-def test_us1_registry_exposes_only_the_seven_declared_capabilities() -> None:
+def test_registry_exposes_only_the_eight_declared_capabilities() -> None:
     assert REGISTERED_TOOL_NAMES == {
         "list_user_orders",
         "get_order",
         "get_logistics",
         "check_after_sales_eligibility",
+        "request_human_approval",
         "create_refund_request",
         "create_return_request",
         "get_after_sales_status",
     }
 
 
-def test_the_write_capabilities_are_exactly_the_refund_and_the_return() -> None:
+def test_the_write_capabilities_are_exactly_the_declared_state_changes() -> None:
     registry = ToolRegistry()
     risks = {registration.name: registration.risk for registration in registry.all()}
 
-    # T041 added the second write capability. Listing them explicitly (rather than asserting
-    # "at least one write exists") turns an accidental third write tool into a test failure.
+    # Approval creation is also state-changing even though it does not move money. Listing every
+    # HIGH capability explicitly turns an accidental new write surface into a test failure.
     writes = {name for name, risk in risks.items() if risk is ToolRisk.HIGH_WRITE}
-    assert writes == {"create_refund_request", "create_return_request"}
+    assert writes == {"request_human_approval", "create_refund_request", "create_return_request"}
     assert all(
         risk is ToolRisk.READ_PRIVACY_MEDIUM for name, risk in risks.items() if name not in writes
     )
@@ -90,6 +91,8 @@ async def test_registry_resolves_only_explicit_bound_commerce_tool_methods() -> 
 
         assert registry.resolve("get_order").__self__ is tools
         assert registry.resolve("get_order").__name__ == "get_order"
+        assert registry.resolve("request_human_approval").__self__ is tools
+        assert registry.resolve("request_human_approval").__name__ == "request_human_approval"
         assert registry.resolve("create_refund_request").__self__ is tools
         assert registry.resolve("create_refund_request").__name__ == "create_refund_request"
 

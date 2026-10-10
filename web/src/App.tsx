@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import './App.css'
 import { CustomerConsole } from './features/chat/CustomerConsole'
+import { ApprovalCenter } from './features/approval/ApprovalCenter'
 import { T016FlowPlayground } from './features/validation/T016FlowPlayground'
 
 /**
@@ -11,7 +12,7 @@ import { T016FlowPlayground } from './features/validation/T016FlowPlayground'
  * switch rather than a router because neither has a URL worth sharing, and the playground stays the
  * default so nothing about the existing verification flow changes.
  */
-type View = 'playground' | 'console'
+type View = 'playground' | 'console' | 'approval'
 
 const tab = (active: boolean): React.CSSProperties => ({
   padding: '6px 12px',
@@ -34,8 +35,17 @@ function App() {
         <button style={tab(view === 'console')} onClick={() => setView('console')}>
           售后助手（客户界面）
         </button>
+        <button style={tab(view === 'approval')} onClick={() => setView('approval')}>
+          Approval Center（审批员）
+        </button>
       </nav>
-      {view === 'playground' ? <T016FlowPlayground /> : <CustomerConsole />}
+      {view === 'playground' ? (
+        <T016FlowPlayground />
+      ) : view === 'console' ? (
+        <CustomerConsole />
+      ) : (
+        <ApprovalCenter />
+      )}
     </div>
   )
 }

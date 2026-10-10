@@ -95,6 +95,13 @@ class RunSession:
         next_action: str | None = None,
     ) -> AgentState:
         """Persist the payload as it stands at a node boundary, and return the row-applied state."""
+        # A write-ahead intent can be persisted while the graph is still running a node.
+        # Never let a delayed node-boundary checkpoint roll back that durable fact or its budget.
+        current = self.state
+        if state.step_count < current.step_count:
+            raise RunStoreError("checkpoint would decrease the durable step count")
+        if current.write_intent is not None and state.write_intent != current.write_intent:
+            raise RunStoreError("checkpoint would discard or replace a durable write intent")
         self._record = self._store.checkpoint_state(
             self._record.run_id,
             expected_version=self._record.version,
@@ -206,7 +213,9 @@ async def drive_graph(graph: CompiledGraph, session: RunSession) -> RunRecord:
         raise RunStoreError("this run is already terminal; there is nothing to drive")
 
     try:
-        pending: tuple[AgentState, str] | None = None
+        # Carry the store version that produced each delayed boundary. A write node may
+        # durably checkpoint its idempotency intent before yielding its GraphUpdate.
+        pending: tuple[AgentState, str, int] | None = None
         invocation: GraphState = {
             "state": session.state,
             "decision": Decision(),
@@ -221,12 +230,16 @@ async def drive_graph(graph: CompiledGraph, session: RunSession) -> RunRecord:
                 decision: Decision | None = update.get("decision")
 
                 if pending is not None:
-                    previous_state, previous_node = pending
-                    session.checkpoint(
-                        state=previous_state,
-                        current_node=previous_node,
-                        next_action=node_name,
-                    )
+                    previous_state, previous_node, previous_version = pending
+                    if session.record.version == previous_version:
+                        session.checkpoint(
+                            state=previous_state,
+                            current_node=previous_node,
+                            next_action=node_name,
+                        )
+                    # If the store version advanced while this node ran, its write-ahead
+                    # intent is already durable. Flushing the older pending state would
+                    # erase the key and roll the budget backwards (observed at T054 v15/v16).
 
                 if decision is not None and decision.terminal is not None:
                     # The run ends here. The boundary checkpoint above already holds this node's
@@ -235,7 +248,7 @@ async def drive_graph(graph: CompiledGraph, session: RunSession) -> RunRecord:
                     session.finish(decision.terminal, current_node=node_name)
                     return session.record
 
-                pending = (state, node_name)
+                pending = (state, node_name, session.record.version)
 
         raise RunStoreError(
             "the graph stopped without a terminal decision; the routing table is incomplete"

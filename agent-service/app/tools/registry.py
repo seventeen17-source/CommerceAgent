@@ -22,6 +22,7 @@ ToolName = Literal[
     "get_order",
     "get_logistics",
     "check_after_sales_eligibility",
+    "request_human_approval",
     "create_refund_request",
     "create_return_request",
     "get_after_sales_status",
@@ -59,6 +60,13 @@ _REGISTRATIONS: Final[dict[ToolName, ToolRegistration]] = {
         name="check_after_sales_eligibility",
         risk=ToolRisk.READ_PRIVACY_MEDIUM,
         description="Ask Java for the deterministic after-sales eligibility decision.",
+    ),
+    "request_human_approval": ToolRegistration(
+        name="request_human_approval",
+        risk=ToolRisk.HIGH_WRITE,
+        description=(
+            "Create one authoritative PENDING human approval request for the exact proposal."
+        ),
     ),
     "create_refund_request": ToolRegistration(
         name="create_refund_request",
@@ -109,7 +117,7 @@ class ToolRegistry:
         """Resolve a registered name to its already-authenticated Tool implementation.
 
         Binding is explicit rather than based on arbitrary attribute lookup. A model-produced string
-        can select only one of these seven predeclared capabilities; it can never name an arbitrary
+        can select only one of these eight predeclared capabilities; it can never name an arbitrary
         method, URL, service or SQL statement.
         """
         registration = self.get(name)
@@ -121,6 +129,7 @@ class ToolRegistry:
             "get_order": self._tools.get_order,
             "get_logistics": self._tools.get_logistics,
             "check_after_sales_eligibility": self._tools.check_after_sales_eligibility,
+            "request_human_approval": self._tools.request_human_approval,
             "create_refund_request": self._tools.create_refund_request,
             "create_return_request": self._tools.create_return_request,
             "get_after_sales_status": self._tools.get_after_sales_status,

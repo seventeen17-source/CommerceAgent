@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.agent.approval_execution import ApprovalTools, request_human_approval
 from app.agent.eligibility_execution import (
     US1_ELIGIBILITY_REASON_CODE,
     EligibilityTools,
@@ -65,6 +66,7 @@ from app.tools.registry import ToolRegistry
 __all__ = [
     "GraphDeps",
     "PersistWriteIntent",
+    "build_approval_nodes",
     "build_evidence_nodes",
     "build_lifecycle_nodes",
     "build_read_nodes",
@@ -102,6 +104,7 @@ class GraphDeps:
     evidence: EvidenceReadTools
     registry: ToolRegistry
     eligibility: EligibilityTools
+    approvals: ApprovalTools
     writes: WriteTools
     after_sales: AfterSalesReadTools
     persist_intent: PersistWriteIntent
@@ -285,6 +288,58 @@ def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
     return {Node.DECIDE_EVIDENCE: decide_evidence, Node.EXECUTE_EVIDENCE: execute_evidence}
 
 
+def build_approval_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
+    """Build the T053 HITL handoff: create authority, then park the run."""
+
+    async def request_approval(graph: GraphState) -> GraphUpdate:
+        state = spend_one_step(graph["state"])
+        snapshot = state.eligibility
+        if state.resolved_order_id is None or snapshot is None:
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.EVIDENCE_CONTEXT_MISSING),
+            )
+        if not snapshot.eligible or not snapshot.approval_required:
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.ELIGIBILITY_INCONSISTENT),
+            )
+
+        try:
+            result = await request_human_approval(
+                run_id=state.run_id,
+                resolved_order_id=state.resolved_order_id,
+                eligibility=snapshot,
+                step_index=state.step_count,
+                tools=deps.approvals,
+                record_trace=deps.record_trace,
+            )
+        except ValueError:
+            return GraphUpdate(
+                state=state,
+                decision=Decision(safe_stop_reason=SafeStopReason.ELIGIBILITY_INCONSISTENT),
+            )
+
+        history = [*state.tool_history, result.history]
+        if not result.history.success:
+            moved = advance(state, tool_history=history)
+            return GraphUpdate(
+                state=moved,
+                decision=Decision(safe_stop_reason=SafeStopReason.APPROVAL_REQUEST_FAILED),
+            )
+        if result.approval is None or not result.response_matches_proposal:
+            moved = advance(state, tool_history=history)
+            return GraphUpdate(
+                state=moved,
+                decision=Decision(safe_stop_reason=SafeStopReason.APPROVAL_RESPONSE_INCONSISTENT),
+            )
+
+        moved = advance(state, approval=result.approval, tool_history=history)
+        return GraphUpdate(state=moved, decision=Decision())
+
+    return {Node.REQUEST_APPROVAL: request_approval}
+
+
 def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
     """Build the money path: ask Java what is allowed, write once, then read authority back.
 
@@ -351,6 +406,15 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             order_id=state.resolved_order_id,
             reason_code=US1_ELIGIBILITY_REASON_CODE,
             requested_amount=snapshot.max_refund_amount,
+            approval_request_id=(
+                None
+                if (
+                    state.approval is None
+                    or not state.approval.binding_verified
+                    or not snapshot.approval_required
+                )
+                else state.approval.approval_request_id
+            ),
         )
 
         # The callback T031 calls before its first Tool call. Whatever it returns is the state that
@@ -412,6 +476,15 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
             state,
             order_id=state.resolved_order_id,
             reason_code=US1_ELIGIBILITY_REASON_CODE,
+            approval_request_id=(
+                None
+                if (
+                    state.approval is None
+                    or not state.approval.binding_verified
+                    or not snapshot.approval_required
+                )
+                else state.approval.approval_request_id
+            ),
         )
 
         persisted = state
@@ -523,8 +596,20 @@ def build_lifecycle_nodes() -> dict[Node, GraphNode]:
         """End this invocation waiting for the user. The run stays resumable."""
         return terminate(graph["state"], TerminalDecision(status=RunStatus.WAITING_USER))
 
+    async def waiting_approval(graph: GraphState) -> GraphUpdate:
+        """End this invocation after Java created a PENDING authoritative approval."""
+        state = graph["state"]
+        if (
+            state.approval is None
+            or state.approval.approval_request_id is None
+            or state.approval.status != "PENDING"
+        ):
+            raise ValueError("waiting_approval requires a PENDING authoritative approval reference")
+        return terminate(state, TerminalDecision(status=RunStatus.WAITING_APPROVAL))
+
     return {
         Node.FINALIZE: finalize,
         Node.SAFE_STOP: safe_stop,
         Node.WAITING_USER: waiting_user,
+        Node.WAITING_APPROVAL: waiting_approval,
     }

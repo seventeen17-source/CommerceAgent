@@ -208,13 +208,17 @@ Python **不得直接读写 `commerce` 业务表**；它访问权威业务状态
 - `id`
 - `run_id`
 - `order_id`
-- `action_type`
+- `user_id`（发起该售后动作的 authenticated owner）
+- `action`（API 字段名为 `actionType`）
 - `amount` nullable
-- `risk_reason`
+- `eligibility_rule_code`
+- `reason_code`（API 字段名为 `riskReason`）
 - `status`: `PENDING | APPROVED | DENIED | EXPIRED`
-- `requested_at`
+- `created_at`（API 投影为 `requestedAt`）
+- `expires_at`
 - `decided_at` nullable
 - `decided_by` nullable
+- `updated_at`
 
 状态迁移：
 
@@ -226,7 +230,9 @@ Python **不得直接读写 `commerce` 业务表**；它访问权威业务状态
 - Agent 不能直接设置 `APPROVED`；
 - 只有授权 approver endpoint 可以改变审批状态；
 - 敏感写入只接受 `approval_request_id`，不接受模型生成的 approval token/status；
-- 提交写入前重新读取审批记录并核对 run/order/action/amount。
+- 提交写入前重新读取审批记录并核对 run/order/action/amount；
+- V1 `expires_at = created_at + 24h`。这是操作层 TTL，不替代写前 eligibility 重校验；owner/approver 的权威读取会把到期的 PENDING 行惰性迁移为 EXPIRED；
+- owner 精确读取与缺失统一使用 `APPROVAL_NOT_FOUND` concealment，approver worklist/decision 只能由 APPROVER 角色访问。
 
 ## 12. AgentRun
 

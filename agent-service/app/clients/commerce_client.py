@@ -2,8 +2,8 @@
 
 T016 delivered the read/evaluation surface (``GET /me``, ``GET /orders``,
 ``GET /orders/{orderId}``, ``GET /orders/{orderId}/logistics``,
-``POST /after-sales/eligibility``). T022 adds the first two write-surface calls: ``POST /refunds``
-and ``GET /orders/{orderId}/after-sales``.
+``POST /after-sales/eligibility``). Later slices add the protected refund/return writes,
+authoritative after-sales recovery reads, and T053's ``POST /approvals`` handoff.
 
 Six rules this module enforces once, instead of once per tool
 --------------------------------------------------------------
@@ -20,8 +20,9 @@ Six rules this module enforces once, instead of once per tool
 5. **Ambient configuration cannot reroute the call.** The client is built with ``trust_env=False``,
    so no environment or OS-level proxy can silently put itself between the Agent and the one service
    allowed to state business facts -- and receive the forwarded Bearer token on the way.
-6. **A state-changing call says so in its type.** ``request_is_safe=False`` on
-   :meth:`CommerceClient.create_refund` is what makes a timeout there an *unknown outcome*
+6. **A state-changing call says so in its type.** ``request_is_safe=False`` on protected
+   writes such as :meth:`CommerceClient.create_refund` and :meth:`CommerceClient.create_approval`
+   is what makes a timeout there an *unknown outcome*
    instead of a free retry. Deriving that from ``method == "POST"`` would be wrong twice over: it
    would strip the retry budget from ``POST /after-sales/eligibility`` (side-effect free) and it
    would teach the next reader that an HTTP verb decides authorization.
@@ -54,6 +55,8 @@ from app.clients.errors import (
 )
 from app.clients.models import (
     AfterSalesStatus,
+    ApprovalResult,
+    CreateApprovalRequest,
     CreateRefundRequest,
     CreateReturnRequest,
     CurrentPrincipal,
@@ -321,7 +324,43 @@ class CommerceClient:
             json_body=request.model_dump(by_alias=True, mode="json"),
         )
 
+    async def get_approval(
+        self,
+        auth: AuthContext,
+        approval_request_id: str,
+    ) -> CommerceCall[ApprovalResult]:
+        """Owner-scoped authoritative approval re-read used by T054 resume."""
+        segment = _safe_path_segment(approval_request_id, field="approval_request_id")
+        return await self._request(
+            "GET",
+            f"/approvals/{segment}",
+            auth,
+            response_model=ApprovalResult,
+            request_is_safe=True,
+        )
+
     # ---- write surface ---------------------------------------------------------------------
+
+    async def create_approval(
+        self,
+        auth: AuthContext,
+        request: CreateApprovalRequest,
+    ) -> CommerceCall[ApprovalResult]:
+        """``POST /approvals`` -- ask Java to create one authoritative PENDING approval.
+
+        This is state-changing, so a transport failure is an unknown outcome. The caller must not
+        invent an approval id or status to continue. Java makes exact replay safe for the same live
+        run/order/action proposal, but the Tool layer still surfaces the unknown result rather than
+        hiding it behind an internal retry.
+        """
+        return await self._request(
+            "POST",
+            "/approvals",
+            auth,
+            response_model=ApprovalResult,
+            request_is_safe=False,
+            json_body=request.model_dump(by_alias=True, mode="json"),
+        )
 
     async def create_refund(
         self,

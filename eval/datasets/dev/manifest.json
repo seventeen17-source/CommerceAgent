@@ -6,6 +6,11 @@
       "caseId": "refund-logistics-001",
       "fixtureVersion": "t014-refund-logistics-001-v1",
       "description": "Synthetic customer-001 shipped electronics order with stalled logistics and deterministic refund rule."
+    },
+    {
+      "caseId": "approval-high-risk-001",
+      "fixtureVersion": "t056-approval-high-risk-001-v1",
+      "description": "Synthetic customer-001 shipped electronics order at 399.00 with stalled logistics and a 300.00 deterministic approval threshold."
     }
   ],
   "note": "Development manifest only. T074 freezes the full test/dev dataset."

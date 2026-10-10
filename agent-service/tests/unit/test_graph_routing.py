@@ -353,10 +353,10 @@ class TestRouteAfterEligibility:
         assert route_after_eligibility(state) is Node.SAFE_STOP
         assert safe_stop_reason_for(state) is SafeStopReason.ELIGIBILITY_INCONSISTENT
 
-    def test_approval_required_refuses_until_hitl_exists(self) -> None:
+    def test_approval_required_routes_to_the_hitl_request_node(self) -> None:
         state = make_state(eligibility=make_eligibility(approval_required=True))
-        assert route_after_eligibility(state) is Node.SAFE_STOP
-        assert safe_stop_reason_for(state) is SafeStopReason.ELIGIBILITY_APPROVAL_REQUIRED
+        assert route_after_eligibility(state) is Node.REQUEST_APPROVAL
+        assert safe_stop_reason_for(state) is None
 
     def test_an_unbounded_refund_amount_is_not_the_agents_decision(self) -> None:
         state = make_state(eligibility=make_eligibility(max_refund_amount=None))
@@ -374,6 +374,69 @@ class TestRouteAfterEligibility:
         )
         assert route_after_eligibility(state) is Node.RETURN_WRITE
         assert safe_stop_reason_for(state) is None
+
+
+class TestT054VerificationBudget:
+    """Never spend the final step writing money when verification needs another step."""
+
+    def test_refund_must_have_two_steps_left(self) -> None:
+        state = make_state(
+            step_count=11,
+            max_steps=12,
+            eligibility=make_eligibility(),
+        )
+        assert route_after_eligibility(state) is Node.SAFE_STOP
+        assert safe_stop_reason_for(state) is SafeStopReason.BUDGET_EXHAUSTED
+
+    def test_refund_and_verification_fit_exactly(self) -> None:
+        state = make_state(
+            step_count=10,
+            max_steps=12,
+            eligibility=make_eligibility(),
+        )
+        assert route_after_eligibility(state) is Node.REFUND_WRITE
+
+    def test_approval_creation_is_not_rejected_as_a_refund_write(self) -> None:
+        state = make_state(
+            step_count=11,
+            max_steps=12,
+            eligibility=make_eligibility(approval_required=True),
+        )
+        assert route_after_eligibility(state) is Node.REQUEST_APPROVAL
+
+    def test_approved_resume_must_reserve_verification_step(self) -> None:
+        state = make_state(
+            step_count=11,
+            max_steps=12,
+            resolved_order_id="order-001",
+            eligibility=make_eligibility(
+                max_refund_amount=Decimal("399.00"), approval_required=True
+            ),
+        )
+        state = advance(
+            state,
+            approval={
+                "approval_request_id": "approval-001",
+                "status": "APPROVED",
+                "binding_verified": True,
+                "run_id": state.run_id,
+                "order_id": "order-001",
+                "action_type": "REFUND_ONLY",
+                "amount": Decimal("399.00"),
+            },
+        )
+        assert route_after_eligibility(state) is Node.SAFE_STOP
+        assert safe_stop_reason_for(state) is SafeStopReason.BUDGET_EXHAUSTED
+
+    def test_write_that_already_happened_can_still_route_to_verify(self) -> None:
+        state = make_state(
+            step_count=11,
+            max_steps=12,
+            eligibility=make_eligibility(),
+            write={"status": WriteStatus.SUCCEEDED},
+            write_intent=make_intent(),
+        )
+        assert route_after_write(state) is Node.VERIFY
 
 
 class TestRouteAfterWrite:

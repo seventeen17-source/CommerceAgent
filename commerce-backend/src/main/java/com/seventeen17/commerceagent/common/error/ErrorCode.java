@@ -12,6 +12,8 @@ public enum ErrorCode {
     ELIGIBILITY_DENIED(422, false, "After-sales eligibility was denied"),
     MANUAL_REVIEW_REQUIRED(422, false, "Manual review is required"),
     APPROVAL_REQUIRED(422, false, "Approval is required"),
+    APPROVAL_NOT_FOUND(404, false, "Approval request was not found"),
+    APPROVAL_CONFLICT(409, false, "Approval request conflicts with the proposed action or decision"),
     APPROVAL_DENIED(409, false, "Approval was denied"),
     APPROVAL_EXPIRED(409, false, "Approval has expired"),
     INVALID_PARAMETER(400, false, "Request parameter validation failed"),

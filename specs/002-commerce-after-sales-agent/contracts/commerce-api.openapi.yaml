@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Business Backend API
-  version: 0.2.6
+  version: 0.2.8
   description: |
     ## Write-path idempotency (T021)
 
@@ -336,7 +336,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApprovalResult' }
+        '400':
+          $ref: '#/components/responses/Error'
+          description: INVALID_PARAMETER when action/amount/riskReason does not exactly match authoritative eligibility.
         '401': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: ACCESS_DENIED for a non-customer capability.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: ORDER_NOT_FOUND for both missing and cross-owner orders.
+        '409':
+          $ref: '#/components/responses/Error'
+          description: APPROVAL_CONFLICT when a concurrent/live request conflicts with this proposal.
+        '422':
+          $ref: '#/components/responses/Error'
+          description: ELIGIBILITY_DENIED or MANUAL_REVIEW_REQUIRED when deterministic rules do not produce an approval-requiring action.
+        '503':
+          $ref: '#/components/responses/Error'
+          description: Authoritative evidence required to evaluate the proposal is unavailable.
     get:
       summary: List approval requests visible to an authorized approver
       description: Requires APPROVER role. Used by the Human-in-the-loop approval center.
@@ -356,6 +374,31 @@ paths:
                 items: { $ref: '#/components/schemas/ApprovalResult' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+  /approvals/{approvalId}:
+    get:
+      summary: Re-read one authoritative approval for its owning customer
+      description: >-
+        Customer-scoped read used by Agent resume. The id is only a reference; callers must re-read
+        this record and compare runId/orderId/actionType/amount before treating APPROVED as authority.
+        Missing and cross-owner ids intentionally return the same APPROVAL_NOT_FOUND response.
+      parameters:
+        - in: path
+          name: approvalId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Authoritative approval record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalResult' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403':
+          $ref: '#/components/responses/Error'
+          description: ACCESS_DENIED for a non-customer capability.
+        '404':
+          $ref: '#/components/responses/Error'
+          description: APPROVAL_NOT_FOUND for both missing and cross-owner approval ids.
   /approvals/{approvalId}/decision:
     post:
       summary: Authorized human decides approval
@@ -384,7 +427,12 @@ paths:
               schema: { $ref: '#/components/schemas/ApprovalResult' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '404':
+          $ref: '#/components/responses/Error'
+          description: APPROVAL_NOT_FOUND.
+        '409':
+          $ref: '#/components/responses/Error'
+          description: APPROVAL_CONFLICT for an opposite terminal decision, or APPROVAL_EXPIRED when the request can no longer be decided.
   /orders/{orderId}/after-sales:
     get:
       summary: Query current after-sales objects/status for verification and timeout recovery
@@ -549,7 +597,11 @@ components:
             else and you get 400/422, not a smaller refund.
         approvalRequestId:
           type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
+          description: >-
+            Optional approval locator. When current eligibility requires human approval, Java owner-scopes the
+            ApprovalRequest and requires current status APPROVED plus an exact run/order/action/amount binding
+            before commit. When current eligibility does not require approval, a non-null reference is rejected;
+            the id is never a bearer token.
         runId:
           type: string
           format: uuid
@@ -586,7 +638,11 @@ components:
             but no rule or state depends on it.
         approvalRequestId:
           type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
+          description: >-
+            Optional approval locator. When current eligibility requires human approval, Java owner-scopes the
+            ApprovalRequest and requires current status APPROVED plus an exact run/order/action/amount binding
+            before commit. When current eligibility does not require approval, a non-null reference is rejected;
+            the id is never a bearer token.
         runId: { type: string }
     ReturnResult:
       type: object
@@ -615,16 +671,25 @@ components:
         status: { type: string }
     CreateApprovalRequest:
       type: object
+      additionalProperties: false
+      description: >-
+        A proposal only. Java re-runs deterministic eligibility and requires actionType, amount and
+        riskReason to exactly match its current authoritative decision before creating PENDING.
       required: [runId, orderId, actionType, riskReason]
       properties:
-        runId: { type: string }
-        orderId: { type: string }
-        actionType: { type: string }
+        runId: { type: string, format: uuid }
+        orderId: { type: string, minLength: 1, maxLength: 64 }
+        actionType:
+          type: string
+          enum: [REFUND_ONLY, RETURN, RETURN_REFUND]
         amount: { type: [number, 'null'] }
-        riskReason: { type: string }
+        riskReason: { type: string, minLength: 1, maxLength: 100 }
     ApprovalResult:
       type: object
-      required: [approvalRequestId, runId, orderId, actionType, status]
+      description: >-
+        Authoritative approval record. Consumers must treat APPROVED as usable only together with
+        the exact runId/orderId/actionType/amount binding and must re-read it before a sensitive write.
+      required: [approvalRequestId, runId, orderId, actionType, eligibilityRuleCode, status, requestedAt, expiresAt]
       properties:
         approvalRequestId: { type: string }
         runId: { type: string }
@@ -632,11 +697,19 @@ components:
         actionType: { type: string }
         amount: { type: [number, 'null'] }
         riskReason: { type: [string, 'null'] }
+        eligibilityRuleCode:
+          type: string
+          description: Deterministic Java eligibility rule that produced this approval requirement; display evidence only, never an approval token or replacement for write-time revalidation.
         status:
           type: string
           description: Java-owned forward-compatible approval status. Known V1 values are PENDING, APPROVED, DENIED, EXPIRED; consumers must fail closed on unknown values.
         decidedBy: { type: [string, 'null'] }
         decidedAt: { type: [string, 'null'], format: date-time }
+        requestedAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: V1 approval request deadline. A sensitive write still revalidates current business state even before this deadline.
     AfterSalesStatus:
       type: object
       required: [refunds, returns]
@@ -644,752 +717,6 @@ components:
         Both arrays are required. An omitted `refunds` field is a contract violation, not an empty
         authoritative answer; clients must not turn missing evidence into permission to retry a
         state-changing request.
-      properties:
-        refunds:
-          type: array
-          items: { $ref: '#/components/schemas/RefundResult' }
-        returns:
-          type: array
-          items: { $ref: '#/components/schemas/ReturnResult' }
-    ErrorResponse:
-      type: object
-      required: [errorCode, message, retryable, traceId]
-      properties:
-        errorCode: { type: string }
-        message: { type: string }
-        retryable: { type: boolean }
-        traceId: { type: string }
-        details: { type: object, additionalProperties: true }
-security:
-  - bearerAuth: []
-
-      responses:
-        '200':
-          description: Current after-sales status
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AfterSalesStatus' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404':
-          $ref: '#/components/responses/Error'
-          description: |
-            ORDER_NOT_FOUND, identical for "order does not exist" and "order belongs to another
-            user". Added in T021 for the same reason T019 added it elsewhere: an endpoint that reads
-            order-scoped state must not be the one place that leaks existence.
-components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    OrderId:
-      in: path
-      name: orderId
-      required: true
-      schema: { type: string }
-    IdempotencyKey:
-      in: header
-      name: Idempotency-Key
-      required: true
-      schema: { type: string, minLength: 8 }
-  responses:
-    Error:
-      description: Machine-readable error
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
-  schemas:
-    CurrentPrincipal:
-      type: object
-      required: [userId, role]
-      properties:
-        userId: { type: string, minLength: 1, maxLength: 64 }
-        role:
-          type: string
-          enum: [CUSTOMER, APPROVER, SUPPORT]
-    OrderSummary:
-      type: object
-      required: [orderId, productSummary, status, createdAt]
-      properties:
-        orderId: { type: string }
-        productSummary: { type: string }
-        status: { type: string }
-        createdAt: { type: string, format: date-time }
-    OrderSnapshot:
-      type: object
-      required: [orderId, status, totalAmount, currency, items]
-      properties:
-        orderId: { type: string }
-        status: { type: string }
-        totalAmount: { type: number }
-        currency: { type: string }
-        items:
-          type: array
-          items:
-            type: object
-            properties:
-              productId: { type: string }
-              productName: { type: string }
-              productCategory: { type: string }
-              quantity: { type: integer }
-        afterSalesStatus: { type: string }
-    LogisticsSnapshot:
-      type: object
-      required: [status, signed]
-      properties:
-        status: { type: string }
-        signed: { type: boolean }
-        lastMeaningfulEventAt: { type: [string, 'null'], format: date-time }
-        stalledHours: { type: [integer, 'null'] }
-    EligibilityRequest:
-      type: object
-      required: [orderId, reasonCode]
-      properties:
-        orderId: { type: string }
-        reasonCode: { type: string }
-    EligibilityDecision:
-      type: object
-      description: |
-        A deterministic decision about one order at one moment. Redundant-looking fields are
-        deliberately kept mutually consistent by the producer (T020): `eligible` is true exactly
-        when `allowedAction` grants an action; a decision that grants nothing carries no
-        `maxRefundAmount` and no `approvalRequired`; a decision that grants an action always cites
-        the rule it applied. Consumers should treat `eligible=false` as terminal for the proposed
-        action and must never read an amount out of a non-eligible decision.
-      required: [eligible, allowedAction, approvalRequired]
-      properties:
-        eligible: { type: boolean }
-        allowedAction:
-          type: string
-          description: Java-owned forward-compatible action value. Known V1 values are REFUND_ONLY, RETURN, RETURN_REFUND, MANUAL_REVIEW, DENY. Consumers must fail closed / SAFE_STOP on an unknown value instead of treating an additive backend value as a transport parse failure.
-        maxRefundAmount:
-          type: [number, 'null']
-          description: The amount this decision authorises, never more than the order total and never more than the rule's limit. Present exactly when a money-moving action is granted (REFUND_ONLY / RETURN_REFUND); null for a pure RETURN and for every non-eligible decision.
-        approvalRequired:
-          type: boolean
-          description: True only when eligible is true and the authoritative amount reached the rule's approval threshold ("reached" includes equality). It means "eligible, but an authoritative approval is required before the write", not "not eligible".
-        ruleCode:
-          type: [string, 'null']
-          minLength: 1
-          description: |
-            The rule that produced this decision. Null together with ruleVersion when no rule could
-            be determined (for example MANUAL_REVIEW because no rule applies, or because two
-            different rule codes match the same order). A decision that grants an action always
-            cites a rule.
-        ruleVersion:
-          type: [integer, 'null']
-          minimum: 1
-          description: Business rule version (not an optimistic-lock version). Null exactly when ruleCode is null.
-        reasonCodes:
-          type: array
-          description: Machine-readable explanation, owned by Java. Every non-eligible decision carries at least one; a granting decision may carry none when the rule declared no conditions. Consumers must treat unknown values as additive, not as a parse failure.
-          items: { type: string }
-    CreateRefundRequest:
-      type: object
-      required: [orderId, reasonCode, runId]
-      properties:
-        orderId: { type: string }
-        reasonCode: { type: string }
-        requestedAmount:
-          type: [number, 'null']
-          description: |
-            Optional. Omitted means "refund the whole authorised amount". This version refunds the
-            whole order only: an explicit value must be positive and exactly equal to the authorised
-            amount. The backend never silently substitutes a different amount — ask for something
-            else and you get 400/422, not a smaller refund.
-        approvalRequestId:
-          type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
-        runId:
-          type: string
-          format: uuid
-          description: Agent run UUID. Recorded on the refund and in the audit log for cross-service traceability; it is never identity or authorization, because agent.agent_runs belongs to another schema and DB role.
-    RefundResult:
-      type: object
-      description: |
-        Authoritative facts about the refund row that exists right now. A caller must never treat "I
-        requested X" as "the system accepted X": read the value back (or re-read
-        `GET /orders/{orderId}/after-sales`) before reporting success to a user.
-      properties:
-        refundRequestId:
-          type: string
-          description: Random UUIDv4. Not enumerable, so unlike order ids it needs no concealment.
-        status:
-          type: string
-          description: Java-owned forward-compatible status. Known V1 values are CREATED, PROCESSING, COMPLETED, REJECTED, CANCELLED. REJECTED and CANCELLED are terminal and do not occupy the order's single live-refund slot.
-        acceptedAmount:
-          type: number
-          description: The amount the backend actually accepted. In V1 this always equals the authorised whole-order amount; it is never a silently reduced version of a requested amount.
-    CreateReturnRequest:
-      type: object
-      required: [orderId, reasonCode, runId]
-      properties:
-        orderId: { type: string }
-        reasonCode:
-          type: string
-          description: Descriptive reason. It participates in the idempotency fingerprint but never selects a rule or authorises an action.
-        returnMethod:
-          type: [string, 'null']
-          description: |
-            Optional, max 32 characters. V1 attaches no behaviour to it: it is validated, stored and part of the
-            idempotency fingerprint (so "same key, different method" is a conflict rather than a silent replay),
-            but no rule or state depends on it.
-        approvalRequestId:
-          type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
-        runId: { type: string }
-    ReturnResult:
-      type: object
-      properties:
-        returnRequestId: { type: string }
-        status: { type: string }
-        returnDeadline:
-          type: [string, 'null']
-          format: date-time
-          description: |
-            Frozen at acceptance: the rule's return window measured from the carrier's signed-at timestamp. It is
-            stored rather than recomputed on read so a later rule revision cannot rewrite a deadline the customer
-            was already told. Null means the accepted return carried no window.
-    CreateTicketRequest:
-      type: object
-      required: [category, evidenceSummary, runId]
-      properties:
-        orderId: { type: [string, 'null'] }
-        category: { type: string }
-        evidenceSummary: { type: string }
-        runId: { type: string }
-    TicketResult:
-      type: object
-      properties:
-        ticketId: { type: string }
-        status: { type: string }
-    CreateApprovalRequest:
-      type: object
-      required: [runId, orderId, actionType, riskReason]
-      properties:
-        runId: { type: string }
-        orderId: { type: string }
-        actionType: { type: string }
-        amount: { type: [number, 'null'] }
-        riskReason: { type: string }
-    ApprovalResult:
-      type: object
-      required: [approvalRequestId, runId, orderId, actionType, status]
-      properties:
-        approvalRequestId: { type: string }
-        runId: { type: string }
-        orderId: { type: string }
-        actionType: { type: string }
-        amount: { type: [number, 'null'] }
-        riskReason: { type: [string, 'null'] }
-        status:
-          type: string
-          description: Java-owned forward-compatible approval status. Known V1 values are PENDING, APPROVED, DENIED, EXPIRED; consumers must fail closed on unknown values.
-        decidedBy: { type: [string, 'null'] }
-        decidedAt: { type: [string, 'null'], format: date-time }
-    AfterSalesStatus:
-      type: object
-      properties:
-        refunds:
-          type: array
-          items: { $ref: '#/components/schemas/RefundResult' }
-        returns:
-          type: array
-          items: { $ref: '#/components/schemas/ReturnResult' }
-    ErrorResponse:
-      type: object
-      required: [errorCode, message, retryable, traceId]
-      properties:
-        errorCode: { type: string }
-        message: { type: string }
-        retryable: { type: boolean }
-        traceId: { type: string }
-        details: { type: object, additionalProperties: true }
-security:
-  - bearerAuth: []
-
-      responses:
-        '200':
-          description: Current after-sales status
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AfterSalesStatus' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404':
-          $ref: '#/components/responses/Error'
-          description: |
-            ORDER_NOT_FOUND, identical for "order does not exist" and "order belongs to another
-            user". Added in T021 for the same reason T019 added it elsewhere: an endpoint that reads
-            order-scoped state must not be the one place that leaks existence.
-components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    OrderId:
-      in: path
-      name: orderId
-      required: true
-      schema: { type: string }
-    IdempotencyKey:
-      in: header
-      name: Idempotency-Key
-      required: true
-      schema: { type: string, minLength: 8 }
-  responses:
-    Error:
-      description: Machine-readable error
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
-  schemas:
-    CurrentPrincipal:
-      type: object
-      required: [userId, role]
-      properties:
-        userId: { type: string, minLength: 1, maxLength: 64 }
-        role:
-          type: string
-          enum: [CUSTOMER, APPROVER, SUPPORT]
-    OrderSummary:
-      type: object
-      required: [orderId, productSummary, status, createdAt]
-      properties:
-        orderId: { type: string }
-        productSummary: { type: string }
-        status: { type: string }
-        createdAt: { type: string, format: date-time }
-    OrderSnapshot:
-      type: object
-      required: [orderId, status, totalAmount, currency, items]
-      properties:
-        orderId: { type: string }
-        status: { type: string }
-        totalAmount: { type: number }
-        currency: { type: string }
-        items:
-          type: array
-          items:
-            type: object
-            properties:
-              productId: { type: string }
-              productName: { type: string }
-              productCategory: { type: string }
-              quantity: { type: integer }
-        afterSalesStatus: { type: string }
-    LogisticsSnapshot:
-      type: object
-      required: [status, signed]
-      properties:
-        status: { type: string }
-        signed: { type: boolean }
-        lastMeaningfulEventAt: { type: [string, 'null'], format: date-time }
-        stalledHours: { type: [integer, 'null'] }
-    EligibilityRequest:
-      type: object
-      required: [orderId, reasonCode]
-      properties:
-        orderId: { type: string }
-        reasonCode: { type: string }
-    EligibilityDecision:
-      type: object
-      description: |
-        A deterministic decision about one order at one moment. Redundant-looking fields are
-        deliberately kept mutually consistent by the producer (T020): `eligible` is true exactly
-        when `allowedAction` grants an action; a decision that grants nothing carries no
-        `maxRefundAmount` and no `approvalRequired`; a decision that grants an action always cites
-        the rule it applied. Consumers should treat `eligible=false` as terminal for the proposed
-        action and must never read an amount out of a non-eligible decision.
-      required: [eligible, allowedAction, approvalRequired]
-      properties:
-        eligible: { type: boolean }
-        allowedAction:
-          type: string
-          description: Java-owned forward-compatible action value. Known V1 values are REFUND_ONLY, RETURN, RETURN_REFUND, MANUAL_REVIEW, DENY. Consumers must fail closed / SAFE_STOP on an unknown value instead of treating an additive backend value as a transport parse failure.
-        maxRefundAmount:
-          type: [number, 'null']
-          description: The amount this decision authorises, never more than the order total and never more than the rule's limit. Present exactly when a money-moving action is granted (REFUND_ONLY / RETURN_REFUND); null for a pure RETURN and for every non-eligible decision.
-        approvalRequired:
-          type: boolean
-          description: True only when eligible is true and the authoritative amount reached the rule's approval threshold ("reached" includes equality). It means "eligible, but an authoritative approval is required before the write", not "not eligible".
-        ruleCode:
-          type: [string, 'null']
-          minLength: 1
-          description: |
-            The rule that produced this decision. Null together with ruleVersion when no rule could
-            be determined (for example MANUAL_REVIEW because no rule applies, or because two
-            different rule codes match the same order). A decision that grants an action always
-            cites a rule.
-        ruleVersion:
-          type: [integer, 'null']
-          minimum: 1
-          description: Business rule version (not an optimistic-lock version). Null exactly when ruleCode is null.
-        reasonCodes:
-          type: array
-          description: Machine-readable explanation, owned by Java. Every non-eligible decision carries at least one; a granting decision may carry none when the rule declared no conditions. Consumers must treat unknown values as additive, not as a parse failure.
-          items: { type: string }
-    CreateRefundRequest:
-      type: object
-      required: [orderId, reasonCode, runId]
-      properties:
-        orderId: { type: string }
-        reasonCode: { type: string }
-        requestedAmount:
-          type: [number, 'null']
-          description: |
-            Optional. Omitted means "refund the whole authorised amount". This version refunds the
-            whole order only: an explicit value must be positive and exactly equal to the authorised
-            amount. The backend never silently substitutes a different amount — ask for something
-            else and you get 400/422, not a smaller refund.
-        approvalRequestId:
-          type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
-        runId:
-          type: string
-          format: uuid
-          description: Agent run UUID. Recorded on the refund and in the audit log for cross-service traceability; it is never identity or authorization, because agent.agent_runs belongs to another schema and DB role.
-    RefundResult:
-      type: object
-      description: |
-        Authoritative facts about the refund row that exists right now. A caller must never treat "I
-        requested X" as "the system accepted X": read the value back (or re-read
-        `GET /orders/{orderId}/after-sales`) before reporting success to a user.
-      properties:
-        refundRequestId:
-          type: string
-          description: Random UUIDv4. Not enumerable, so unlike order ids it needs no concealment.
-        status:
-          type: string
-          description: Java-owned forward-compatible status. Known V1 values are CREATED, PROCESSING, COMPLETED, REJECTED, CANCELLED. REJECTED and CANCELLED are terminal and do not occupy the order's single live-refund slot.
-        acceptedAmount:
-          type: number
-          description: The amount the backend actually accepted. In V1 this always equals the authorised whole-order amount; it is never a silently reduced version of a requested amount.
-    CreateReturnRequest:
-      type: object
-      required: [orderId, reasonCode, runId]
-      properties:
-        orderId: { type: string }
-        reasonCode:
-          type: string
-          description: Descriptive reason. It participates in the idempotency fingerprint but never selects a rule or authorises an action.
-        returnMethod:
-          type: [string, 'null']
-          description: |
-            Optional, max 32 characters. V1 attaches no behaviour to it: it is validated, stored and part of the
-            idempotency fingerprint (so "same key, different method" is a conflict rather than a silent replay),
-            but no rule or state depends on it.
-        approvalRequestId:
-          type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
-        runId: { type: string }
-    ReturnResult:
-      type: object
-      properties:
-        returnRequestId: { type: string }
-        status: { type: string }
-        returnDeadline:
-          type: [string, 'null']
-          format: date-time
-          description: |
-            Frozen at acceptance: the rule's return window measured from the carrier's signed-at timestamp. It is
-            stored rather than recomputed on read so a later rule revision cannot rewrite a deadline the customer
-            was already told. Null means the accepted return carried no window.
-    CreateTicketRequest:
-      type: object
-      required: [category, evidenceSummary, runId]
-      properties:
-        orderId: { type: [string, 'null'] }
-        category: { type: string }
-        evidenceSummary: { type: string }
-        runId: { type: string }
-    TicketResult:
-      type: object
-      properties:
-        ticketId: { type: string }
-        status: { type: string }
-    CreateApprovalRequest:
-      type: object
-      required: [runId, orderId, actionType, riskReason]
-      properties:
-        runId: { type: string }
-        orderId: { type: string }
-        actionType: { type: string }
-        amount: { type: [number, 'null'] }
-        riskReason: { type: string }
-    ApprovalResult:
-      type: object
-      required: [approvalRequestId, runId, orderId, actionType, status]
-      properties:
-        approvalRequestId: { type: string }
-        runId: { type: string }
-        orderId: { type: string }
-        actionType: { type: string }
-        amount: { type: [number, 'null'] }
-        riskReason: { type: [string, 'null'] }
-        status:
-          type: string
-          description: Java-owned forward-compatible approval status. Known V1 values are PENDING, APPROVED, DENIED, EXPIRED; consumers must fail closed on unknown values.
-        decidedBy: { type: [string, 'null'] }
-        decidedAt: { type: [string, 'null'], format: date-time }
-    AfterSalesStatus:
-      type: object
-      required: [refunds, returns]
-      description: |
-        Both arrays are required. An omitted `refunds` field is a contract violation, not an empty
-        authoritative answer; clients must not turn missing evidence into permission to retry a
-        state-changing request.
-      properties:
-        refunds:
-          type: array
-          items: { $ref: '#/components/schemas/RefundResult' }
-        returns:
-          type: array
-          items: { $ref: '#/components/schemas/ReturnResult' }
-    ErrorResponse:
-      type: object
-      required: [errorCode, message, retryable, traceId]
-      properties:
-        errorCode: { type: string }
-        message: { type: string }
-        retryable: { type: boolean }
-        traceId: { type: string }
-        details: { type: object, additionalProperties: true }
-security:
-  - bearerAuth: []
-
-      responses:
-        '200':
-          description: Current after-sales status
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AfterSalesStatus' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404':
-          $ref: '#/components/responses/Error'
-          description: |
-            ORDER_NOT_FOUND, identical for "order does not exist" and "order belongs to another
-            user". Added in T021 for the same reason T019 added it elsewhere: an endpoint that reads
-            order-scoped state must not be the one place that leaks existence.
-components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    OrderId:
-      in: path
-      name: orderId
-      required: true
-      schema: { type: string }
-    IdempotencyKey:
-      in: header
-      name: Idempotency-Key
-      required: true
-      schema: { type: string, minLength: 8 }
-  responses:
-    Error:
-      description: Machine-readable error
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/ErrorResponse' }
-  schemas:
-    CurrentPrincipal:
-      type: object
-      required: [userId, role]
-      properties:
-        userId: { type: string, minLength: 1, maxLength: 64 }
-        role:
-          type: string
-          enum: [CUSTOMER, APPROVER, SUPPORT]
-    OrderSummary:
-      type: object
-      required: [orderId, productSummary, status, createdAt]
-      properties:
-        orderId: { type: string }
-        productSummary: { type: string }
-        status: { type: string }
-        createdAt: { type: string, format: date-time }
-    OrderSnapshot:
-      type: object
-      required: [orderId, status, totalAmount, currency, items]
-      properties:
-        orderId: { type: string }
-        status: { type: string }
-        totalAmount: { type: number }
-        currency: { type: string }
-        items:
-          type: array
-          items:
-            type: object
-            properties:
-              productId: { type: string }
-              productName: { type: string }
-              productCategory: { type: string }
-              quantity: { type: integer }
-        afterSalesStatus: { type: string }
-    LogisticsSnapshot:
-      type: object
-      required: [status, signed]
-      properties:
-        status: { type: string }
-        signed: { type: boolean }
-        lastMeaningfulEventAt: { type: [string, 'null'], format: date-time }
-        stalledHours: { type: [integer, 'null'] }
-    EligibilityRequest:
-      type: object
-      required: [orderId, reasonCode]
-      properties:
-        orderId: { type: string }
-        reasonCode: { type: string }
-    EligibilityDecision:
-      type: object
-      description: |
-        A deterministic decision about one order at one moment. Redundant-looking fields are
-        deliberately kept mutually consistent by the producer (T020): `eligible` is true exactly
-        when `allowedAction` grants an action; a decision that grants nothing carries no
-        `maxRefundAmount` and no `approvalRequired`; a decision that grants an action always cites
-        the rule it applied. Consumers should treat `eligible=false` as terminal for the proposed
-        action and must never read an amount out of a non-eligible decision.
-      required: [eligible, allowedAction, approvalRequired]
-      properties:
-        eligible: { type: boolean }
-        allowedAction:
-          type: string
-          description: Java-owned forward-compatible action value. Known V1 values are REFUND_ONLY, RETURN, RETURN_REFUND, MANUAL_REVIEW, DENY. Consumers must fail closed / SAFE_STOP on an unknown value instead of treating an additive backend value as a transport parse failure.
-        maxRefundAmount:
-          type: [number, 'null']
-          description: The amount this decision authorises, never more than the order total and never more than the rule's limit. Present exactly when a money-moving action is granted (REFUND_ONLY / RETURN_REFUND); null for a pure RETURN and for every non-eligible decision.
-        approvalRequired:
-          type: boolean
-          description: True only when eligible is true and the authoritative amount reached the rule's approval threshold ("reached" includes equality). It means "eligible, but an authoritative approval is required before the write", not "not eligible".
-        ruleCode:
-          type: [string, 'null']
-          minLength: 1
-          description: |
-            The rule that produced this decision. Null together with ruleVersion when no rule could
-            be determined (for example MANUAL_REVIEW because no rule applies, or because two
-            different rule codes match the same order). A decision that grants an action always
-            cites a rule.
-        ruleVersion:
-          type: [integer, 'null']
-          minimum: 1
-          description: Business rule version (not an optimistic-lock version). Null exactly when ruleCode is null.
-        reasonCodes:
-          type: array
-          description: Machine-readable explanation, owned by Java. Every non-eligible decision carries at least one; a granting decision may carry none when the rule declared no conditions. Consumers must treat unknown values as additive, not as a parse failure.
-          items: { type: string }
-    CreateRefundRequest:
-      type: object
-      required: [orderId, reasonCode, runId]
-      properties:
-        orderId: { type: string }
-        reasonCode: { type: string }
-        requestedAmount:
-          type: [number, 'null']
-          description: |
-            Optional. Omitted means "refund the whole authorised amount". This version refunds the
-            whole order only: an explicit value must be positive and exactly equal to the authorised
-            amount. The backend never silently substitutes a different amount — ask for something
-            else and you get 400/422, not a smaller refund.
-        approvalRequestId:
-          type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
-        runId:
-          type: string
-          format: uuid
-          description: Agent run UUID. Recorded on the refund and in the audit log for cross-service traceability; it is never identity or authorization, because agent.agent_runs belongs to another schema and DB role.
-    RefundResult:
-      type: object
-      description: |
-        Authoritative facts about the refund row that exists right now. A caller must never treat "I
-        requested X" as "the system accepted X": read the value back (or re-read
-        `GET /orders/{orderId}/after-sales`) before reporting success to a user.
-      properties:
-        refundRequestId:
-          type: string
-          description: Random UUIDv4. Not enumerable, so unlike order ids it needs no concealment.
-        status:
-          type: string
-          description: Java-owned forward-compatible status. Known V1 values are CREATED, PROCESSING, COMPLETED, REJECTED, CANCELLED. REJECTED and CANCELLED are terminal and do not occupy the order's single live-refund slot.
-        acceptedAmount:
-          type: number
-          description: The amount the backend actually accepted. In V1 this always equals the authorised whole-order amount; it is never a silently reduced version of a requested amount.
-    CreateReturnRequest:
-      type: object
-      required: [orderId, reasonCode, runId]
-      properties:
-        orderId: { type: string }
-        reasonCode:
-          type: string
-          description: Descriptive reason. It participates in the idempotency fingerprint but never selects a rule or authorises an action.
-        returnMethod:
-          type: [string, 'null']
-          description: |
-            Optional, max 32 characters. V1 attaches no behaviour to it: it is validated, stored and part of the
-            idempotency fingerprint (so "same key, different method" is a conflict rather than a silent replay),
-            but no rule or state depends on it.
-        approvalRequestId:
-          type: [string, 'null']
-          description: Optional authoritative approval reference. V1 has no approval record to validate, so any non-null value is refused with 400 rather than stored as if it were proof of approval (US4/T049 adds the real binding).
-        runId: { type: string }
-    ReturnResult:
-      type: object
-      properties:
-        returnRequestId: { type: string }
-        status: { type: string }
-        returnDeadline:
-          type: [string, 'null']
-          format: date-time
-          description: |
-            Frozen at acceptance: the rule's return window measured from the carrier's signed-at timestamp. It is
-            stored rather than recomputed on read so a later rule revision cannot rewrite a deadline the customer
-            was already told. Null means the accepted return carried no window.
-    CreateTicketRequest:
-      type: object
-      required: [category, evidenceSummary, runId]
-      properties:
-        orderId: { type: [string, 'null'] }
-        category: { type: string }
-        evidenceSummary: { type: string }
-        runId: { type: string }
-    TicketResult:
-      type: object
-      properties:
-        ticketId: { type: string }
-        status: { type: string }
-    CreateApprovalRequest:
-      type: object
-      required: [runId, orderId, actionType, riskReason]
-      properties:
-        runId: { type: string }
-        orderId: { type: string }
-        actionType: { type: string }
-        amount: { type: [number, 'null'] }
-        riskReason: { type: string }
-    ApprovalResult:
-      type: object
-      required: [approvalRequestId, runId, orderId, actionType, status]
-      properties:
-        approvalRequestId: { type: string }
-        runId: { type: string }
-        orderId: { type: string }
-        actionType: { type: string }
-        amount: { type: [number, 'null'] }
-        riskReason: { type: [string, 'null'] }
-        status:
-          type: string
-          description: Java-owned forward-compatible approval status. Known V1 values are PENDING, APPROVED, DENIED, EXPIRED; consumers must fail closed on unknown values.
-        decidedBy: { type: [string, 'null'] }
-        decidedAt: { type: [string, 'null'], format: date-time }
-    AfterSalesStatus:
-      type: object
       properties:
         refunds:
           type: array

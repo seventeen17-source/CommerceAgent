@@ -14,6 +14,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.clients.models import (
+    ApprovalResult,
+    CreateApprovalRequest,
     CurrentPrincipal,
     EligibilityDecision,
     EligibilityRequest,
@@ -22,6 +24,43 @@ from app.clients.models import (
     OrderSnapshot,
     OrderSummary,
 )
+
+
+def test_approval_request_cannot_carry_a_status_or_approver_claim() -> None:
+    with pytest.raises(ValidationError):
+        CreateApprovalRequest.model_validate(
+            {
+                "runId": "52000000-0000-4000-8000-000000000001",
+                "orderId": "order-001",
+                "actionType": "REFUND_ONLY",
+                "amount": "399.00",
+                "riskReason": "APPROVAL_REQUIRED_BY_AMOUNT",
+                "status": "APPROVED",
+            }
+        )
+
+
+def test_approval_result_parses_authoritative_binding_and_timestamps() -> None:
+    result = ApprovalResult.model_validate(
+        {
+            "approvalRequestId": "approval-001",
+            "runId": "52000000-0000-4000-8000-000000000001",
+            "orderId": "order-001",
+            "actionType": "REFUND_ONLY",
+            "amount": "399.00",
+            "riskReason": "APPROVAL_REQUIRED_BY_AMOUNT",
+            "status": "PENDING",
+            "decidedBy": None,
+            "decidedAt": None,
+            "requestedAt": "2026-10-08T08:00:00Z",
+            "expiresAt": "2026-10-09T08:00:00Z",
+        }
+    )
+
+    assert result.status == "PENDING"
+    assert result.amount == Decimal("399.00")
+    assert result.run_id.version == 4
+    assert result.expires_at > result.requested_at
 
 
 def test_current_principal_parses_camel_case() -> None:

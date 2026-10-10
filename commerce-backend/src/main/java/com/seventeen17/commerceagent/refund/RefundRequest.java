@@ -58,7 +58,7 @@ public class RefundRequest {
     @Column(name = "eligibility_rule_code", length = 100, nullable = false, updatable = false)
     private String eligibilityRuleCode;
 
-    /** V1 恒为 null：没有权威审批记录可绑定（US4/T049+）。 */
+    /** 授权该高风险退款的权威审批引用；普通无需审批的退款为 null。 */
     @Column(name = "approval_request_id", length = 64, updatable = false)
     private String approvalRequestId;
 

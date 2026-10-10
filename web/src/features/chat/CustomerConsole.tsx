@@ -20,6 +20,8 @@
 
 import { useState } from 'react'
 
+import { clarificationTextFor, headlineFor, type ClarificationKind } from './clarification'
+
 /** The subset of the run response a customer page is allowed to depend on. */
 type RunView = {
   runId: string
@@ -32,10 +34,6 @@ type RunView = {
     candidateOrderIds?: string[]
   } | null
 }
-
-/** The three ways a run can stop to ask something. They are not interchangeable: telling a customer
- *  "several of your orders match" when none of them matched the product they named is simply wrong. */
-type ClarificationKind = 'INTENT_UNKNOWN' | 'ORDER_AMBIGUOUS' | 'ORDER_NO_MATCH'
 
 type Turn =
   | { role: 'customer'; text: string }
@@ -50,42 +48,6 @@ type Turn =
     }
 
 const AGENT = '/agent'
-
-/** Status is a state, not a label: map it to words a customer would use, never print the enum. */
-function headlineFor(view: RunView): string {
-  if (view.status === 'WAITING_USER') {
-    return '需要你补充一点信息'
-  }
-  if (view.status === 'WAITING_APPROVAL') {
-    // Waiting on an approver is not something the customer can act on, so it must not read like a
-    // request for more information -- that would send them looking for something to supply.
-    return '已提交人工审核，请等待结果'
-  }
-  if (view.status === 'RUNNING') {
-    // The create call drives the graph, so this should not happen; saying so honestly beats a
-    // spinner that never resolves.
-    return '还在处理中，请稍后刷新页面查看结果'
-  }
-  if (view.status === 'SAFE_STOP' || view.status === 'ESCALATED') {
-    return '已转人工处理'
-  }
-  if (view.status === 'FAILED') {
-    return '处理失败'
-  }
-  return '处理完成'
-}
-
-/** One question per kind, in the customer's words. `ORDER_NO_MATCH` says the *clue* found nothing --
- *  it is not "several match" and not "I did not understand you", and saying either would be a lie. */
-function clarificationTextFor(kind: ClarificationKind): string {
-  if (kind === 'ORDER_AMBIGUOUS') {
-    return '你名下有好几笔订单，请告诉我是哪一笔。'
-  }
-  if (kind === 'ORDER_NO_MATCH') {
-    return '我没找到你说的那件商品的订单，请确认是下面哪一笔（只列最近几笔）。'
-  }
-  return '我还不太确定你的诉求，能再说明一下吗？'
-}
 
 const card: React.CSSProperties = {
   border: '1px solid #d8dee9',
@@ -112,7 +74,7 @@ export function CustomerConsole() {
         role: 'agent',
         text: needsClarification
           ? clarificationTextFor(view.clarification?.kind ?? 'INTENT_UNKNOWN')
-          : (view.finalMessage ?? headlineFor(view)),
+          : (view.finalMessage ?? headlineFor(view.status)),
         orders: view.resolvedOrderId ? [view.resolvedOrderId] : undefined,
         needsClarification,
         candidates: view.clarification?.candidateOrderIds ?? [],

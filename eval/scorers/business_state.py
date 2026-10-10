@@ -62,6 +62,29 @@ class ReturnFacts:
 
 
 @dataclass(frozen=True)
+class ApprovalFacts:
+    """One authoritative ``commerce.approval_requests`` row (T056)."""
+
+    approval_id: str
+    run_id: str
+    order_id: str
+    status: str
+
+
+@dataclass(frozen=True)
+class ApprovalExpectation:
+    """Exact approval-state assertions for HITL eval cases.
+
+    Status counts are exact rather than an allowlist: the cross-bound case intentionally creates one
+    PENDING approval for the real run and one APPROVED approval bound to a different run. Merely
+    allowing both status words would miss the regression where both rows accidentally became approved.
+    """
+
+    count: int | None = None
+    status_counts: tuple[tuple[str, int], ...] = ()
+
+
+@dataclass(frozen=True)
 class Expectation:
     """What a case says the world must look like once the run is over.
 
@@ -148,6 +171,30 @@ def score_business_state(
         if unexpected_returns:
             reasons.append(
                 f"return status(es) not allowed by the case: {', '.join(unexpected_returns)}"
+            )
+
+    return Verdict(passed=not reasons, reasons=tuple(reasons))
+
+
+def score_approval_state(
+    expectation: ApprovalExpectation, observed: Sequence[ApprovalFacts]
+) -> Verdict:
+    """Grade approval authority rows independently from Agent prose (T056)."""
+    reasons: list[str] = []
+    if expectation.count is not None and len(observed) != expectation.count:
+        reasons.append(
+            f"expected {expectation.count} approval row(s), found {len(observed)}"
+        )
+
+    if expectation.status_counts:
+        from collections import Counter
+
+        actual = Counter(row.status for row in observed)
+        expected = Counter(dict(expectation.status_counts))
+        if actual != expected:
+            reasons.append(
+                "approval status counts differ: "
+                f"expected {dict(expected)}, found {dict(actual)}"
             )
 
     return Verdict(passed=not reasons, reasons=tuple(reasons))

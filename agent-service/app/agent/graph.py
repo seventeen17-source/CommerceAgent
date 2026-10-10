@@ -27,11 +27,12 @@ from app.agent.routing import (
     route_after_decision,
     route_after_eligibility,
     route_after_execute,
+    route_after_request_approval,
     route_after_resolve_order,
     route_after_understand,
     route_after_write,
 )
-from app.agent.state import AgentState
+from app.agent.state import AgentState, RunStatus
 
 __all__ = ["CompiledGraph", "GraphNode", "GraphState", "GraphUpdate", "build_graph"]
 
@@ -77,6 +78,7 @@ _ROUTERS: Final[dict[Node, Callable[[AgentState, Decision | None], Node]]] = {
     Node.DECIDE_EVIDENCE: route_after_decision,
     Node.EXECUTE_EVIDENCE: route_after_execute,
     Node.CHECK_ELIGIBILITY: route_after_eligibility,
+    Node.REQUEST_APPROVAL: route_after_request_approval,
     Node.REFUND_WRITE: route_after_write,
     Node.RETURN_WRITE: route_after_write,
 }
@@ -97,6 +99,7 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
     Node.EXECUTE_EVIDENCE: frozenset({Node.DECIDE_EVIDENCE, Node.EXECUTE_EVIDENCE, Node.SAFE_STOP}),
     Node.CHECK_ELIGIBILITY: frozenset(
         {
+            Node.REQUEST_APPROVAL,
             Node.REFUND_WRITE,
             Node.RETURN_WRITE,
             Node.CHECK_ELIGIBILITY,
@@ -104,6 +107,7 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
             Node.SAFE_STOP,
         }
     ),
+    Node.REQUEST_APPROVAL: frozenset({Node.WAITING_APPROVAL, Node.SAFE_STOP, Node.FINALIZE}),
     Node.REFUND_WRITE: frozenset({Node.VERIFY, Node.FINALIZE, Node.SAFE_STOP}),
     # T041: the return write leaves through the same doors as the refund write -- verification, a
     # quiet finish, or a refusal. It has no money to lose, but it still must never finish on the
@@ -111,9 +115,12 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
     Node.RETURN_WRITE: frozenset({Node.VERIFY, Node.FINALIZE, Node.SAFE_STOP}),
 }
 
-#: Nodes that end one invocation of the graph. ``waiting_user`` and ``safe_stop`` also end it: a
+#: Nodes that end one invocation of the graph. ``waiting_user`` / ``waiting_approval`` and
+#: ``safe_stop`` also end it: a
 #: waiting run is resumed later by the API, and a refused run must not quietly continue.
-_TERMINAL: Final[frozenset[Node]] = frozenset({Node.FINALIZE, Node.WAITING_USER, Node.SAFE_STOP})
+_TERMINAL: Final[frozenset[Node]] = frozenset(
+    {Node.FINALIZE, Node.WAITING_USER, Node.WAITING_APPROVAL, Node.SAFE_STOP}
+)
 
 
 def _edge(router: Callable[[AgentState, Decision | None], Node]) -> Callable[[GraphState], Node]:
@@ -123,6 +130,29 @@ def _edge(router: Callable[[AgentState, Decision | None], Node]) -> Callable[[Gr
         return router(graph["state"], graph.get("decision"))
 
     return decide
+
+
+def _entry_node(graph: GraphState) -> Node:
+    """Select the entry stage from durable authority, never from a caller-supplied claim.
+
+    Fresh runs and WAITING_USER follow the normal interpretation path. An approved HITL
+    resume carries an owner-scoped, Java-verified binding checkpointed by the API;
+    the order is already resolved, so only a fresh eligibility read is needed.
+    """
+    state = graph["state"]
+    if state.step_count >= state.max_steps:
+        return Node.SAFE_STOP
+    approval = state.approval
+    if (
+        state.status is RunStatus.RUNNING
+        and approval is not None
+        and approval.status == "APPROVED"
+        and approval.binding_verified
+        and state.resolved_order_id is not None
+        and state.write_intent is None
+    ):
+        return Node.CHECK_ELIGIBILITY
+    return Node.UNDERSTAND
 
 
 def build_graph(nodes: Mapping[Node, GraphNode]) -> CompiledGraph:
@@ -143,7 +173,18 @@ def build_graph(nodes: Mapping[Node, GraphNode]) -> CompiledGraph:
         # caller of this function; the cast is confined to this one framework call.
         graph.add_node(node, cast(Any, implementation))
 
-    graph.add_edge(START, Node.UNDERSTAND)
+    # T054: a verified approval resume skips LLM re-interpretation, but never skips the
+    # fresh Java eligibility read. The verified flag is durable only after the owner-scoped
+    # approval GET and checkpoint in the resume API. Java remains the write authority.
+    graph.add_conditional_edges(
+        START,
+        _entry_node,
+        {
+            Node.UNDERSTAND: Node.UNDERSTAND,
+            Node.CHECK_ELIGIBILITY: Node.CHECK_ELIGIBILITY,
+            Node.SAFE_STOP: Node.SAFE_STOP,
+        },
+    )
     for source, router in _ROUTERS.items():
         graph.add_conditional_edges(
             source, _edge(router), {target: target for target in _CONDITIONAL_TARGETS[source]}

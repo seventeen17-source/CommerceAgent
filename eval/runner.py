@@ -1,4 +1,4 @@
-"""Run the US1 eval cases: reset the world, run the agent, grade the business state.
+"""Run development eval cases: reset the world, run the agent, grade authority state.
 
 Usage (from the repository root)::
 
@@ -25,6 +25,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import yaml
@@ -40,9 +41,12 @@ sys.path.insert(0, str(_EVAL_DIR))
 sys.path.insert(0, str(_EVAL_DIR.parent / "agent-service"))
 
 from scorers.business_state import (
+    ApprovalExpectation,
+    ApprovalFacts,
     Expectation,
     RefundFacts,
     ReturnFacts,
+    score_approval_state,
     score_business_state,
 )
 
@@ -53,6 +57,28 @@ JAVA_BASE = "http://127.0.0.1:8080"
 COMMERCE_DSN = (
     "postgresql://commerce_app:commerce_app_dev_only@127.0.0.1:5432/commerceagent"
 )
+
+
+def agent_trace_connect_kwargs() -> dict[str, Any]:
+    """Connection kwargs for reading the Agent-owned trace tables during eval.
+
+    The Docker database is published only on 127.0.0.1. On this Windows host, localhost resolves
+    to ::1 first, so psycopg waits for the IPv6 connect timeout before falling back to IPv4 on
+    every trace query. The integration-test harness already pins the same measured fact. Keep all
+    configured credentials/port/db values, but normalize only the default local host name.
+    """
+    from app.config.settings import Settings  # type: ignore[import-not-found]
+
+    settings = Settings()
+    host = "127.0.0.1" if settings.postgres_host == "localhost" else settings.postgres_host
+    return {
+        "host": host,
+        "port": settings.postgres_port,
+        "dbname": settings.postgres_db,
+        "user": settings.agent_app_user,
+        "password": settings.agent_app_password,
+        "connect_timeout": 5,
+    }
 
 
 @dataclass(frozen=True)
@@ -150,6 +176,163 @@ def return_rows(order_id: str) -> list[ReturnFacts]:
         ]
 
 
+def approval_rows(order_id: str) -> list[ApprovalFacts]:
+    """Read Java-owned approval rows directly from authority storage for grading (T056)."""
+    import psycopg
+
+    with (
+        psycopg.connect(COMMERCE_DSN, connect_timeout=5) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            "SELECT id, run_id, order_id, status "
+            "FROM commerce.approval_requests WHERE order_id = %s ORDER BY created_at, id",
+            (order_id,),
+        )
+        return [
+            ApprovalFacts(
+                approval_id=row[0], run_id=row[1], order_id=row[2], status=row[3]
+            )
+            for row in cursor.fetchall()
+        ]
+
+
+def _error_code(response: httpx.Response) -> str | None:
+    """Normalize Java ErrorEnvelope and the Agent API's current HTTPException shape."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    return payload.get("errorCode") or payload.get("detail")
+
+
+def _decision(
+    client: httpx.Client, approval_id: str, decision: str, *, token: str
+) -> httpx.Response:
+    return client.post(
+        f"{JAVA_BASE}/api/v1/approvals/{approval_id}/decision",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"decision": decision},
+    )
+
+
+def _approval_flow(
+    client: httpx.Client,
+    case: dict[str, Any],
+    *,
+    customer_token: str,
+    view: dict[str, Any],
+) -> list[str]:
+    """Exercise the post-WAITING_APPROVAL boundary requested by one T056 case."""
+    flow = case.get("approvalFlow")
+    if not flow:
+        return []
+
+    reasons: list[str] = []
+    expect = case.get("expect") or {}
+    approval_id = view.get("approvalRequestId")
+    if not approval_id:
+        return ["run did not expose an approvalRequestId"]
+
+    if flow == "pending-only":
+        return reasons
+
+    if flow == "deny-then-resume":
+        decision = _decision(
+            client, approval_id, "DENY", token=mint_token("approver-001")
+        )
+        if decision.status_code != 200:
+            reasons.append(
+                f"approver DENY returned {decision.status_code} ({_error_code(decision)})"
+            )
+            return reasons
+        resumed = client.post(
+            f"{AGENT_BASE}/runs/{view['runId']}/resume",
+            headers={"Authorization": f"Bearer {customer_token}"},
+            json={"approvalRequestId": approval_id},
+        )
+        expected_status = expect.get("resumeHttpStatus")
+        if expected_status is not None and resumed.status_code != expected_status:
+            reasons.append(
+                f"expected resume HTTP {expected_status}, got {resumed.status_code}"
+            )
+        expected_error = expect.get("resumeError")
+        if expected_error and _error_code(resumed) != expected_error:
+            reasons.append(
+                f"expected resume error {expected_error}, got {_error_code(resumed)}"
+            )
+        return reasons
+
+    if flow == "cross-bound-resume":
+        authoritative = client.get(
+            f"{JAVA_BASE}/api/v1/approvals/{approval_id}",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        )
+        if authoritative.status_code != 200:
+            return [
+                f"could not read original approval: {authoritative.status_code} "
+                f"({_error_code(authoritative)})"
+            ]
+        proposal = authoritative.json()
+        foreign = client.post(
+            f"{JAVA_BASE}/api/v1/approvals",
+            headers={"Authorization": f"Bearer {customer_token}"},
+            json={
+                "runId": str(uuid4()),
+                "orderId": proposal["orderId"],
+                "actionType": proposal["actionType"],
+                "amount": proposal.get("amount"),
+                "riskReason": proposal["riskReason"],
+            },
+        )
+        if foreign.status_code != 201:
+            return [
+                f"could not create cross-bound approval: {foreign.status_code} "
+                f"({_error_code(foreign)})"
+            ]
+        foreign_id = foreign.json()["approvalRequestId"]
+        approved = _decision(
+            client, foreign_id, "APPROVE", token=mint_token("approver-001")
+        )
+        if approved.status_code != 200:
+            return [
+                f"could not approve cross-bound approval: {approved.status_code} "
+                f"({_error_code(approved)})"
+            ]
+        resumed = client.post(
+            f"{AGENT_BASE}/runs/{view['runId']}/resume",
+            headers={"Authorization": f"Bearer {customer_token}"},
+            json={"approvalRequestId": foreign_id},
+        )
+        expected_status = expect.get("resumeHttpStatus")
+        if expected_status is not None and resumed.status_code != expected_status:
+            reasons.append(
+                f"expected cross-bound resume HTTP {expected_status}, got {resumed.status_code}"
+            )
+        expected_error = expect.get("resumeError")
+        if expected_error and _error_code(resumed) != expected_error:
+            reasons.append(
+                f"expected cross-bound resume error {expected_error}, got {_error_code(resumed)}"
+            )
+        return reasons
+
+    if flow == "self-approval":
+        attempted = _decision(client, approval_id, "APPROVE", token=customer_token)
+        expected_status = expect.get("decisionHttpStatus")
+        if expected_status is not None and attempted.status_code != expected_status:
+            reasons.append(
+                f"expected self-approval HTTP {expected_status}, got {attempted.status_code}"
+            )
+        expected_error = expect.get("decisionError")
+        if expected_error and _error_code(attempted) != expected_error:
+            reasons.append(
+                f"expected self-approval error {expected_error}, got {_error_code(attempted)}"
+            )
+        return reasons
+
+    return [f"unknown approvalFlow {flow!r}"]
+
+
 def tool_call_count(run_id: str, tool_name: str) -> int:
     """How many times this run recorded one Tool name in the cross-service evidence table.
 
@@ -158,10 +341,9 @@ def tool_call_count(run_id: str, tool_name: str) -> int:
     a run that never got out of bed. The Tool trace can.
     """
     import psycopg
-    from app.config.settings import Settings  # type: ignore[import-not-found]
 
     with (
-        psycopg.connect(Settings().agent_database_url, connect_timeout=5) as connection,
+        psycopg.connect(**agent_trace_connect_kwargs()) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -180,10 +362,9 @@ def recovery_read_happened(run_id: str) -> bool:
     evidence: the write first reported that it did not know, and only then did the run go and ask.
     """
     import psycopg
-    from app.config.settings import Settings  # type: ignore[import-not-found]
 
     with (
-        psycopg.connect(Settings().agent_database_url, connect_timeout=5) as connection,
+        psycopg.connect(**agent_trace_connect_kwargs()) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
@@ -237,6 +418,9 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
                 )
             views.append(response.json())
         view = views[-1]
+        flow_reasons = _approval_flow(
+            client, case, customer_token=token, view=view
+        )
 
         # A case may name several orders (T048: an ambiguity case has to prove that *neither* candidate
         # was written to), so the rows of every named order are pooled into one reading.
@@ -255,6 +439,32 @@ def run_case(case: dict[str, Any], order_id: str) -> Outcome:
             returns=observed_returns,
         )
         reasons = list(verdict.reasons)
+        reasons.extend(flow_reasons)
+
+        approval_count = expect.get("approvalCount")
+        approval_status_counts = expect.get("approvalStatusCounts")
+        if approval_count is not None or approval_status_counts:
+            approvals = approval_rows(order_id)
+            approval_verdict = score_approval_state(
+                ApprovalExpectation(
+                    count=approval_count,
+                    status_counts=tuple(
+                        (name, int(count))
+                        for name, count in (approval_status_counts or {}).items()
+                    ),
+                ),
+                approvals,
+            )
+            reasons.extend(approval_verdict.reasons)
+
+        if expect.get("approvalRequestIdRequired") and not view.get("approvalRequestId"):
+            reasons.append("run did not expose an approvalRequestId")
+
+        if (
+            expect.get("approvalToolRequired")
+            and tool_call_count(view["runId"], "request_human_approval") == 0
+        ):
+            reasons.append("request_human_approval was never called")
 
         if (
             expect.get("terminalStatus")

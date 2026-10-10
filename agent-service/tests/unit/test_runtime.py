@@ -131,6 +131,7 @@ def two_step_graph() -> CompiledGraph:
         Node.DECIDE_EVIDENCE: stand_in("decide_evidence"),
         Node.EXECUTE_EVIDENCE: stand_in("execute_evidence"),
         Node.CHECK_ELIGIBILITY: stand_in("check_eligibility"),
+        Node.REQUEST_APPROVAL: stand_in("request_approval"),
         Node.REFUND_WRITE: stand_in("refund_write"),
         Node.RETURN_WRITE: stand_in("return_write"),
         Node.VERIFY: stand_in("verify"),
@@ -246,6 +247,78 @@ async def test_the_intent_is_checkpointed_by_the_callback_t031_calls() -> None:
     assert moved.write.status is WriteStatus.PENDING
     assert store.checkpoints == [(Node.REFUND_WRITE.value, None)]
     assert session.record.version == 2
+
+
+@pytest.mark.asyncio
+async def test_write_ahead_intent_survives_delayed_boundary_and_interruption() -> None:
+    """A later eligibility checkpoint must never undo a committed write-ahead intent."""
+    state = make_state()
+    store = StrictRunStore(make_record(state))
+    session = RunSession(store, store.record)
+    intent = WriteIntent(
+        action="CREATE_REFUND_REQUEST",
+        target_id="order-001",
+        idempotency_key="0123456789abcdef",
+        request_fingerprint="a" * 64,
+    )
+
+    class WriteThenInterrupt:
+        async def astream(self, value: Any, *, stream_mode: str) -> AsyncIterator[dict[str, Any]]:
+            eligibility = advance(value["state"], step_count=1)
+            yield {Node.CHECK_ELIGIBILITY: {"state": eligibility}}
+
+            writing = advance(eligibility, step_count=2)
+            persisted = await session.persist_intent(
+                writing, intent, WriteOutcome(status=WriteStatus.PENDING)
+            )
+            yield {
+                Node.REFUND_WRITE: {
+                    "state": advance(
+                        persisted,
+                        write=WriteOutcome(status=WriteStatus.SUCCEEDED, resource_id="refund-001"),
+                    )
+                }
+            }
+            # Simulate a crash before the next boundary has a chance to checkpoint the
+            # write result. The last durable state MUST still carry the idempotency key.
+            assert session.state.write_intent == intent
+            assert session.state.step_count == 2
+            raise RuntimeError("simulated interruption after write")
+
+    with pytest.raises(RuntimeError, match="simulated interruption after write"):
+        await drive_graph(WriteThenInterrupt(), session)  # type: ignore[arg-type]
+
+    assert store.record.status is RunStatus.FAILED
+    assert store.record.state is not None
+    assert store.record.state.write_intent == intent
+    assert store.record.state.write.status is WriteStatus.PENDING
+    assert store.record.state.step_count == 2
+    assert store.checkpoints == [(Node.REFUND_WRITE.value, None)]
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_cannot_erase_a_durable_write_intent_or_reduce_its_budget() -> None:
+    state = make_state()
+    store = StrictRunStore(make_record(state))
+    session = RunSession(store, store.record)
+    intent = WriteIntent(
+        action="CREATE_REFUND_REQUEST",
+        target_id="order-001",
+        idempotency_key="0123456789abcdef",
+        request_fingerprint="a" * 64,
+    )
+    await session.persist_intent(
+        advance(state, step_count=2), intent, WriteOutcome(status=WriteStatus.PENDING)
+    )
+
+    with pytest.raises(RunStoreError, match="decrease the durable step count"):
+        session.checkpoint(state=advance(state, step_count=1), current_node="check_eligibility")
+    with pytest.raises(RunStoreError, match="discard or replace a durable write intent"):
+        session.checkpoint(state=advance(state, step_count=2), current_node="check_eligibility")
+
+    assert store.record.state is not None
+    assert store.record.state.write_intent == intent
+    assert store.record.version == 2
 
 
 @pytest.mark.asyncio

@@ -49,6 +49,36 @@ public class FixtureLoader {
     private static final String AMBIGUOUS_ORDER_FIRST_ID = "order-101";
     private static final String AMBIGUOUS_ORDER_SECOND_ID = "order-102";
 
+    /**
+     * T048b: the clue-narrowing case -- three equally writable orders, only one of them described by
+     * the clue.
+     */
+    static final String CLUE_NARROW_CASE = "order-clue-narrow-001";
+
+    /** T056: approval eval world -- eligible refund whose amount requires human approval. */
+    static final String APPROVAL_HIGH_RISK_CASE = "approval-high-risk-001";
+
+    private static final String APPROVAL_HIGH_RISK_ORDER_ID = "order-004";
+    private static final String APPROVAL_HIGH_RISK_SHIPMENT_ID = "shipment-004";
+
+    private static final String CLUE_NARROW_MATCHING_ID = "order-101";
+    private static final String CLUE_NARROW_OTHER_FIRST_ID = "order-201";
+    private static final String CLUE_NARROW_OTHER_SECOND_ID = "order-202";
+
+    /**
+     * Every order id any fixture case may have created, as one SQL list.
+     *
+     * <p>Held as a constant rather than repeated in six statements because this list is a single fact
+     * ("the ids that fixtures own") that six deletes happen to share. Repeating it made adding one case
+     * a six-place edit, and a missed place fails as a foreign-key error in some *other* case's reset.
+     */
+    private static final String ORDER_ID_LIST =
+            "'order-001', 'order-002', 'order-003', 'order-004', 'order-101', 'order-102', 'order-201', 'order-202'";
+
+    /** The shipment-side sibling of {@link #ORDER_ID_LIST}. */
+    private static final String SHIPMENT_ID_LIST =
+            "'shipment-001', 'shipment-002', 'shipment-003', 'shipment-004', 'shipment-101', 'shipment-102', 'shipment-201', 'shipment-202'";
+
     private final JdbcTemplate jdbcTemplate;
     private final FixtureCaseRegistry registry;
     private final Clock clock;
@@ -88,6 +118,10 @@ public class FixtureLoader {
                 seedDeliveredReturnCase();
             } else if (AMBIGUOUS_ORDER_CASE.equals(fixtureCase.caseId())) {
                 seedAmbiguousOrderCase();
+            } else if (CLUE_NARROW_CASE.equals(fixtureCase.caseId())) {
+                seedClueNarrowingCase();
+            } else if (APPROVAL_HIGH_RISK_CASE.equals(fixtureCase.caseId())) {
+                seedApprovalHighRiskCase();
             } else {
                 seedRefundLogisticsCase();
             }
@@ -119,30 +153,32 @@ public class FixtureLoader {
 
     private void clearFixtureState() {
         jdbcTemplate.update("DELETE FROM commerce.audit_logs");
+        // T051：approval_requests 是运行产生的权威业务状态，并且同时外键引用 orders / users。
+        // reset 的语义是回到已知基线，因此必须在删除 orders/users 之前清掉审批记录；否则既会残留上一轮
+        // APPROVED/DENIED 结论，也会因为外键让后续清理失败。
+        jdbcTemplate.update("DELETE FROM commerce.approval_requests");
         // T021/T026：refund_requests 对 orders 有外键，因此必须在下游对象之后再删 orders，否则 fixture reset 会以
         // FK 违约失败。Eval reset 的语义是"业务状态回到基线"，退款这类写入结果必须一起清掉，否则"重置后重跑同一个
         // 用例"会因为上一轮的退款行而得到不同结论。
-        jdbcTemplate.update(
-                "DELETE FROM commerce.refund_requests WHERE order_id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
+        jdbcTemplate.update("DELETE FROM commerce.refund_requests WHERE order_id IN (" + ORDER_ID_LIST + ")");
         // T038：退货行与退款行同类 —— 都是"运行产生的写入结果"，不是用例的起点。同样必须在删 orders 之前
         // 处理掉（同样的外键），否则"重置后重跑同一个用例"会带着上一轮的退货行，结论不可比。
-        jdbcTemplate.update(
-                "DELETE FROM commerce.return_requests WHERE order_id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
-        jdbcTemplate.update(
-                "DELETE FROM commerce.logistics_events WHERE shipment_id IN ('shipment-001', 'shipment-002', 'shipment-003', 'shipment-101', 'shipment-102')");
-        jdbcTemplate.update(
-                "DELETE FROM commerce.shipments WHERE order_id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
-        jdbcTemplate.update(
-                "DELETE FROM commerce.order_items WHERE order_id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
-        jdbcTemplate.update(
-                "DELETE FROM commerce.orders WHERE id IN ('order-001', 'order-002', 'order-003', 'order-101', 'order-102')");
+        jdbcTemplate.update("DELETE FROM commerce.return_requests WHERE order_id IN (" + ORDER_ID_LIST + ")");
+        jdbcTemplate.update("DELETE FROM commerce.logistics_events WHERE shipment_id IN (" + SHIPMENT_ID_LIST + ")");
+        jdbcTemplate.update("DELETE FROM commerce.shipments WHERE order_id IN (" + ORDER_ID_LIST + ")");
+        jdbcTemplate.update("DELETE FROM commerce.order_items WHERE order_id IN (" + ORDER_ID_LIST + ")");
+        jdbcTemplate.update("DELETE FROM commerce.orders WHERE id IN (" + ORDER_ID_LIST + ")");
         // The eval world must not inherit policy rows it did not choose. Deleting only the two rule codes
         // this loader creates left the demo seed's rules in place, and a delivered order then matched both
         // a demo return rule and this case's rule: two distinct ruleCodes matching one order is a
         // CONFLICTING_RULES refusal by design, so the case graded a *correct* refusal as a failure. Found by
         // running it -- status COMPLETED, zero return rows, zero Tool calls.
         jdbcTemplate.update("DELETE FROM commerce.after_sales_rules");
-        jdbcTemplate.update("DELETE FROM commerce.users WHERE id IN ('customer-001', 'customer-002', 'approver-001')");
+        // Do not delete the shared dev/eval principals here. They are also used by manual/live
+        // scenarios outside the fixture-owned order ids (for example us4-live-*). Deleting
+        // customer-001 would fail on those preserved orders/refunds through their user_id FKs.
+        // seedBaseUsers() below is the deterministic reset boundary for identity fields: it upserts
+        // username/role/status back to the fixture baseline without destroying unrelated business rows.
     }
 
     private void seedBaseUsers() {
@@ -195,18 +231,74 @@ public class FixtureLoader {
      */
     private void seedAmbiguousOrderCase() {
         Instant signedAt = clock.instant().minus(SIGNED_AGO);
-        seedAmbiguousOrder(AMBIGUOUS_ORDER_FIRST_ID, "item-101", "product-101", "无线蓝牙耳机 Pro", "shipment-101", signedAt);
-        seedAmbiguousOrder(
+        seedWritableDeliveredOrder(
+                AMBIGUOUS_ORDER_FIRST_ID, "item-101", "product-101", "无线蓝牙耳机 Pro", "shipment-101", signedAt);
+        seedWritableDeliveredOrder(
                 AMBIGUOUS_ORDER_SECOND_ID, "item-102", "product-102", "有线耳机 Basic", "shipment-102", signedAt);
         upsertReturnRule();
     }
 
-    private void seedAmbiguousOrder(
+    /**
+     * T048b: three orders that differ in exactly one respect -- whether the clue describes them.
+     *
+     * <p>The failure this case is built to catch is a filter that silently does nothing. Every other
+     * property of the three orders is identical on purpose (delivered, signed three days before the
+     * reset, {@code APPAREL}, covered by the same {@code RETURN_REFUND} rule that is the only active
+     * one), so "which order is meant" cannot be answered by status, window, category, rule or
+     * recency. Only the product name separates them -- and if that separation is lost, the two
+     * decoys turn {@code order-101} into one candidate among three, which is a question rather than
+     * an answer. The two decoys are what make "resolved" evidence of the filter instead of evidence
+     * that there was nothing to filter.
+     */
+    private void seedClueNarrowingCase() {
+        Instant signedAt = clock.instant().minus(SIGNED_AGO);
+        seedWritableDeliveredOrder(
+                CLUE_NARROW_MATCHING_ID, "item-101", "product-101", "无线蓝牙耳机 Pro", "shipment-101", signedAt);
+        seedWritableDeliveredOrder(
+                CLUE_NARROW_OTHER_FIRST_ID, "item-201", "product-201", "运动水壶", "shipment-201", signedAt);
+        seedWritableDeliveredOrder(
+                CLUE_NARROW_OTHER_SECOND_ID, "item-202", "product-202", "登山杖", "shipment-202", signedAt);
+        upsertReturnRule();
+    }
+
+    /**
+     * One order the after-sales rules would happily accept a return for: delivered, signed at
+     * {@code signedAt}, and covered by {@link #upsertReturnRule()}.
+     *
+     * <p>Named for the property the cases depend on rather than for the first case that needed it:
+     * both T048 worlds are built out of "orders that look writable", and that shared property is the
+     * only thing that makes "nothing was written" and "exactly one was written" meaningful.
+     */
+    private void seedWritableDeliveredOrder(
             String orderId, String itemId, String productId, String productName, String shipmentId, Instant signedAt) {
         upsertOrder(orderId, "customer-001", "DELIVERED", "199.00", signedAt);
         upsertOrderItem(itemId, orderId, productId, productName, "APPAREL", "199.00");
         upsertShipmentSignedAt(shipmentId, orderId, "SYNTHETIC", "TRACK-" + orderId, "DELIVERED", signedAt);
         ensureLogisticsEvent(shipmentId, "DELIVERED", "Synthetic signed delivery event", signedAt);
+    }
+
+    /**
+     * T056: one order that is eligible for the normal logistics-stall refund rule but crosses its
+     * 300.00 approval threshold. The request can therefore only create a PENDING ApprovalRequest and
+     * park the Agent in WAITING_APPROVAL until an authorized human decides it.
+     */
+    private void seedApprovalHighRiskCase() {
+        upsertOrder(APPROVAL_HIGH_RISK_ORDER_ID, "customer-001", "SHIPPED", "399.00");
+        upsertOrderItem(
+                "item-004",
+                APPROVAL_HIGH_RISK_ORDER_ID,
+                "product-004",
+                "Wireless Headphones Pro",
+                "ELECTRONICS",
+                "399.00");
+        upsertShipment(
+                APPROVAL_HIGH_RISK_SHIPMENT_ID, APPROVAL_HIGH_RISK_ORDER_ID, "SYNTHETIC", "TRACK-004", "IN_TRANSIT");
+        ensureLogisticsEvent(
+                APPROVAL_HIGH_RISK_SHIPMENT_ID,
+                "IN_TRANSIT",
+                "Synthetic stalled logistics event for approval eval",
+                LAST_LOGISTICS_EVENT_AT);
+        upsertAfterSalesRule();
     }
 
     private void seedRefundLogisticsCase() {

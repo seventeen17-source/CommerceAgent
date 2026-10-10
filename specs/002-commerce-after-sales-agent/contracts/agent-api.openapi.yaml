@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CommerceAgent Agent API
-  version: 0.2.1
+  version: 0.2.2
 servers:
   - url: http://agent-service:8000/api/v1
 paths:
@@ -77,7 +77,12 @@ paths:
   /agent/runs/{runId}/resume:
     post:
       summary: Resume a checkpointed run after authoritative approval/business event
-      description: Resume never trusts approval status supplied by the caller. The Agent service re-reads the authoritative backend approval record before continuing.
+      description: >-
+        Resume never trusts approval status supplied by the caller. For WAITING_APPROVAL the checkpoint's
+        approvalRequestId selects the record; an optional body id may only repeat that reference. Before the
+        run is claimed, the Agent service owner-scoped re-reads Java ApprovalRequest and requires APPROVED plus
+        exact run/order/action/amount binding. The resumed graph re-runs eligibility, and the final Java write
+        re-checks the approval again.
       parameters:
         - $ref: '#/components/parameters/RunId'
       requestBody:
@@ -86,8 +91,11 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
-                approvalRequestId: { type: [string, 'null'] }
+                approvalRequestId:
+                  type: [string, 'null']
+                  description: Optional claim about the checkpointed approval reference; it cannot assert status or authority.
       responses:
         '200':
           description: Run resumed
@@ -96,7 +104,14 @@ paths:
               schema: { $ref: '#/components/schemas/AgentRunView' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '409':
+          $ref: '#/components/responses/Error'
+          description: >-
+            The run is not resumable, the caller supplied a different approval reference, the approval is still
+            pending/denied/expired, or its authoritative run/order/action/amount binding does not match the checkpoint.
+        '503':
+          $ref: '#/components/responses/Error'
+          description: The authoritative Commerce approval record could not be re-read safely.
   /agent/runs/{runId}/trace:
     get:
       summary: Retrieve structured state/tool timeline

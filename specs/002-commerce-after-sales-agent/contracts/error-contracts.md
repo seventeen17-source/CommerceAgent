@@ -86,6 +86,27 @@ id 存不存在"。本项目订单 id 形如 `order-001`，是可枚举的；把
 - **`returnDeadline` 是受理时冻结的事实**，不是读时重算的派生值：规则改版不得改写已经承诺给客户的截止日。`503` 只出现
   在"决策刚刚放行、但受理时窗口已经算不出来"这一种情形，此时**不写半截行**。
 
+## 审批 API（US4 / T052）
+
+审批记录是对一份确定 proposal 的权威决定，不是可转移的 permission token。
+
+| 情形 | 形态 |
+|---|---|
+| 创建请求的 action / amount / riskReason 与当前权威 eligibility 不一致 | `400 INVALID_PARAMETER` |
+| 创建时订单不存在或属于其他用户 | `404 ORDER_NOT_FOUND`（继续沿用 ownership concealment） |
+| 当前规则不需要审批 | `400 INVALID_PARAMETER`，不得制造无来源的审批 |
+| 当前规则拒绝 / 要求 manual review | `422 ELIGIBILITY_DENIED` / `422 MANUAL_REVIEW_REQUIRED` |
+| approval id 不存在，或 owner 读取别人的 approval id | `404 APPROVAL_NOT_FOUND` |
+| 已有相反终态、或 live approval 与 proposal 冲突 | `409 APPROVAL_CONFLICT` |
+| 审批已过 `expiresAt` | `409 APPROVAL_EXPIRED`；后端同时把 PENDING 权威迁移为 EXPIRED |
+| CUSTOMER / SUPPORT 尝试 list/decision | `403 ACCESS_DENIED` |
+
+V1 的审批有效期明确为 **24 小时**，这是操作层 TTL，不是资金授权规则：即使仍在有效期内，退款/退货写入前也必须重新读取
+ApprovalRequest 并重新跑当前 eligibility，不能把“24 小时内 APPROVED”解释成“24 小时内无条件可写”。
+
+`GET /approvals/{approvalId}` 是 owner-scoped 的权威重读面，专供 resume/T054 使用。它对“不存在”和“属于别人”统一返回
+`APPROVAL_NOT_FOUND`，调用方只能拿到自己审批记录的 run/order/action/amount/status；`approvalRequestId` 本身不携带权限。
+
 ## Error Taxonomy
 
 | Code | 含义 | 可重试 | Agent 处理 |
@@ -101,6 +122,8 @@ id 存不存在"。本项目订单 id 形如 `order-001`，是可枚举的；把
 | `ELIGIBILITY_DENIED` | 确定性规则拒绝动作 | 否 | 解释拒绝，不写入 |
 | `MANUAL_REVIEW_REQUIRED` | 规则要求人工处理 | 否 | 创建工单/升级人工 |
 | `APPROVAL_REQUIRED` | 资格允许但需要审批 | 否 | 创建/等待审批，不执行业务写入 |
+| `APPROVAL_NOT_FOUND` | 审批不存在或 owner 无权读取（对外不可区分） | 否 | 不猜 approval，停止/重新读取当前 run 绑定 |
+| `APPROVAL_CONFLICT` | 审批 proposal 或终态与当前请求冲突 | 否 | 不覆盖既有决定，重新读取权威审批 |
 | `APPROVAL_DENIED` | 人工审批拒绝 | 否 | 停止拟执行写入并反馈结果 |
 | `APPROVAL_EXPIRED` | 审批已过期 | 否 | 仅在仍合理时重新发起审批 |
 | `INVALID_PARAMETER` | 参数未通过 schema/业务校验 | 否 | 从权威证据修正参数，否则停止 |

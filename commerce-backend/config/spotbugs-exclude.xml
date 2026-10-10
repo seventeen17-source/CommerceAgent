@@ -60,6 +60,17 @@
 		<Field name="auditWriter"/>
 		<Bug pattern="EI_EXPOSE_REP2"/>
 	</Match>
+	<!--
+		T052/T056 verification: ApprovalService has the same constructor-injected AuditWriter shape as
+		OrderService, RefundService and ReturnService. The collaborator stays in a private final field,
+		is only invoked for structured audit writes, and is never returned or exposed. Keep the
+		EI_EXPOSE_REP2 exemption narrowed to this exact class plus field.
+	-->
+	<Match>
+		<Class name="com.seventeen17.commerceagent.approval.ApprovalService"/>
+		<Field name="auditWriter"/>
+		<Bug pattern="EI_EXPOSE_REP2"/>
+	</Match>
 	<Match>
 		<Class name="com.seventeen17.commerceagent.fixture.FixtureLoader"/>
 		<Field name="jdbcTemplate"/>

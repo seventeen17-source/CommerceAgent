@@ -19,8 +19,9 @@ import java.util.UUID;
  *   <li>{@code reasonCode} —— 描述性原因，参与幂等指纹，但<b>不影响</b>资格与金额（那是 T020 的确定性规则）。
  *   <li>{@code requestedAmount} —— 可空。V1 只支持整单退款：省略表示"按授权全额"，显式给出时必须为正数、并且
  *       在资格校验之后正好等于授权金额（那一步需要权威结论，因此放在服务里）。不静默改金额。
- *   <li>{@code approvalRequestId} —— 可空。V1 没有权威审批记录可校验，因此任何非空值都会被拒绝（fail closed），
- *       而不是被原样存进退款行当作"已批准"的证据。US4/T049 会替换这条规则。
+ *   <li>{@code approvalRequestId} —— 可空且只是一条引用。当前 eligibility 不要求审批时必须为空；要求审批时，
+ *       {@link RefundService} 会 owner-scoped 重读权威 ApprovalRequest，并校验 APPROVED + run/order/action/amount
+ *       完整 binding 后才允许写入。引用本身从不携带权限。
  *   <li>{@code runId} —— Agent run 的 UUID。它是**溯源**信息（写进退款行与审计的 run_id），不是身份：Java 不能
  *       也不应该用它授权，因为 {@code agent.agent_runs} 属于另一个 schema 与另一个数据库角色。
  * </ul>

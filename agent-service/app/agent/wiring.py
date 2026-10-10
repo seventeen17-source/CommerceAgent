@@ -4,11 +4,11 @@ The graph is a pure function of its dependencies, and this module is the one pla
 built and bound: the caller's credential goes into the Tool layer, the model comes from settings,
 and the only per-run piece is the session that persists the walk.
 
-``CommerceTools`` deliberately fills five of the nine dependencies. Orders, evidence, eligibility,
-the refund write and the after-sales read are all the same authenticated HTTP client, so the
-credential is bound in exactly one object - there is no second place for it to leak from, and no
-second place for it to drift. That one object satisfies five protocols is checked by mypy rather
-than asserted here.
+``CommerceTools`` deliberately fills six capability dependencies: orders, evidence,
+eligibility, approval creation, protected writes and the after-sales read. They are all the same
+authenticated HTTP facade, so the credential is bound in exactly one object - there is no second
+place for it to leak from, and no second place for it to drift. That one object satisfies the six
+narrow protocols through structural typing; mypy checks the wiring rather than a runtime cast.
 
 Assembling per request is also on purpose. A shared graph object would have to hold one caller's
 credential, which is the same mistake as caching a database connection with a user's permissions.
@@ -20,6 +20,7 @@ from app.agent.graph import CompiledGraph, build_graph
 from app.agent.nodes import (
     GraphDeps,
     PersistWriteIntent,
+    build_approval_nodes,
     build_evidence_nodes,
     build_lifecycle_nodes,
     build_read_nodes,
@@ -57,6 +58,7 @@ def build_agent_graph(
         evidence=tools,
         registry=registry,
         eligibility=tools,
+        approvals=tools,
         writes=tools,
         after_sales=tools,
         persist_intent=persist_intent,
@@ -66,6 +68,7 @@ def build_agent_graph(
         {
             **build_read_nodes(deps),
             **build_evidence_nodes(deps),
+            **build_approval_nodes(deps),
             **build_write_nodes(deps),
             **build_lifecycle_nodes(),
         }

@@ -50,7 +50,7 @@ import org.springframework.test.web.servlet.MvcResult;
  * <p>These tests deliberately start above the controller: Bearer JWT -> Spring Security ->
  * ReturnController -> ReturnService -> PostgreSQL. The point is not to re-prove the service's rules but to
  * show the same safety properties survive the HTTP boundary: ownership concealment, idempotent replay,
- * duplicate refusal, fail-closed approval references, and — the US2-specific one — that a delivered order
+ * duplicate refusal, fail-closed unnecessary approval references, and — the US2-specific one — that a delivered order
  * can never buy a direct refund through this endpoint either.
  */
 @ActiveProfiles("test")
@@ -250,7 +250,7 @@ class ReturnHttpIntegrationTest {
     }
 
     @Test
-    void anApprovalReferenceIsRefusedInThisVersion() throws Exception {
+    void anApprovalReferenceIsRefusedWhenCurrentEligibilityDoesNotRequireApproval() throws Exception {
         seedUser(CUSTOMER_ID, UserRole.CUSTOMER);
         seedDeliveredOrder(OWN_ORDER_ID, CUSTOMER_ID, HAPPY_CATEGORY);
         seedSignedShipment(OWN_ORDER_ID, Duration.ofDays(3));
@@ -264,7 +264,7 @@ class ReturnHttpIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("INVALID_PARAMETER"));
 
-        // 被拒绝的请求不得留下任何业务痕迹：宁可拒绝，也不留一条"看起来已获批准"的记录。
+        // 当前规则不要求审批，approval id 就没有授权意义；拒绝它能防止调用方把 id 当通用 bearer token。
         assertEquals(0, countReturnsFor(OWN_ORDER_ID));
     }
 

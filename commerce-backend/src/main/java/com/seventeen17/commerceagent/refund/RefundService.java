@@ -1,5 +1,7 @@
 package com.seventeen17.commerceagent.refund;
 
+import com.seventeen17.commerceagent.approval.ApprovalRequest;
+import com.seventeen17.commerceagent.approval.ApprovalService;
 import com.seventeen17.commerceagent.audit.AuditActorType;
 import com.seventeen17.commerceagent.audit.AuditEvent;
 import com.seventeen17.commerceagent.audit.AuditWriter;
@@ -46,17 +48,16 @@ import org.springframework.transaction.annotation.Transactional;
  * <pre>
  * 1. 能力校验（只有 CUSTOMER 能为自己发起退款）
  * 2. Idempotency-Key 形状校验 ............ 绝不带着垃圾参数进数据库
- * 3. V1 不接受的字段（任何 approval 引用）
- * 4. 幂等键快速重放 .................... 超时重试的常见路径，不该为读回一行而抢订单锁
- * 5. 锁订单行（owner 谓词在锁查询里）..... 并发写入在这里排队
- * 6. 拿到锁后**二次**检查幂等键 ......... 排队期间别人可能已经用同一个 key 提交了
- * 7. 订单售后状态 ....................... 已有售后 → DUPLICATE_AFTER_SALES（终端结论，先判更省事）
- * 8. 重新评估资格 ....................... DENY → ELIGIBILITY_DENIED；MANUAL_REVIEW → MANUAL_REVIEW_REQUIRED
- * 9. 金额必须等于授权全额 ............... V1 只做整单退款，超限 → AMOUNT_EXCEEDS_ALLOWED
- * 10. 同一事务写入：退款行 + 订单投影 + 审计
+ * 3. 幂等键快速重放 .................... 超时重试的常见路径，不该为读回一行而抢订单锁
+ * 4. 锁订单行（owner 谓词在锁查询里）..... 并发写入在这里排队
+ * 5. 拿到锁后**二次**检查幂等键 ......... 排队期间别人可能已经用同一个 key 提交了
+ * 6. 订单售后状态 ....................... 已有售后 → DUPLICATE_AFTER_SALES
+ * 7. 重新评估资格与金额 ................. 当前权威规则必须仍然允许这笔整单退款
+ * 8. 如当前规则要求审批 ................. owner-scoped 重读 ApprovalRequest，并核对 APPROVED + run/order/action/amount
+ * 9. 同一事务写入：退款行（含 approval_request_id）+ 订单投影 + 审计
  * </pre>
  *
- * <h2>为什么第 5 步的锁和第 6 步的二次检查必须成对出现</h2>
+ * <h2>为什么订单锁和锁后二次检查必须成对出现</h2>
  *
  * 只加锁不复查，等于只把并发请求排了队，排在后面的那个仍然会拿着"进入方法时读到的结论"继续往下写：那个结论是在
  * 别人提交之前得到的，它已经过期了。锁让检查不竞态，<b>复查</b>才让过期可见。这与 T017 在 resume 上的结论同源
@@ -87,6 +88,7 @@ public class RefundService {
     private final OrderRepository orderRepository;
     private final EligibilityService eligibilityService;
     private final RefundRequestRepository refundRequestRepository;
+    private final ApprovalService approvalService;
     private final AuditWriter auditWriter;
 
     public RefundService(
@@ -94,11 +96,13 @@ public class RefundService {
             OrderRepository orderRepository,
             EligibilityService eligibilityService,
             RefundRequestRepository refundRequestRepository,
+            ApprovalService approvalService,
             AuditWriter auditWriter) {
         this.orderService = orderService;
         this.orderRepository = orderRepository;
         this.eligibilityService = eligibilityService;
         this.refundRequestRepository = refundRequestRepository;
+        this.approvalService = approvalService;
         this.auditWriter = auditWriter;
     }
 
@@ -112,8 +116,6 @@ public class RefundService {
     public RefundResult createRefund(CommercePrincipal principal, String idempotencyKey, RefundCommand command) {
         requireCustomerCapability(principal);
         String key = requireValidIdempotencyKey(idempotencyKey);
-        requireRefundActionIsSupportedInThisVersion(command);
-
         RefundResult replayed = replayIfPresent(principal, key, command);
         if (replayed != null) {
             return replayed;
@@ -136,8 +138,9 @@ public class RefundService {
 
         // 写前重校验：资格是"某一时刻"的结论，进入事务后必须重新计算一次，而不是相信上游传下来的快照。
         EligibilityDecision decision = eligibilityService.evaluate(principal, command.orderId());
-        requireRefundAuthorized(decision);
+        requireRefundEligible(decision);
         BigDecimal amount = requireAuthorizedWholeOrderAmount(command, decision.maxRefundAmount());
+        String approvalRequestId = requireRefundApproval(principal, command, decision, amount);
 
         RefundRequest refund = RefundRequest.create(
                 newRefundId(),
@@ -147,8 +150,7 @@ public class RefundService {
                 amount,
                 key,
                 decision.ruleCode(),
-                // V1 没有权威审批记录可绑定；带审批引用的请求已在前面被拒绝，因此这里恒为 null。
-                null,
+                approvalRequestId,
                 command.runId());
 
         persistRefund(refund);
@@ -229,20 +231,6 @@ public class RefundService {
     }
 
     /**
-     * V1 无法校验任何审批引用，因此带审批引用的请求一律拒绝。
-     *
-     * <p>两种错误看起来都像"挑剔"，其实是在防一件具体的事：把无法验证的 approvalRequestId **原样存进退款行**，
-     * 会让这张表里出现"看起来已获批准"的记录，而没有任何权威来源能证明它。宁可拒绝，也不留一条日后被误读的证据。
-     */
-    private static void requireRefundActionIsSupportedInThisVersion(RefundCommand command) {
-        if (command.approvalRequestId() != null) {
-            throw new BusinessException(
-                    ErrorCode.INVALID_PARAMETER,
-                    "This version cannot validate an approval reference, so it must not be presented");
-        }
-    }
-
-    /**
      * 幂等重放判断。
      *
      * <p>指纹 = (orderId, amount, reasonCode)；<b>runId 不参与</b>。理由不是图省事：Agent 在 run 恢复后重试时
@@ -264,7 +252,8 @@ public class RefundService {
         boolean sameReason = refund.getReasonCode().equals(command.reasonCode());
         boolean sameAmount =
                 !command.hasExplicitAmount() || command.requestedAmount().compareTo(refund.getAmount()) == 0;
-        if (!sameOrder || !sameReason || !sameAmount) {
+        boolean sameApproval = java.util.Objects.equals(refund.getApprovalRequestId(), command.approvalRequestId());
+        if (!sameOrder || !sameReason || !sameAmount || !sameApproval) {
             throw new BusinessException(
                     ErrorCode.IDEMPOTENCY_CONFLICT,
                     "This Idempotency-Key was already used for a different refund request");
@@ -279,13 +268,8 @@ public class RefundService {
      * 变成错误码；而且三种拒绝的原因对 Agent 的含义完全不同 —— 证据不足要转人工，规则拒绝要解释，需要审批要先去
      * 拿审批，不能合成一个笼统的"不行"。
      */
-    private static void requireRefundAuthorized(EligibilityDecision decision) {
+    private static void requireRefundEligible(EligibilityDecision decision) {
         if (decision.eligible() && decision.allowedAction() == AllowedAction.REFUND_ONLY) {
-            if (decision.approvalRequired()) {
-                throw new BusinessException(
-                        ErrorCode.APPROVAL_REQUIRED,
-                        "Eligible, but an authoritative approval is required before this refund may be written");
-            }
             return;
         }
         if (decision.allowedAction() == AllowedAction.MANUAL_REVIEW) {
@@ -295,6 +279,26 @@ public class RefundService {
         }
         throw new BusinessException(
                 ErrorCode.ELIGIBILITY_DENIED, "Deterministic after-sales rules deny a refund for this order");
+    }
+
+    private String requireRefundApproval(
+            CommercePrincipal principal, RefundCommand command, EligibilityDecision decision, BigDecimal amount) {
+        if (!decision.approvalRequired()) {
+            if (command.approvalRequestId() != null) {
+                throw new BusinessException(
+                        ErrorCode.INVALID_PARAMETER,
+                        "approvalRequestId is not accepted when current eligibility does not require approval");
+            }
+            return null;
+        }
+        ApprovalRequest approval = approvalService.requireApprovedForWrite(
+                principal,
+                command.approvalRequestId(),
+                command.runId(),
+                command.orderId(),
+                AllowedAction.REFUND_ONLY,
+                amount);
+        return approval.getId();
     }
 
     /**
