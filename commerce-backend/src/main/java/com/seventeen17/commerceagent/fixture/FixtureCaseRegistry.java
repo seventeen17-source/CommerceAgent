@@ -28,7 +28,11 @@ class FixtureCaseRegistry {
             // resolve that one and finish. Its sibling can only ever return WAITING_USER, which makes
             // "the filter worked" and "the filter did nothing" indistinguishable there.
             key("order-clue-narrow-001", DEFAULT_DATASET_VERSION),
-            new FixtureCase("order-clue-narrow-001", DEFAULT_DATASET_VERSION, "t048b-order-clue-narrow-001-v1"));
+            new FixtureCase("order-clue-narrow-001", DEFAULT_DATASET_VERSION, "t048b-order-clue-narrow-001-v1"),
+            // T056: one shipped electronics order whose amount crosses the deterministic approval
+            // threshold. All four approval eval scenarios reset back to this same clean world.
+            key("approval-high-risk-001", DEFAULT_DATASET_VERSION),
+            new FixtureCase("approval-high-risk-001", DEFAULT_DATASET_VERSION, "t056-approval-high-risk-001-v1"));
 
     Optional<FixtureCase> find(String caseId, String datasetVersion) {
         String resolvedVersion =
