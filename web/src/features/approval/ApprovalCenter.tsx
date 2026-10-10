@@ -53,6 +53,7 @@ export function ApprovalCenter() {
   const [deciding, setDeciding] = useState(false)
   const [message, setMessage] = useState('')
   const [confirm, setConfirm] = useState<Decision | null>(null)
+  const [requiresRefresh, setRequiresRefresh] = useState(false)
   const selected = records.find((record) => record.approvalRequestId === selectedId) ?? null
 
   async function readPending() {
@@ -60,6 +61,7 @@ export function ApprovalCenter() {
     setLoading(true)
     setMessage('')
     setConfirm(null)
+    setRequiresRefresh(false)
     try {
       // Java controls the APPROVER role and which records may be listed.
       const response = await fetch('/commerce/approvals?status=PENDING', {
@@ -87,7 +89,7 @@ export function ApprovalCenter() {
   }
 
   async function decide(decision: Decision) {
-    if (!selected || selected.status !== 'PENDING' || !token.trim() || deciding) return
+    if (!selected || selected.status !== 'PENDING' || !token.trim() || deciding || requiresRefresh) return
     setConfirm(null)
     setDeciding(true)
     setMessage('')
@@ -104,6 +106,7 @@ export function ApprovalCenter() {
         },
       )
       if (!response.ok) {
+        setRequiresRefresh(true)
         setMessage(approvalError(response.status))
         return
       }
@@ -117,6 +120,7 @@ export function ApprovalCenter() {
       setMessage(`Java 已确认：${updated.status}；请刷新待审批列表。`)
     } catch {
       // Timeout after commit is unknown: never blindly repeat an approval decision.
+      setRequiresRefresh(true)
       setMessage('审批请求的结果未知。请先刷新列表核对 Java 状态，不要直接重复提交。')
     } finally {
       setDeciding(false)
@@ -135,7 +139,14 @@ export function ApprovalCenter() {
           id="approval-token"
           type="password"
           value={token}
-          onChange={(event) => setToken(event.target.value)}
+          onChange={(event) => {
+            setToken(event.target.value)
+            setRecords([])
+            setSelectedId(null)
+            setConfirm(null)
+            setMessage('')
+            setRequiresRefresh(false)
+          }}
           placeholder="粘贴 approver-001 的 Bearer Token"
           autoComplete="off"
           style={{ padding: 10, width: '100%', boxSizing: 'border-box' }}
@@ -187,13 +198,13 @@ export function ApprovalCenter() {
                 <dt>过期时间</dt><dd style={{ margin: 0 }}>{formatTime(selected.expiresAt)}</dd>
                 {selected.decidedBy ? <><dt>审批人</dt><dd style={{ margin: 0 }}>{selected.decidedBy}</dd></> : null}
               </dl>
-              {selected.status === 'PENDING' ? (
+              {selected.status === 'PENDING' && !requiresRefresh ? (
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 18 }}>
                   <button disabled={deciding || loading} onClick={() => setConfirm('APPROVE')}>Approve · 批准</button>
                   <button disabled={deciding || loading} onClick={() => setConfirm('DENY')}>Deny · 拒绝</button>
                 </div>
               ) : null}
-              {confirm ? (
+              {confirm && !requiresRefresh ? (
                 <div role="group" aria-label="确认审批决定" style={{ border: '1px solid #b99e73', borderRadius: 8, padding: 12, marginTop: 14 }}>
                   <p style={{ ...small, marginBottom: 10 }}>
                     确认对订单 {selected.orderId} 的 {selected.actionType}（{formatAmount(selected.amount)}）执行 {confirm}？该操作会提交至 Java 审批服务。
