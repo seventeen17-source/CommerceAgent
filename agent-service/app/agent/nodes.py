@@ -56,7 +56,14 @@ from app.agent.routing import (
     safe_stop_reason_for,
     terminal_decision_for,
 )
-from app.agent.state import AgentState, RunStatus, ToolHistoryEntry, WriteIntent, WriteOutcome, advance
+from app.agent.state import (
+    AgentState,
+    RunStatus,
+    ToolHistoryEntry,
+    WriteIntent,
+    WriteOutcome,
+    advance,
+)
 from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.agent.verify_business_state import (
     AfterSalesReadTools,
