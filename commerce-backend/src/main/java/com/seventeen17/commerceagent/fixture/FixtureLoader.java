@@ -174,7 +174,11 @@ public class FixtureLoader {
         // CONFLICTING_RULES refusal by design, so the case graded a *correct* refusal as a failure. Found by
         // running it -- status COMPLETED, zero return rows, zero Tool calls.
         jdbcTemplate.update("DELETE FROM commerce.after_sales_rules");
-        jdbcTemplate.update("DELETE FROM commerce.users WHERE id IN ('customer-001', 'customer-002', 'approver-001')");
+        // Do not delete the shared dev/eval principals here. They are also used by manual/live
+        // scenarios outside the fixture-owned order ids (for example us4-live-*). Deleting
+        // customer-001 would fail on those preserved orders/refunds through their user_id FKs.
+        // seedBaseUsers() below is the deterministic reset boundary for identity fields: it upserts
+        // username/role/status back to the fixture baseline without destroying unrelated business rows.
     }
 
     private void seedBaseUsers() {
