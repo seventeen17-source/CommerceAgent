@@ -121,7 +121,7 @@
 
 ## Phase 7：US5 无法自动处理时安全转人工（P2）
 
-- [ ] T057 [P] [US5] 编写 retry budget、no-progress loop、dependency timeout、`MANUAL_REVIEW`、safe stop、escalation Python Test。
+- [X] T057 [P] [US5] 编写 retry budget、no-progress loop、dependency timeout、`MANUAL_REVIEW`、safe stop、escalation Python Test。→ **已完成并验收（2026-10-10）**：新增 `agent-service/tests/unit/test_us5_failure_safety.py`，把 US5 failure-safety contract 分成“当前必须成立”和“T061 才实现”两层。当前 5 条 active test 钉住：① persisted retry budget 不能在 resume 后重置/越界；② step budget 优先于 retry 请求，耗尽即 `SAFE_STOP/BUDGET_EXHAUSTED`；③ `DEPENDENCY_TIMEOUT + retryable=true` 只表示可考虑有限重试，不是无限授权；④ transport timeout 保持 read/write 不对称——side-effect-free unknown 可重试，state-changing unknown 禁止 blind retry；⑤ unconfirmable business outcome 必须 `SAFE_STOP` 且携带 machine-readable reason。另以 **2 条 strict `xfail`** 把 T061 尚未实现的契约写成可执行规格：no-progress loop 不得 clean-complete、权威 `MANUAL_REVIEW` 必须走 escalation 而非 `COMPLETED`；**不提前实现 T061**。用户本机定点：`5 passed, 2 xfailed`；完整 Python 门禁：`ruff check .` All checks passed / `ruff format --check .` **101 files already formatted** / `mypy app` **Success: no issues found in 51 source files** / `pytest -q` **570 passed, 7 skipped, 2 xfailed, 6 warnings**。
 - [ ] T058 [P] [US5] 编写 SupportTicket create/ownership/audit Java Test。
 - [ ] T059 [US5] 新建 `commerce.support_tickets` schema 与 Entity/Repository；只保存结构化 evidence summary/reason code；同步扩展 T014 fixture reset 清理 support-ticket state。
 - [ ] T060 [US5] 实现受保护 SupportTicket Create API。
