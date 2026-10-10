@@ -210,8 +210,12 @@ async def test_manual_handoff_node_cannot_forge_committed_ticket() -> None:
             "reason_codes": ["MANUAL_REVIEW_REQUIRED"],
         }
     )
-    result = await build_lifecycle_nodes()[Node.ESCALATE_OR_SAFE_STOP]({"state": state})
-    terminal = result["decision"].terminal
+    lifecycle = build_lifecycle_nodes()
+    result = await lifecycle[Node.ESCALATE_OR_SAFE_STOP]({"state": state})
+    assert result["state"].support_ticket_id is None
+    assert result["decision"].terminal is None
+    finalized = await lifecycle[Node.FINALIZE]({"state": result["state"]})
+    terminal = finalized["decision"].terminal
     assert terminal is not None
     assert terminal.status is RunStatus.SAFE_STOP
     assert terminal.reason is SafeStopReason.MANUAL_REVIEW_REQUIRED
