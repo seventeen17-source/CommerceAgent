@@ -72,7 +72,7 @@ def repeated_no_progress(state: AgentState) -> bool:
     successful calls as progress-free. A success must contribute evidence, so its handling
     remains with the evidence guard and Java eligibility validator.
     """
-    if len(state.tool_history) < 2 or state.resolved_order_id is None:
+    if len(state.tool_history) < 2:
         return False
     previous, latest = state.tool_history[-2:]
     return (
