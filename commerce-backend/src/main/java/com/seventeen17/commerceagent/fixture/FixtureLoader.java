@@ -55,6 +55,12 @@ public class FixtureLoader {
      */
     static final String CLUE_NARROW_CASE = "order-clue-narrow-001";
 
+    /** T056: approval eval world -- eligible refund whose amount requires human approval. */
+    static final String APPROVAL_HIGH_RISK_CASE = "approval-high-risk-001";
+
+    private static final String APPROVAL_HIGH_RISK_ORDER_ID = "order-004";
+    private static final String APPROVAL_HIGH_RISK_SHIPMENT_ID = "shipment-004";
+
     private static final String CLUE_NARROW_MATCHING_ID = "order-101";
     private static final String CLUE_NARROW_OTHER_FIRST_ID = "order-201";
     private static final String CLUE_NARROW_OTHER_SECOND_ID = "order-202";
@@ -67,11 +73,11 @@ public class FixtureLoader {
      * a six-place edit, and a missed place fails as a foreign-key error in some *other* case's reset.
      */
     private static final String ORDER_ID_LIST =
-            "'order-001', 'order-002', 'order-003', 'order-101', 'order-102', 'order-201', 'order-202'";
+            "'order-001', 'order-002', 'order-003', 'order-004', 'order-101', 'order-102', 'order-201', 'order-202'";
 
     /** The shipment-side sibling of {@link #ORDER_ID_LIST}. */
     private static final String SHIPMENT_ID_LIST =
-            "'shipment-001', 'shipment-002', 'shipment-003', 'shipment-101', 'shipment-102', 'shipment-201', 'shipment-202'";
+            "'shipment-001', 'shipment-002', 'shipment-003', 'shipment-004', 'shipment-101', 'shipment-102', 'shipment-201', 'shipment-202'";
 
     private final JdbcTemplate jdbcTemplate;
     private final FixtureCaseRegistry registry;
@@ -114,6 +120,8 @@ public class FixtureLoader {
                 seedAmbiguousOrderCase();
             } else if (CLUE_NARROW_CASE.equals(fixtureCase.caseId())) {
                 seedClueNarrowingCase();
+            } else if (APPROVAL_HIGH_RISK_CASE.equals(fixtureCase.caseId())) {
+                seedApprovalHighRiskCase();
             } else {
                 seedRefundLogisticsCase();
             }
@@ -263,6 +271,34 @@ public class FixtureLoader {
         upsertOrderItem(itemId, orderId, productId, productName, "APPAREL", "199.00");
         upsertShipmentSignedAt(shipmentId, orderId, "SYNTHETIC", "TRACK-" + orderId, "DELIVERED", signedAt);
         ensureLogisticsEvent(shipmentId, "DELIVERED", "Synthetic signed delivery event", signedAt);
+    }
+
+    /**
+     * T056: one order that is eligible for the normal logistics-stall refund rule but crosses its
+     * 300.00 approval threshold. The request can therefore only create a PENDING ApprovalRequest and
+     * park the Agent in WAITING_APPROVAL until an authorized human decides it.
+     */
+    private void seedApprovalHighRiskCase() {
+        upsertOrder(APPROVAL_HIGH_RISK_ORDER_ID, "customer-001", "SHIPPED", "399.00");
+        upsertOrderItem(
+                "item-004",
+                APPROVAL_HIGH_RISK_ORDER_ID,
+                "product-004",
+                "Wireless Headphones Pro",
+                "ELECTRONICS",
+                "399.00");
+        upsertShipment(
+                APPROVAL_HIGH_RISK_SHIPMENT_ID,
+                APPROVAL_HIGH_RISK_ORDER_ID,
+                "SYNTHETIC",
+                "TRACK-004",
+                "IN_TRANSIT");
+        ensureLogisticsEvent(
+                APPROVAL_HIGH_RISK_SHIPMENT_ID,
+                "IN_TRANSIT",
+                "Synthetic stalled logistics event for approval eval",
+                LAST_LOGISTICS_EVENT_AT);
+        upsertAfterSalesRule();
     }
 
     private void seedRefundLogisticsCase() {
