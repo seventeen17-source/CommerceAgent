@@ -21,6 +21,7 @@ from app.clients.models import (
     CreateApprovalRequest,
     CreateRefundRequest,
     CreateReturnRequest,
+    CreateTicketRequest,
     EligibilityDecision,
     EligibilityRequest,
     LogisticsSnapshot,
@@ -28,6 +29,7 @@ from app.clients.models import (
     OrderSummary,
     RefundResult,
     ReturnResult,
+    TicketResult,
 )
 from app.tools.models import ToolEnvelope
 
@@ -132,6 +134,59 @@ class CommerceTools:
             )
 
         return ToolEnvelope[ApprovalResult](
+            success=True,
+            data=call.value,
+            latencyMs=_elapsed_ms(started),
+            traceId=call.trace_id,
+        )
+
+    async def create_support_ticket(
+        self,
+        *,
+        run_id: str,
+        order_id: str | None,
+        category: str,
+        reason_code: str,
+        evidence_summary: str,
+    ) -> ToolEnvelope[TicketResult]:
+        """Create a Java-owned OPEN ticket once; never blindly retry unknown writes."""
+        started = perf_counter()
+        try:
+            request = CreateTicketRequest.model_validate(
+                {
+                    "runId": run_id,
+                    "orderId": order_id,
+                    "category": category,
+                    "reasonCode": reason_code,
+                    "evidenceSummary": evidence_summary,
+                }
+            )
+            call = await self._client.create_support_ticket(self._auth, request)
+        except ValidationError:
+            return _invalid_parameter(started)
+        except UnsafeRequestParameterError as exc:
+            return ToolEnvelope[TicketResult](
+                success=False,
+                errorCode=exc.error_code,
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+            )
+        except CommerceApiError as exc:
+            return ToolEnvelope[TicketResult](
+                success=False,
+                errorCode=exc.error_code,
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+                traceId=exc.trace_id,
+            )
+        except CommerceTransportError:
+            return ToolEnvelope[TicketResult](
+                success=False,
+                errorCode="WRITE_TIMEOUT_UNKNOWN",
+                retryable=False,
+                latencyMs=_elapsed_ms(started),
+            )
+        return ToolEnvelope[TicketResult](
             success=True,
             data=call.value,
             latencyMs=_elapsed_ms(started),
