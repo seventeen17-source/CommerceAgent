@@ -42,6 +42,7 @@ __all__ = [
     "CreateApprovalRequest",
     "CreateRefundRequest",
     "CreateReturnRequest",
+    "CreateTicketRequest",
     "CurrentPrincipal",
     "EligibilityDecision",
     "EligibilityRequest",
@@ -52,6 +53,7 @@ __all__ = [
     "OrderSummary",
     "RefundResult",
     "ReturnResult",
+    "TicketResult",
 ]
 
 # Responses come from Java: tolerate additive fields rather than failing the call.
@@ -171,6 +173,27 @@ class EligibilityDecision(BaseModel):
         if (self.rule_code is None) != (self.rule_version is None):
             raise ValueError("ruleCode and ruleVersion are cited together or not at all")
         return self
+
+
+class CreateTicketRequest(BaseModel):
+    """Structured manual-handoff request; identity and lifecycle state are Java-owned."""
+
+    model_config = _REQUEST
+
+    order_id: str | None = Field(default=None, alias="orderId", min_length=1, max_length=64)
+    category: str = Field(min_length=1, max_length=64)
+    reason_code: str = Field(alias="reasonCode", min_length=1, max_length=100)
+    evidence_summary: str = Field(alias="evidenceSummary", min_length=1, max_length=2000)
+    run_id: UUID = Field(alias="runId")
+
+
+class TicketResult(BaseModel):
+    """Java ticket creation response. Status is checked by the graph, not assumed."""
+
+    model_config = _RESPONSE
+
+    ticket_id: str = Field(alias="ticketId", min_length=1, max_length=64)
+    status: str = Field(min_length=1, max_length=32)
 
 
 class CreateApprovalRequest(BaseModel):
