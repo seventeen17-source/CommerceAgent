@@ -1,8 +1,8 @@
 """T057 executable safety contract for US5 failure handling.
 
-T057 is intentionally test-first. Existing lower-level guarantees are active tests; the two
-behaviours whose implementation belongs to T061 are strict xfails. This keeps the suite green while
-making the missing US5 semantics executable instead of hiding them in prose.
+T057 started test-first with two strict xfails. T061 activates those cases as regression
+checks for fail-closed no-progress detection and manual-review routing. A ticket is only
+confirmed after the T062 Tool creates one in Java.
 """
 
 from __future__ import annotations
@@ -12,17 +12,17 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from app.agent.failure_policy import may_retry_read, normalize_tool_error, repeated_no_progress
+from app.agent.nodes import build_lifecycle_nodes
 from app.agent.routing import (
     Decision,
-    route_after_eligibility,
     Node,
     SafeStopReason,
+    route_after_eligibility,
     route_after_execute,
     safe_stop_reason_for,
     terminal_decision_for,
 )
-from app.agent.failure_policy import may_retry_read, normalize_tool_error, repeated_no_progress
-from app.agent.nodes import build_lifecycle_nodes
 from app.agent.state import (
     AgentState,
     EvidenceItem,
@@ -167,6 +167,7 @@ def test_manual_review_is_an_escalation_not_a_clean_completion() -> None:
     assert terminal.reason is SafeStopReason.MANUAL_REVIEW_REQUIRED
     assert route_after_eligibility(state) is Node.ESCALATE_OR_SAFE_STOP
 
+
 def test_transient_retry_requires_known_code_and_remaining_budget() -> None:
     state = make_state()
     unknown = ToolHistoryEntry(
@@ -197,6 +198,7 @@ def test_no_progress_requires_consecutive_failures_of_same_fixed_read() -> None:
     assert safe_stop_reason_for(state) is SafeStopReason.REPEATED_NO_PROGRESS
     success = second.model_copy(update={"success": True})
     assert repeated_no_progress(make_state(tool_history=[first, success])) is False
+
 
 @pytest.mark.asyncio
 async def test_manual_handoff_node_cannot_forge_committed_ticket() -> None:
