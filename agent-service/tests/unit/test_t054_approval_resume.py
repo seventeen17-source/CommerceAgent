@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from app.agent.graph import GraphUpdate, build_graph, _entry_node
+from app.agent.graph import GraphUpdate, _entry_node, build_graph
 from app.agent.routing import Decision, Node, route_after_eligibility
 from app.agent.state import AgentState, ApprovalSnapshot, RunStatus, advance
 from app.api.runs import ResumeRunRequest, _verify_waiting_approval
@@ -17,7 +17,6 @@ from app.clients.commerce_client import CommerceCall
 from app.clients.models import ApprovalResult
 from app.security.dependencies import AuthenticatedCall
 from app.trace.checkpoint import RunRecord
-
 
 RUN_ID = UUID("54000000-0000-4000-8000-000000000001")
 
@@ -88,7 +87,9 @@ class ApprovalClient:
         self.result = result
         self.calls: list[str] = []
 
-    async def get_approval(self, auth: AuthContext, approval_request_id: str) -> CommerceCall[ApprovalResult]:
+    async def get_approval(
+        self, auth: AuthContext, approval_request_id: str
+    ) -> CommerceCall[ApprovalResult]:
         self.calls.append(approval_request_id)
         return CommerceCall(value=self.result, trace_id="trace-approval-001", status_code=200)
 
@@ -241,15 +242,23 @@ def test_unverified_or_unresolved_approval_cannot_select_short_resume() -> None:
         amount=Decimal("399.00"),
         binding_verified=False,
     )
-    assert _entry_node({"state": advance(state, status=RunStatus.RUNNING, approval=approval)}) is Node.UNDERSTAND
-    assert _entry_node({
-        "state": advance(
-            state,
-            status=RunStatus.RUNNING,
-            resolved_order_id=None,
-            approval=approval.model_copy(update={"binding_verified": True}),
+    assert (
+        _entry_node({"state": advance(state, status=RunStatus.RUNNING, approval=approval)})
+        is Node.UNDERSTAND
+    )
+    assert (
+        _entry_node(
+            {
+                "state": advance(
+                    state,
+                    status=RunStatus.RUNNING,
+                    resolved_order_id=None,
+                    approval=approval.model_copy(update={"binding_verified": True}),
+                )
+            }
         )
-    }) is Node.UNDERSTAND
+        is Node.UNDERSTAND
+    )
 
 
 @pytest.mark.asyncio
@@ -314,12 +323,10 @@ async def test_compiled_resume_graph_rechecks_eligibility_before_write() -> None
             binding_verified=True,
         ),
     )
-    finished = await build_graph(nodes).ainvoke({
-        "state": verified, "decision": Decision(), "understood": None, "resolution": None
-    })
-    assert trace == [
-        Node.CHECK_ELIGIBILITY, Node.REFUND_WRITE, Node.VERIFY, Node.FINALIZE
-    ]
+    finished = await build_graph(nodes).ainvoke(
+        {"state": verified, "decision": Decision(), "understood": None, "resolution": None}
+    )
+    assert trace == [Node.CHECK_ELIGIBILITY, Node.REFUND_WRITE, Node.VERIFY, Node.FINALIZE]
     assert finished["state"].verification.status.value == "VERIFIED_SUCCESS"
     assert finished["state"].step_count == 10
 
