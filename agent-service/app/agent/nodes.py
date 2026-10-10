@@ -66,8 +66,8 @@ from app.tools.registry import ToolRegistry
 __all__ = [
     "GraphDeps",
     "PersistWriteIntent",
-    "build_evidence_nodes",
     "build_approval_nodes",
+    "build_evidence_nodes",
     "build_lifecycle_nodes",
     "build_read_nodes",
     "build_write_nodes",
