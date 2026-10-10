@@ -10,12 +10,17 @@ import com.seventeen17.commerceagent.security.CommercePrincipal;
 import com.seventeen17.commerceagent.user.UserRole;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Java-authoritative, transactional escalation-ticket creation. */
 @Service
 public class SupportTicketService {
+
+    private static final Pattern BEARER_CREDENTIAL = Pattern.compile("(?i)\\bBearer\\s+\\S+");
+    private static final Pattern JWT_CREDENTIAL = Pattern.compile(
+            "(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}(?![A-Za-z0-9_-])");
 
     private final OrderService orderService;
     private final SupportTicketRepository repository;
@@ -32,6 +37,11 @@ public class SupportTicketService {
     public SupportTicketResult create(CommercePrincipal principal, CreateSupportTicketRequest request) {
         if (principal == null || principal.role() != UserRole.CUSTOMER) {
             throw new BusinessException(ErrorCode.ACCESS_DENIED, "Only a customer can create a support ticket");
+        }
+        if (BEARER_CREDENTIAL.matcher(request.evidenceSummary()).find()
+                || JWT_CREDENTIAL.matcher(request.evidenceSummary()).find()) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_PARAMETER, "evidenceSummary cannot contain raw authentication credentials");
         }
         String orderId = request.orderId();
         if (orderId != null) {
