@@ -17,7 +17,8 @@ from app.clients.models import TicketResult
 from app.tools.commerce_tools import CommerceTools
 from app.tools.models import ToolEnvelope
 
-_AUTH = AuthContext(token="header.payload.signature")
+_FAKE_JWT = "header.payload.signature"
+_AUTH = AuthContext(token=_FAKE_JWT)
 
 
 def _state() -> AgentState:
