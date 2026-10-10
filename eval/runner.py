@@ -1,4 +1,4 @@
-"""Run the US1 eval cases: reset the world, run the agent, grade the business state.
+"""Run development eval cases: reset the world, run the agent, grade authority state.
 
 Usage (from the repository root)::
 
@@ -23,9 +23,9 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
-from uuid import uuid4
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import yaml
