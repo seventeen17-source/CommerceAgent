@@ -17,7 +17,9 @@
             "error_code": "DEPENDENCY_TIMEOUT",
             "retryable": true
           }
-        ]
+        ],
+        "step_count": 12,
+        "max_steps": 12
       },
       "expect": {
         "route": "decide_evidence",
