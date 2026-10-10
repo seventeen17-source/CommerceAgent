@@ -343,7 +343,9 @@ class TestRouteAfterEligibility:
         assert route_after_eligibility(state) is Node.FINALIZE
 
     def test_manual_review_requires_explicit_safe_handoff_node(self) -> None:
-        state = make_state(eligibility=make_eligibility(eligible=False, allowed_action="MANUAL_REVIEW"))
+        state = make_state(
+            eligibility=make_eligibility(eligible=False, allowed_action="MANUAL_REVIEW")
+        )
         assert route_after_eligibility(state) is Node.ESCALATE_OR_SAFE_STOP
         terminal = terminal_decision_for(state)
         assert terminal.status is RunStatus.SAFE_STOP
