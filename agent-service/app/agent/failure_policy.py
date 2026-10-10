@@ -17,7 +17,7 @@ from typing import Final
 
 from app.agent.state import AgentState, ToolHistoryEntry
 
-__all__ = ["normalize_tool_error", "may_retry_read", "repeated_no_progress"]
+__all__ = ["may_retry_read", "normalize_tool_error", "repeated_no_progress"]
 
 #: Keep this list narrow: unrecognized remote codes must fail closed, not inherit a
 #: model/provider-provided retryable flag as if it were an authorization.
