@@ -103,6 +103,12 @@ async def test_us5_failure_recovery_eval(case: dict[str, object]) -> None:
     assert status.value == expected["terminalStatus"]
     assert reason_code == expected["reason"]
     assert (len(scripted.calls) if scripted is not None else 0) == expected["ticketCount"]
+    assert len(traces) == expected["ticketCount"]
+    if scripted is not None:
+        assert scripted.calls[0]["run_id"] == str(state.run_id)
+        assert scripted.calls[0]["reason_code"] == "MANUAL_REVIEW_REQUIRED"
+        assert "user_request" not in str(scripted.calls[0])
+        assert "token" not in str(scripted.calls[0]).lower()
     assert not any(
         entry.tool_name in {"create_refund_request", "create_return_request"}
         for entry in state.tool_history
