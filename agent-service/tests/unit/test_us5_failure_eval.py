@@ -102,9 +102,15 @@ async def test_us5_failure_recovery_eval(case: dict[str, object]) -> None:
 
     assert status.value == expected["terminalStatus"]
     assert reason_code == expected["reason"]
-    assert len(scripted.calls) if scripted else 0 == expected["ticketCount"]
-    assert not any(entry.tool_name in {"create_refund_request", "create_return_request"} for entry in state.tool_history)
-    assert state.support_ticket_id is not None if status is RunStatus.ESCALATED else state.support_ticket_id is None
+    assert (len(scripted.calls) if scripted is not None else 0) == expected["ticketCount"]
+    assert not any(
+        entry.tool_name in {"create_refund_request", "create_return_request"}
+        for entry in state.tool_history
+    )
+    if status is RunStatus.ESCALATED:
+        assert state.support_ticket_id is not None
+    else:
+        assert state.support_ticket_id is None
 
 
 def test_us5_dataset_has_the_four_required_failure_families() -> None:
