@@ -99,24 +99,18 @@ class SupportTicketPersistenceIntegrationTest {
     }
 
     private void seedUser(String userId) {
-        jdbcTemplate.update(
-                """
+        jdbcTemplate.update("""
                 INSERT INTO commerce.users (id, username, role, status, created_at)
                 VALUES (?, ?, 'CUSTOMER', 'ACTIVE', CURRENT_TIMESTAMP)
                 ON CONFLICT (id) DO NOTHING
-                """,
-                userId,
-                userId);
+                """, userId, userId);
     }
 
     private void seedOrder(String orderId, String userId) {
-        jdbcTemplate.update(
-                """
+        jdbcTemplate.update("""
                 INSERT INTO commerce.orders
                     (id, user_id, status, total_amount, currency, created_at, after_sales_status, version)
                 VALUES (?, ?, 'SHIPPED', 199.00, 'USD', CURRENT_TIMESTAMP, NULL, 0)
-                """,
-                orderId,
-                userId);
+                """, orderId, userId);
     }
 }
