@@ -64,7 +64,9 @@ _REGISTRATIONS: Final[dict[ToolName, ToolRegistration]] = {
     "request_human_approval": ToolRegistration(
         name="request_human_approval",
         risk=ToolRisk.HIGH_WRITE,
-        description="Create one authoritative PENDING human approval request for the exact proposal.",
+        description=(
+            "Create one authoritative PENDING human approval request for the exact proposal."
+        ),
     ),
     "create_refund_request": ToolRegistration(
         name="create_refund_request",
