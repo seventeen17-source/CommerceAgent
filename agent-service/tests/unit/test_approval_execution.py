@@ -10,7 +10,6 @@ from app.agent.state import EligibilitySnapshot
 from app.clients.models import ApprovalResult
 from app.tools.models import ToolEnvelope
 
-
 RUN_ID = UUID("52000000-0000-4000-8000-000000000001")
 
 
