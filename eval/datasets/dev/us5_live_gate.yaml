@@ -1,0 +1,71 @@
+datasetVersion: v1
+dataset: us5_live_gate
+description: >-
+  T063 跨服务 live Gate：US5 的两条 spec 独立验收场景，跑在真实 Java + PostgreSQL + Agent 上
+  （端口由 EVAL_JAVA_BASE / EVAL_AGENT_BASE 决定，默认 8080 / 8000），
+  而不是 in-process 的脚本化 Tool 边界（那是 us5_failure_recovery.json 的职责）。
+
+  两条 case 共用同一个物理世界（order-001：customer-001 的 SHIPPED ELECTRONICS 订单，物流已停滞远超 48 小时），
+  差别只在**失败从哪条路来**：
+    · logistics-unavailable-001：依赖读不出来（故障注入在 Agent 面向的 HTTP 边界，Java 侧只在 test/eval
+      profile 注册），Java 的数据本身健康可写；
+    · manual-review-001：Java 自己的规则表回答 MANUAL_REVIEW（规则 MANUAL_REVIEW_ESCALATION），
+      依赖完全正常。
+
+  为什么共用世界很重要：两条 case 都要能说"如果 Agent 拿到了答案，这单本来是可以退款的"。否则
+  "没有退款行" 只证明世界不可写，不证明 Agent 拒绝了猜测（T042 记录过这个假通过）。
+
+  判定口径：结果层读权威业务行（refund/return/support_ticket），机制层读 agent.tool_executions，
+  终态原因读 agent.agent_checkpoints.reason_code —— 不是 run view 的 errorCode：SAFE_STOP 是"决定停下"，
+  不是"调用失败"，那个字段本来就为空（实测见 devlog）。原因用允许集而不是单值：两种安全收尾都合法。
+
+  Gate 边界（必须诚实记录）：本数据集的依赖故障注入在 **Agent→Java 的 HTTP 边界**，
+  因此它证明的是"Agent 在拿不到依赖证据时不会凭空退款"，而不是"Java 自己下游故障时的映射"；
+  后者由 Java 侧自己的错误码与测试负责。
+
+cases:
+  - scenarioId: us5-live-dependency-unavailable
+    caseId: logistics-unavailable-001
+    fixtureVersion: t063-logistics-unavailable-001-v1
+    orderId: order-001
+    user: customer-001
+    request: order-001 的物流三天没更新了，按物流丢失给我退款
+    scenario: 物流证据在重试预算内拿不到时必须安全停下，不得凭空退款，也不得伪造工单
+    expect:
+      terminalStatus: SAFE_STOP
+      terminalReasonIn:
+        - REPEATED_NO_PROGRESS
+        - BUDGET_EXHAUSTED
+      toolCallRequired:
+        - get_logistics
+      toolCallForbidden:
+        - create_refund_request
+        - create_return_request
+        - create_support_ticket
+      maxWriteCount: 0
+      refundsForOrder: 0
+      returnsForOrder: 0
+      supportTicketCount: 0
+      supportTicketAuditCount: 0
+
+  - scenarioId: us5-live-manual-review-escalated
+    caseId: manual-review-001
+    fixtureVersion: t063-manual-review-001-v1
+    orderId: order-001
+    user: customer-001
+    request: order-001 的物流三天没更新了，按物流丢失给我退款
+    scenario: 权威资格返回 MANUAL_REVIEW 时必须创建恰好一张 OPEN 工单并附带结构化证据
+    expect:
+      terminalStatus: ESCALATED
+      supportTicketCount: 1
+      supportTicketStatus: OPEN
+      supportTicketReasonCode: MANUAL_REVIEW_REQUIRED
+      supportTicketAuditCount: 1
+      toolCallRequired:
+        - create_support_ticket
+      toolCallForbidden:
+        - create_refund_request
+        - create_return_request
+      maxWriteCount: 0
+      refundsForOrder: 0
+      returnsForOrder: 0
