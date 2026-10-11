@@ -822,6 +822,7 @@ CommerceAgent/
 | T057–T063 | US5 安全转人工 | retry budget + safe stop + SupportTicket |
 | T064–T070 | US6 Policy/RAG（可延期） | policy schema + retrieval + citation |
 | T071–T083 | Eval / CI / Docker / Final Portfolio | 可复现证据与最终交付 |
+| T084–T095 | US7 可信售后工作台与执行展示 | Web + Agent API 安全投影；设计见 [ui-productization.md](../specs/002-commerce-after-sales-agent/ui-productization.md)，执行顺序见 PROJECT_PROGRESS.md |
 
 ### Setup 细化
 

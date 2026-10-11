@@ -244,6 +244,27 @@ infra/
 
 ---
 
+## US7 前端产品化架构
+
+目标与页面见 [ui-productization.md](ui-productization.md)，实现拆分见 tasks.md T084–T095；阶段状态只读根 PROJECT_PROGRESS.md。
+
+```text
+Java 本人订单/物流/审批 → Web 业务卡片
+Agent Run + owner-scoped checkpoint/trace → 确定性安全展示投影
+展示投影 → 客户证据/结果面板与执行回放
+客户 input/resume → 原 Agent 生产图 → Java 权威写入 → 核验
+```
+
+- 沿用 React/TypeScript/Vite；局部拆组件、限定样式作用域，保留 Flow Playground 全部已有入口，宿主迁移须回归验证。
+- UI-first 指优先把既有能力产品化，不将业务授权迁移前端。以 US6、独立 Dashboard、实时执行流和完整登录体系的延期控制新增范围。
+- 先冻结字段来源与兼容方案，再在同一个任务内交付契约、投影、测试与升版。设计文件中的候选字段不是已发布承诺；本规划不提前改 OpenAPI。
+- 实施 owner-scoped 最小查询；客户摘要使用白名单，禁止输出隐藏推理、原始用户请求、凭据与任意 Tool payload；持久化保留策略导致的缺失明确区分。
+- stopReason 从对应终态 checkpoint 取证，不能由 UI 推测或误用 errorCode；统一结果区分退款、退货、工单及确认方式，旧消费者需兼容。
+- 默认使用同步执行后的真实状态与有限 trace 回放；不引入队列/后台 worker/实时 SSE 生命周期改造。若可靠首请求恢复需要新查询标识，先设计独立最小增量。
+- Web 客户选单只提交当次候选，同一 Run 续跑；审批查询/恢复调用现有权威接口；凭据变化时取消或隔离旧请求结果。
+- 报告展示复用 T077，Eval reset 依赖 T071 隔离数据库守卫；T095 场景矩阵复用 T079/T082 证据，不替代其全局验收。
+- 无商品图是正常数据形态；只呈现 API 实有字段。UI 不为展示金额/类别而硬编码演示商品。
+
 ## Complexity Tracking
 
 当前不接受任何 Constitution 例外。

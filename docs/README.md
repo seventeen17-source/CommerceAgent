@@ -14,6 +14,7 @@
 - **进度 / 当前任务 / 下一步**：唯一入口是 [`PROJECT_PROGRESS.md`](../PROJECT_PROGRESS.md)；
 - **协作规则与文档纪律**（哪份文件负责什么、"能指不断言"、历史不回改）：[`AGENTS.md`](../AGENTS.md) §4；
 - **任务清单与每条任务的验收证据**：[`tasks.md`](../specs/002-commerce-after-sales-agent/tasks.md)；
+- **US7 页面设计、数据来源原则与 UI Gate 矩阵**：[`ui-productization.md`](../specs/002-commerce-after-sales-agent/ui-productization.md)；
 - **API / Tool / Error 契约**：[`contracts/`](../specs/002-commerce-after-sales-agent/contracts/)；
 - **模块怎么跑**：[`agent-service/README.md`](../agent-service/README.md)、[`web/README.md`](../web/README.md)。
 

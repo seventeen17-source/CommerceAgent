@@ -257,6 +257,12 @@ PASS 条件：
 
 ---
 
+## US7 UI 验收入口
+
+UI 的逐场景步骤与断言以 [ui-productization.md 的 UI Gate 验收矩阵](ui-productization.md#ui-gate-验收矩阵) 为准；执行任务为 tasks.md T095。每条结果记录 fixture/version、输入、角色、Run ID、页面截图、API/Trace 与业务对象证据；模拟结果与真实服务结果分开。运行 reset 前先落实 T071 的隔离 test/eval 数据库 guard，不清理普通业务库。
+
+UI Gate 通过仅代表这组页面链路通过；本文件其余核心场景、T079 安全集与 T082 完整 quickstart 验收仍需逐项执行。最终 README 由 T083 使用真实证据整理。
+
 ## Implementation Entry Gate
 
 开始实现前必须满足：
