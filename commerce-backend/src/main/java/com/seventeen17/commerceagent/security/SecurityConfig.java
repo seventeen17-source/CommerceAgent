@@ -46,6 +46,8 @@ public class SecurityConfig {
                         .hasRole("CUSTOMER")
                         .requestMatchers(HttpMethod.POST, "/api/v1/returns")
                         .hasRole("CUSTOMER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/support-tickets")
+                        .hasRole("CUSTOMER")
                         .requestMatchers(HttpMethod.POST, "/api/v1/approvals")
                         .hasRole("CUSTOMER")
                         .requestMatchers(HttpMethod.GET, "/api/v1/approvals")

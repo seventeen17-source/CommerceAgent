@@ -290,6 +290,9 @@ class AgentState(BaseModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
     eligibility: EligibilitySnapshot | None = None
     approval: ApprovalSnapshot | None = None
+    # Only a Java-confirmed OPEN ticket may populate this reference. A timed-out write
+    # must keep it empty, because the ticket may or may not have committed.
+    support_ticket_id: Identifier | None = None
     tool_history: list[ToolHistoryEntry] = Field(default_factory=list)
 
     # Safety budgets. The configurable values live in `app.config.settings`

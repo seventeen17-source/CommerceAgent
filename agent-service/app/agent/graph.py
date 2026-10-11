@@ -105,6 +105,7 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
             Node.CHECK_ELIGIBILITY,
             Node.FINALIZE,
             Node.SAFE_STOP,
+            Node.ESCALATE_OR_SAFE_STOP,
         }
     ),
     Node.REQUEST_APPROVAL: frozenset({Node.WAITING_APPROVAL, Node.SAFE_STOP, Node.FINALIZE}),
@@ -119,7 +120,12 @@ _CONDITIONAL_TARGETS: Final[dict[Node, frozenset[Node]]] = {
 #: ``safe_stop`` also end it: a
 #: waiting run is resumed later by the API, and a refused run must not quietly continue.
 _TERMINAL: Final[frozenset[Node]] = frozenset(
-    {Node.FINALIZE, Node.WAITING_USER, Node.WAITING_APPROVAL, Node.SAFE_STOP}
+    {
+        Node.FINALIZE,
+        Node.WAITING_USER,
+        Node.WAITING_APPROVAL,
+        Node.SAFE_STOP,
+    }
 )
 
 
@@ -195,6 +201,7 @@ def build_graph(nodes: Mapping[Node, GraphNode]) -> CompiledGraph:
     # Verification never routes anywhere else: the terminal status is derived from the verified
     # facts by the finalize node, so success and failure leave through the same door.
     graph.add_edge(Node.VERIFY, Node.FINALIZE)
+    graph.add_edge(Node.ESCALATE_OR_SAFE_STOP, Node.FINALIZE)
 
     for node in _TERMINAL:
         graph.add_edge(node, END)

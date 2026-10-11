@@ -13,15 +13,24 @@ import org.springframework.web.bind.annotation.RestController;
 class EvalFixtureController {
 
     private final FixtureLoader fixtureLoader;
+    private final EvalFaultInjection faults;
 
-    EvalFixtureController(FixtureLoader fixtureLoader) {
+    EvalFixtureController(FixtureLoader fixtureLoader, EvalFaultInjection faults) {
         this.fixtureLoader = fixtureLoader;
+        this.faults = faults;
     }
 
     @PostMapping("/{caseId}/reset")
     FixtureResetResponse reset(
             @PathVariable String caseId, @RequestBody(required = false) FixtureResetRequest request) {
         String datasetVersion = request == null ? null : request.datasetVersion();
-        return fixtureLoader.reset(caseId, datasetVersion);
+        // T063-live: the fault belongs to the world, so it is decided by the same call that builds
+        // the world. Clear *before* resetting so a failing reset leaves a world with no injection
+        // rather than the previous case's fault still armed -- an eval run must never inherit a
+        // failure it did not ask for.
+        faults.clear();
+        FixtureResetResponse response = fixtureLoader.reset(caseId, datasetVersion);
+        faults.applyForCase(caseId);
+        return response;
     }
 }

@@ -12,7 +12,7 @@ from app.tools import REGISTERED_TOOL_NAMES, CommerceTools, ToolEnvelope, ToolRe
 _FAKE_JWT = "header.payload.signature"
 
 
-def test_registry_exposes_only_the_eight_declared_capabilities() -> None:
+def test_registry_exposes_only_the_nine_declared_capabilities() -> None:
     assert REGISTERED_TOOL_NAMES == {
         "list_user_orders",
         "get_order",
@@ -21,6 +21,7 @@ def test_registry_exposes_only_the_eight_declared_capabilities() -> None:
         "request_human_approval",
         "create_refund_request",
         "create_return_request",
+        "create_support_ticket",
         "get_after_sales_status",
     }
 
@@ -32,7 +33,12 @@ def test_the_write_capabilities_are_exactly_the_declared_state_changes() -> None
     # Approval creation is also state-changing even though it does not move money. Listing every
     # HIGH capability explicitly turns an accidental new write surface into a test failure.
     writes = {name for name, risk in risks.items() if risk is ToolRisk.HIGH_WRITE}
-    assert writes == {"request_human_approval", "create_refund_request", "create_return_request"}
+    assert writes == {
+        "request_human_approval",
+        "create_refund_request",
+        "create_return_request",
+        "create_support_ticket",
+    }
     assert all(
         risk is ToolRisk.READ_PRIVACY_MEDIUM for name, risk in risks.items() if name not in writes
     )
@@ -95,6 +101,8 @@ async def test_registry_resolves_only_explicit_bound_commerce_tool_methods() -> 
         assert registry.resolve("request_human_approval").__name__ == "request_human_approval"
         assert registry.resolve("create_refund_request").__self__ is tools
         assert registry.resolve("create_refund_request").__name__ == "create_refund_request"
+        assert registry.resolve("create_support_ticket").__self__ is tools
+        assert registry.resolve("create_support_ticket").__name__ == "create_support_ticket"
 
 
 def test_registry_cannot_resolve_unregistered_or_unbound_implementation() -> None:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from json import dumps
 from typing import Protocol
 
 from app.agent.approval_execution import ApprovalTools, request_human_approval
@@ -41,6 +42,7 @@ from app.agent.execute_write import (
     return_write_intent,
     write_may_already_have_committed,
 )
+from app.agent.failure_policy import may_retry_read
 from app.agent.graph import GraphNode, GraphState, GraphUpdate
 from app.agent.order_resolution import OrderReadTools, resolve_single_order
 from app.agent.request_understanding import RequestUnderstandingModel, understand_request
@@ -54,13 +56,22 @@ from app.agent.routing import (
     safe_stop_reason_for,
     terminal_decision_for,
 )
-from app.agent.state import AgentState, RunStatus, WriteIntent, WriteOutcome, advance
-from app.agent.tool_tracing import TraceSink
+from app.agent.state import (
+    AgentState,
+    RunStatus,
+    ToolHistoryEntry,
+    WriteIntent,
+    WriteOutcome,
+    advance,
+)
+from app.agent.tool_tracing import TraceSink, report_tool_call
 from app.agent.verify_business_state import (
     AfterSalesReadTools,
     verify_refund_business_state,
     verify_return_business_state,
 )
+from app.clients.models import TicketResult
+from app.tools.models import ToolEnvelope
 from app.tools.registry import ToolRegistry
 
 __all__ = [
@@ -264,7 +275,7 @@ def build_evidence_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         )
         history = [*state.tool_history, result.history]
         if result.evidence is None:
-            if result.history.retryable and state.retry_count < state.max_retries:
+            if may_retry_read(result.history, state):
                 # Consume the run's retry budget and report that another attempt is warranted. The
                 # router sends the run back to *this* node with the same authorized read, so a
                 # transient failure costs no model call to re-reach the same conclusion.
@@ -366,7 +377,7 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
         )
         history = [*state.tool_history, result.history]
         if result.eligibility is None:
-            if result.history.retryable and state.retry_count < state.max_retries:
+            if may_retry_read(result.history, state):
                 moved = advance(state, retry_count=state.retry_count + 1, tool_history=history)
                 return GraphUpdate(state=moved, decision=Decision(retry_current_stage=True))
             # Java could not answer and we are out of attempts. Finishing here would report "not
@@ -561,13 +572,27 @@ def build_write_nodes(deps: GraphDeps) -> dict[Node, GraphNode]:
     }
 
 
-def build_lifecycle_nodes() -> dict[Node, GraphNode]:
-    """Build the nodes that end one invocation.
+class SupportTicketTools(Protocol):
+    """The single authenticated, state-changing T062 escalation capability."""
 
-    These take no dependencies at all, and that is the design: deciding that a run is over is a pure
-    function of the facts already in ``AgentState`` plus the control-plane reason a router refused
-    to continue. Persisting the decision is the wrapper's job, so no node here holds a store - which
-    is also why they are testable without a database.
+    async def create_support_ticket(
+        self,
+        *,
+        run_id: str,
+        order_id: str | None,
+        category: str,
+        reason_code: str,
+        evidence_summary: str,
+    ) -> ToolEnvelope[TicketResult]: ...
+
+
+def build_lifecycle_nodes(
+    tools: SupportTicketTools | None = None, record_trace: TraceSink | None = None
+) -> dict[Node, GraphNode]:
+    """Build termination nodes and the one authenticated manual-handoff write.
+
+    Finalization stays pure. The optional T062 Tool is only invoked for authoritative
+    MANUAL_REVIEW, and its outcome is checkpointed before the lifecycle transition.
     """
 
     def terminate(state: AgentState, terminal: TerminalDecision) -> GraphUpdate:
@@ -592,6 +617,96 @@ def build_lifecycle_nodes() -> dict[Node, GraphNode]:
             raise ValueError("safe_stop was reached without a declared safety reason")
         return terminate(state, TerminalDecision(status=RunStatus.SAFE_STOP, reason=reason))
 
+    async def escalate_or_safe_stop(graph: GraphState) -> GraphUpdate:
+        """Call Java exactly once, then checkpoint the result before finalizing.
+
+        LangGraph goes to FINALIZE on the next edge. The runtime checkpoints this
+        node's state at that boundary, before setting the terminal run status.
+        """
+        state = graph["state"]
+        snapshot = state.eligibility
+        if snapshot is None or snapshot.allowed_action != "MANUAL_REVIEW" or snapshot.eligible:
+            raise ValueError("escalate_or_safe_stop requires authoritative MANUAL_REVIEW")
+        if tools is None:
+            # Unit harnesses with no configured write dependency must not forge a ticket.
+            return GraphUpdate(state=state, decision=Decision())
+        if state.support_ticket_id is not None:
+            # A restored result never triggers another POST.
+            return GraphUpdate(state=state, decision=Decision())
+
+        state = spend_one_step(state)
+
+        # No raw LLM messages or arbitrary evidence.data go into the request.
+        # Use only the Java eligibility verdict and structured evidence type names.
+        evidence_types = sorted(
+            {item.evidence_type for item in state.evidence if item.evidence_type.isidentifier()}
+        )[:8]
+        evidence_facts: list[dict[str, object]] = []
+        for item in state.evidence:
+            if item.evidence_type != "LOGISTICS" or item.source != "get_logistics":
+                continue
+            facts = {
+                key: value
+                for key in ("status", "signed", "stalledHours", "lastMeaningfulEventAt")
+                if (value := item.data.get(key)) is not None and isinstance(value, str | int | bool)
+            }
+            evidence_facts.append({"type": "LOGISTICS", "source": "get_logistics", "facts": facts})
+            break
+        summary = dumps(
+            {
+                "eligibility": "MANUAL_REVIEW",
+                "reasonCode": "MANUAL_REVIEW_REQUIRED",
+                "evidenceTypes": evidence_types,
+                "evidence": evidence_facts,
+            },
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        if len(summary) > 2000:
+            # Never truncate a JSON document into an invalid partial fact.
+            summary = dumps(
+                {"eligibility": "MANUAL_REVIEW", "reasonCode": "MANUAL_REVIEW_REQUIRED"},
+                separators=(",", ":"),
+            )
+        result = await tools.create_support_ticket(
+            run_id=str(state.run_id),
+            order_id=state.resolved_order_id,
+            category="AFTER_SALES_ESCALATION",
+            reason_code="MANUAL_REVIEW_REQUIRED",
+            evidence_summary=summary,
+        )
+        report_tool_call(
+            record_trace,
+            step_index=state.step_count,
+            tool_name="create_support_ticket",
+            envelope=result,
+            input_summary={
+                "runId": str(state.run_id),
+                "orderId": state.resolved_order_id,
+                "category": "AFTER_SALES_ESCALATION",
+                "reasonCode": "MANUAL_REVIEW_REQUIRED",
+                "evidenceTypes": evidence_types,
+            },
+        )
+        history = [
+            *state.tool_history,
+            ToolHistoryEntry(
+                step_index=state.step_count,
+                tool_name="create_support_ticket",
+                success=result.success,
+                error_code=result.error_code,
+                retryable=False,
+                trace_id=result.trace_id,
+            ),
+        ]
+        ticket = result.data
+        if not result.success or ticket is None or ticket.status != "OPEN":
+            return GraphUpdate(state=advance(state, tool_history=history), decision=Decision())
+        return GraphUpdate(
+            state=advance(state, tool_history=history, support_ticket_id=ticket.ticket_id),
+            decision=Decision(),
+        )
+
     async def waiting_user(graph: GraphState) -> GraphUpdate:
         """End this invocation waiting for the user. The run stays resumable."""
         return terminate(graph["state"], TerminalDecision(status=RunStatus.WAITING_USER))
@@ -610,6 +725,7 @@ def build_lifecycle_nodes() -> dict[Node, GraphNode]:
     return {
         Node.FINALIZE: finalize,
         Node.SAFE_STOP: safe_stop,
+        Node.ESCALATE_OR_SAFE_STOP: escalate_or_safe_stop,
         Node.WAITING_USER: waiting_user,
         Node.WAITING_APPROVAL: waiting_approval,
     }

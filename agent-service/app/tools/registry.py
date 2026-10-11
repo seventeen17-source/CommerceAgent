@@ -25,6 +25,7 @@ ToolName = Literal[
     "request_human_approval",
     "create_refund_request",
     "create_return_request",
+    "create_support_ticket",
     "get_after_sales_status",
 ]
 
@@ -82,6 +83,11 @@ _REGISTRATIONS: Final[dict[ToolName, ToolRegistration]] = {
         risk=ToolRisk.HIGH_WRITE,
         description="Create or replay one protected return request using a stable idempotency key.",
     ),
+    "create_support_ticket": ToolRegistration(
+        name="create_support_ticket",
+        risk=ToolRisk.HIGH_WRITE,
+        description="Create a protected Java-owned manual escalation ticket.",
+    ),
     "get_after_sales_status": ToolRegistration(
         name="get_after_sales_status",
         risk=ToolRisk.READ_PRIVACY_MEDIUM,
@@ -132,6 +138,7 @@ class ToolRegistry:
             "request_human_approval": self._tools.request_human_approval,
             "create_refund_request": self._tools.create_refund_request,
             "create_return_request": self._tools.create_return_request,
+            "create_support_ticket": self._tools.create_support_ticket,
             "get_after_sales_status": self._tools.get_after_sales_status,
         }
         return implementations[registration.name]

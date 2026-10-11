@@ -33,6 +33,7 @@ from app.agent.evidence_routing import (
     EvidenceGuardDecision,
     EvidenceGuardStatus,
 )
+from app.agent.failure_policy import repeated_no_progress
 from app.agent.request_understanding import RequestIntent
 from app.agent.state import AgentState, RunStatus, VerificationStatus, WriteStatus
 
@@ -77,6 +78,7 @@ class Node(StrEnum):
     WAITING_USER = "waiting_user"
     WAITING_APPROVAL = "waiting_approval"
     SAFE_STOP = "safe_stop"
+    ESCALATE_OR_SAFE_STOP = "escalate_or_safe_stop"
 
 
 class SafeStopReason(StrEnum):
@@ -97,6 +99,8 @@ class SafeStopReason(StrEnum):
     WRITE_FINGERPRINT_DRIFT = "WRITE_FINGERPRINT_DRIFT"
     BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
     VERIFICATION_UNKNOWN = "VERIFICATION_UNKNOWN"
+    REPEATED_NO_PROGRESS = "REPEATED_NO_PROGRESS"
+    MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
 
 
 #: Java ``AllowedAction`` values (mirrors the V001 CHECK constraint). The wire value is an open
@@ -242,6 +246,8 @@ def safe_stop_reason_for(
     """
     if budget_exhausted(state):
         return SafeStopReason.BUDGET_EXHAUSTED
+    if repeated_no_progress(state):
+        return SafeStopReason.REPEATED_NO_PROGRESS
 
     if decision is not None:
         if decision.safe_stop_reason is not None:
@@ -425,6 +431,8 @@ def route_after_eligibility(state: AgentState, decision: Decision | None = None)
         # ``RETURN_REFUND`` here rather than to the refund write is the whole point of US2: the two
         # halves of "return and refund" are separate authorised writes.
         return Node.RETURN_WRITE
+    if snapshot.allowed_action == "MANUAL_REVIEW":
+        return Node.ESCALATE_OR_SAFE_STOP
     return Node.FINALIZE
 
 
@@ -472,6 +480,16 @@ def terminal_decision_for(state: AgentState) -> TerminalDecision:
     that can be reconciled.
     """
     verification = state.verification.status
+    if repeated_no_progress(state):
+        return TerminalDecision(
+            status=RunStatus.SAFE_STOP, reason=SafeStopReason.REPEATED_NO_PROGRESS
+        )
+    if state.eligibility is not None and state.eligibility.allowed_action == "MANUAL_REVIEW":
+        if state.support_ticket_id is not None:
+            return TerminalDecision(status=RunStatus.ESCALATED)
+        return TerminalDecision(
+            status=RunStatus.SAFE_STOP, reason=SafeStopReason.MANUAL_REVIEW_REQUIRED
+        )
     if verification is VerificationStatus.VERIFIED_SUCCESS:
         return TerminalDecision(status=RunStatus.COMPLETED)
     if verification is VerificationStatus.VERIFIED_FAILURE:
