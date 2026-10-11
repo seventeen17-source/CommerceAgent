@@ -32,7 +32,19 @@ class FixtureCaseRegistry {
             // T056: one shipped electronics order whose amount crosses the deterministic approval
             // threshold. All four approval eval scenarios reset back to this same clean world.
             key("approval-high-risk-001", DEFAULT_DATASET_VERSION),
-            new FixtureCase("approval-high-risk-001", DEFAULT_DATASET_VERSION, "t056-approval-high-risk-001-v1"));
+            new FixtureCase("approval-high-risk-001", DEFAULT_DATASET_VERSION, "t056-approval-high-risk-001-v1"),
+            // T063-live: US5's two spec acceptance scenarios. They are two worlds rather than one
+            // because the failures they describe arrive by different routes -- one through the
+            // deterministic rule (Java answers MANUAL_REVIEW), one through a broken dependency (Java
+            // cannot answer at all) -- and a single world could not distinguish "the Agent gave up on
+            // a failed read" from "the Agent gave up on an answer it did not like".
+            key(FixtureLoader.MANUAL_REVIEW_CASE, DEFAULT_DATASET_VERSION),
+            new FixtureCase(FixtureLoader.MANUAL_REVIEW_CASE, DEFAULT_DATASET_VERSION, "t063-manual-review-001-v1"),
+            key(FixtureLoader.LOGISTICS_UNAVAILABLE_CASE, DEFAULT_DATASET_VERSION),
+            new FixtureCase(
+                    FixtureLoader.LOGISTICS_UNAVAILABLE_CASE,
+                    DEFAULT_DATASET_VERSION,
+                    "t063-logistics-unavailable-001-v1"));
 
     Optional<FixtureCase> find(String caseId, String datasetVersion) {
         String resolvedVersion =

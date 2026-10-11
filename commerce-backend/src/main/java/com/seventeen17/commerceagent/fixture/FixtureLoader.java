@@ -58,6 +58,26 @@ public class FixtureLoader {
     /** T056: approval eval world -- eligible refund whose amount requires human approval. */
     static final String APPROVAL_HIGH_RISK_CASE = "approval-high-risk-001";
 
+    /**
+     * T063-live: US5's second spec acceptance scenario -- the deterministic rule itself asks for a
+     * human, so the run must create a traceable ticket instead of deciding for itself.
+     *
+     * <p>{@code public} because the fault registry keys its injection off the same name; a case id
+     * spelled twice is a case id that will eventually be spelled differently in one of the two
+     * places.
+     */
+    public static final String MANUAL_REVIEW_CASE = "manual-review-001";
+
+    /**
+     * T063-live: US5's first spec acceptance scenario -- the logistics dependency cannot be read, so
+     * no evidence-backed refund may be produced.
+     *
+     * <p>The seeded data is a *healthy* writable order. The failure is injected (see
+     * {@link EvalFaultInterceptor}) rather than expressed as missing data, because "we could not get
+     * the answer" and "there is no answer" are different worlds and only the first one is this case.
+     */
+    public static final String LOGISTICS_UNAVAILABLE_CASE = "logistics-unavailable-001";
+
     private static final String APPROVAL_HIGH_RISK_ORDER_ID = "order-004";
     private static final String APPROVAL_HIGH_RISK_SHIPMENT_ID = "shipment-004";
 
@@ -122,6 +142,10 @@ public class FixtureLoader {
                 seedClueNarrowingCase();
             } else if (APPROVAL_HIGH_RISK_CASE.equals(fixtureCase.caseId())) {
                 seedApprovalHighRiskCase();
+            } else if (MANUAL_REVIEW_CASE.equals(fixtureCase.caseId())) {
+                seedManualReviewCase();
+            } else if (LOGISTICS_UNAVAILABLE_CASE.equals(fixtureCase.caseId())) {
+                seedLogisticsUnavailableCase();
             } else {
                 seedRefundLogisticsCase();
             }
@@ -304,6 +328,54 @@ public class FixtureLoader {
         upsertAfterSalesRule();
     }
 
+    /**
+     * T063-live: the shared physical world behind US5's two acceptance scenarios.
+     *
+     * <p>Both scenarios need the same property, and it is the property that makes their assertions
+     * mean something: the order is **writable**. It is SHIPPED, covered by exactly one active
+     * electronics rule, and its logistics have been stalled for far longer than the rule's 48-hour
+     * threshold -- so a run that received an answer could have refunded it. "No refund row" is
+     * therefore evidence about the Agent rather than about an impossible world, which is exactly the
+     * failure mode T042 recorded ("no write" passing because nothing could ever be written).
+     *
+     * <p>Named for what it is rather than for one of its two consumers: the difference between the
+     * scenarios is the *failure route* (a rule that asks for a human vs a dependency that cannot
+     * answer), not the data.
+     */
+    private void seedShippedElectronicsOrder() {
+        upsertOrder("order-001", "customer-001", "SHIPPED", "199.00");
+        upsertOrderItem("item-001", "order-001", "product-001", "Wireless Headphones", "ELECTRONICS", "199.00");
+        upsertShipment("shipment-001", "order-001", "SYNTHETIC", "TRACK-001", "IN_TRANSIT");
+        ensureLogisticsEvent(
+                "shipment-001", "IN_TRANSIT", "Synthetic stalled logistics event", LAST_LOGISTICS_EVENT_AT);
+    }
+
+    /**
+     * T063-live, scenario 2 (spec: "资格服务返回 {@code MANUAL_REVIEW}"): the deterministic rule
+     * itself refuses to decide.
+     *
+     * <p>No LLM, no conflict and no missing data is involved -- Java's own answer is
+     * {@code MANUAL_REVIEW}. That is the point: the Agent is not being asked to be clever, it is
+     * being asked to pass the decision to a human and to leave a traceable ticket behind.
+     */
+    private void seedManualReviewCase() {
+        seedShippedElectronicsOrder();
+        upsertManualReviewRule();
+    }
+
+    /**
+     * T063-live, scenario 1 (spec: "物流状态无法在重试预算内获取"): the world is healthy, the
+     * *dependency* is not. {@link EvalFaultInjection} arms the failure when this case is reset.
+     *
+     * <p>The rule is the ordinary refund rule on purpose: if the injected failure were the only
+     * reason nothing could happen, an Agent that ignored the failure would look identical to one that
+     * respected it.
+     */
+    private void seedLogisticsUnavailableCase() {
+        seedShippedElectronicsOrder();
+        upsertAfterSalesRule();
+    }
+
     private void seedRefundLogisticsCase() {
         upsertOrder("order-001", "customer-001", "SHIPPED", "199.00");
         upsertOrder("order-002", "customer-002", "DELIVERED", "89.00");
@@ -430,6 +502,28 @@ public class FixtureLoader {
                 VALUES
                     ('LOGISTICS_STALLED_REFUND', 1, 'ELECTRONICS', 'SHIPPED',
                      48, 7, 500.00, 300.00, 'REFUND_ONLY', TRUE, ?, NULL)
+                ON CONFLICT (rule_code, version) DO UPDATE
+                SET active = TRUE
+                """, Timestamp.from(FIXTURE_CREATED_AT));
+    }
+
+    /**
+     * T063-live: the rule whose own answer is "a human must decide".
+     *
+     * <p>Every other field is left NULL deliberately. A stall threshold would send the decision
+     * through the logistics branch (and a conflicting one at that), so the case would no longer be
+     * testing "Java said MANUAL_REVIEW" -- it would be testing a data-conflict path that T039 already
+     * pins with its own test.
+     */
+    private void upsertManualReviewRule() {
+        jdbcTemplate.update("""
+                INSERT INTO commerce.after_sales_rules
+                    (rule_code, version, product_category, required_order_status,
+                     logistics_stalled_hours, return_window_days, max_refund_amount,
+                     approval_threshold, allowed_action, active, effective_from, effective_to)
+                VALUES
+                    ('MANUAL_REVIEW_ESCALATION', 1, 'ELECTRONICS', 'SHIPPED',
+                     NULL, NULL, NULL, NULL, 'MANUAL_REVIEW', TRUE, ?, NULL)
                 ON CONFLICT (rule_code, version) DO UPDATE
                 SET active = TRUE
                 """, Timestamp.from(FIXTURE_CREATED_AT));
