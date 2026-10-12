@@ -4,20 +4,33 @@
 
 Phase 7 — Product Experience Layer
 
-## Background
+Branch:
 
-US5 已完成安全失败处理、人工升级、安全评估等 Agent Runtime 能力。
-
-本阶段负责将已有能力产品化展示。
+feat/ui-experience-layer
 
 ---
 
-# Required Reading
+# 1. Purpose
+
+本文档用于指导后续 Agent / 前端开发人员实现 CommerceAgent Web 产品体验层。
+
+目标不是制作普通后台，而是将 US1-US5 已完成能力展示出来：
+
+- Agent Runtime
+- Run execution
+- Tool usage
+- Verification
+- Safety Boundary
+- Human Escalation
+
+---
+
+# 2. Required Reading
 
 开发前必须阅读：
 
-- PROJECT_PROGRESS.md
 - AGENTS.md
+- PROJECT_PROGRESS.md
 - specs/002-commerce-after-sales-agent/
 - contracts/
 - agent-service/app/api/
@@ -25,99 +38,201 @@ US5 已完成安全失败处理、人工升级、安全评估等 Agent Runtime �
 
 ---
 
-# UI Goal
+# 3. Product Model
 
-不是制作普通管理后台。
+CommerceAgent 是一个统一 Web 平台。
 
-需要体现：
+不是三个系统。
 
-1. Agent如何理解问题
-2. Agent如何执行任务
-3. Agent如何保证安全
-4. 企业如何获得价值
+根据账号权限显示不同视角。
 
----
+```
+                 CommerceAgent
 
-# Main Views
+                  Agent Runtime
 
-## Customer View
-
-关键词：Result
-
-看到：
-
-- 售后申请
-- 当前状态
-- AI处理结果
-- 服务记录
+        ┌────────────┼────────────┐
+        │            │            │
+    Customer    Operator    Enterprise
+      View        View         View
+```
 
 ---
 
-## Agent Operator View
+# 4. Core Screens
 
-关键词：Process
+## Screen 01 Login
 
-看到：
+目标：
 
-- 当前Run
-- Node执行链
-- Tool调用
-- Verification
-- Human escalation
+统一入口，根据角色进入不同 Workspace。
 
----
+角色：
 
-## Enterprise View
-
-关键词：Value
-
-看到：
-
-- 业务指标
-- 自动化率
-- 风险事件
-- Agent效果
+- customer
+- operator
+- enterprise
 
 ---
 
-# API Alignment
+## Screen 02 Customer Portal
 
-禁止前端创造新的业务模型。
+目标：
 
-优先使用：
+模拟真实售后入口。
+
+展示：
+
+- 我的订单
+- 发起售后
+- 当前处理状态
+- 最终结果
+
+不展示：
+
+- Agent内部Trace
+- Runtime细节
+
+---
+
+## Screen 03 Agent Mission Center
+
+核心展示页面。
+
+展示：
+
+- 当前任务
+- Run状态
+- Agent执行流程
+- 处理结果
+
+数据来源：
+
+- Run
+- Event
+- ToolExecution
+
+---
+
+## Screen 04 Run Replay
+
+展示一次任务完整生命周期：
+
+START
+↓
+Intent
+↓
+Tool Call
+↓
+Business Rule Check
+↓
+Safety Guard
+↓
+Decision
+↓
+Verification
+
+重点：
+
+展示 Agent 为什么这样处理。
+
+---
+
+## Screen 05 Safety Center
+
+展示 CommerceAgent 核心差异。
+
+展示：
+
+- SAFE_STOP
+- ESCALATED
+- FAILED
+- Boundary Protection
+
+目标：
+
+证明 Agent 不会越权执行。
+
+---
+
+## Screen 06 Enterprise Dashboard
+
+展示企业价值。
+
+展示：
+
+- 请求数量
+- 自动完成率
+- 人工介入率
+- 风险拦截
+- 服务效率
+
+---
+
+## Screen 07 Human Collaboration
+
+不是审批页面。
+
+展示：
+
+Agent无法安全完成任务时：
+
+- 原因
+- 证据
+- 建议
+- 人工接管
+
+---
+
+# 5. API Alignment
+
+前端禁止重新创造业务模型。
+
+优先复用：
 
 - /runs
 - /input
 - /resume
 - events
 - tool execution trace
+- verification result
 
-新增展示接口必须保持现有命名风格。
+新增接口必须保持已有命名风格。
 
 ---
 
-# Implementation Order
+# 6. Implementation Order
 
 UX001 信息架构
 
-UX002 登录与RBAC
+UX002 RBAC
 
 UX003 Customer Portal
 
 UX004 Agent Mission Center
 
-UX005 Enterprise Dashboard
+UX005 Run Replay
 
-UX006 API Contract
+UX006 Safety Center
+
+UX007 Enterprise Dashboard
+
+UX008 Human Collaboration
 
 ---
 
-# Design Reminder
+# 7. Design Principle
 
-不要做：
+禁止：
 
-审批按钮系统。
+- 普通审批后台
+- CRUD管理系统
+- 手机App设计
 
-要做：
+目标：
 
-AI Agent工作过程展示平台。
+打造企业级 AI Agent 工作展示平台。
+
+核心表达：
+
+用户提出问题 → Agent处理 → 安全判断 → 结果验证 → 企业获得价值。
