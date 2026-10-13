@@ -187,7 +187,7 @@ T094新增依赖T099–T103；T095新增依赖T097–T103与T094。既有编号/
 
 - [ ] T085 [US7] 实现安全停止原因与统一结果投影。**层/链路**：Agent API；owner-scoped Run/checkpoint → 确定性序列化 → 客户结果卡。**依赖**：T084。**文件范围**：`agent-service/app/api/`、必要的 `app/trace/` 只读查询、相关单测/集成测试、`contracts/agent-api.openapi.yaml`。**交付**：最新终态原因、动作类型、退款/退货/工单资源引用、确认方式；修正退货沿用退款文案的歧义，保留旧字段兼容策略；工单响应确认不冒充回读核验。**验收**：退款/退货/ESCALATED/SAFE_STOP/UNKNOWN/已回收各有测试，跨 owner 拒绝；新旧字段语义一致；只读查询不重新运行 Agent；契约与代码同批升版。**不做**：UI 或新增资金动作。**分支建议**：`feat/run-presentation-result`。
 
-- [ ] T086 [US7] 实现客户安全证据摘要。**层/链路**：Agent API；已验证 evidence/eligibility/approval/write/verification → 白名单摘要 → 证据与安全面板。**依赖**：T085。**文件范围**：Agent API 投影模块、tests、Agent OpenAPI。**交付**：安全状态、证据来源、规则引用、可解释阶段；来源时间不可推测。**验收**：PASSED/BLOCKED/UNKNOWN/NOT_CHECKED/NOT_APPLICABLE 明确；不存在证据不得标绿；NOT_APPLICABLE 不能替代未知；区分历史快照与当前业务状态；嵌套敏感字段、用户原文、模型隐藏推理不泄露；权限/回收/未知枚举测试；契约同步升版。**不做**：重新调模型解释、前端自行判断资格。**分支建议**：`feat/run-evidence-summary`。
+- [ ] T086 [US7] 实现客户安全证据摘要。**层/链路**：Agent API；已验证 evidence/eligibility/approval/write/verification → 白名单摘要 → 证据与安全面板。**依赖**：T085。**文件范围**：Agent API 投影模块、tests、Agent OpenAPI。**交付**：安全状态、证据来源、规则引用、可解释阶段；来源时间不可推测。**验收**：PASSED/BLOCKED/UNKNOWN/NOT_CHECKED/NOT_APPLICABLE 明确；不存在证据不得标绿；NOT_APPLICABLE 不能替代未知；区分历史快照与当前业务状态；嵌套敏感字段、用户原文、模型隐藏推理不泄露；权限/回收/未知枚举测试；契约同步升版。**投影必须包含**：安全状态、证据项（类型/来源/observation时间）、`eligibility.ruleCode/ruleVersion/maxRefundAmount/approvalRequired/reasonCodes`、`approval.bindingVerified`、`write_intent` 是否存在（不输出 key 与 fingerprint）、`write.status`、`verification.status` 及确认方式、`tool_history`（工具名/成功/errorCode/retryable/耗时）。**审批阈值展示**：只有 Java 决策同批发布 `approval_threshold` 并升版契约时才显示数值；未发布时只写“业务规则要求人工审批”，禁止填示例值。**不做**：重新调模型解释、前端自行判断资格。**分支建议**：`feat/run-evidence-summary`。
 
 - [ ] T087 [US7] 建立客户工作台外壳与身份隔离。**层/链路**：Web；当前身份/导航 → 工作台与原有页面 → 原接口。**依赖**：T084。**文件范围**：`web/src/App.tsx` 最小宿主调整、局部样式、共享状态组件、tests。**交付**：售后助手默认入口、执行演示、审批角色入口、原 Playground 可达；配置抽屉、欢迎区、任务区、证据抽屉布局；加载/空态/失败组件。**验收**：既有 Playground 的入口和控制仍可操作；切身份清空 Run/订单/消息且迟到响应不回填；凭据不落 localStorage；客户不可通过导航获得审批权限；基础键盘与窄屏可用。**不做**：完整登录平台、整文件替换丢失既有能力。**分支建议**：`feat/customer-workspace-shell`。
 
@@ -199,7 +199,7 @@ T094新增依赖T099–T103；T095新增依赖T097–T103与T094。既有编号/
 
 - [ ] T091 [US7] 接通审批与客户恢复。**层/链路**：Web → Java 审批查询/决策 → Agent resume → 结果卡。**依赖**：T089、T090。**交付**：待审批任务保留、查询状态、继续原任务；审批页风险/规则/绑定详情和二次确认。**验收**：真实 approve 后客户同 Run 完成；deny/expiry/错绑定/资格漂移不得写；customer 不能自批；决策超时先读，重复 resume 不重复逻辑写；角色切换不污染客户状态。**不做**：前端宣布已授权、审批成功直接调用退款。**分支建议**：`feat/customer-approval-resume`。
 
-- [ ] T092 [US7] 升级执行路径回放与场景对比。**层/链路**：Web；owner-authorized trace + 结果 → 路径/节点详情 → 两条真实 Run 比较。**依赖**：T090、T091。**交付**：场景目录、证据改变动作的分支比较、节点耗时（确有记录时）、未知写恢复路径；复用原 Playground 三区和故障入口。**验收**：明确“回放”；不假造实时流；未走过的节点不标完成；同诉求不同 fixture 产生至少三种实际路径；既有验证能力回归；比较只允许当前身份有权读的 Run。**不做**：重写 Agent 执行机制、显示隐藏思维链。**分支建议**：`feat/execution-demo-replay`。
+- [ ] T092 [US7] 升级执行路径回放与场景对比。**层/链路**：Web；owner-authorized trace + 结果 → 路径/节点详情 → 两条真实 Run 比较。**依赖**：T090、T091。**交付**：场景目录、证据改变动作的分支比较、节点耗时（确有记录时）、未知写恢复路径；**第一组对照固定为「同一诉求 越界 vs 未越界」两条真实轨迹**（退款 vs 退货为第二组）；复用原 Playground 三区和故障入口。**验收**：明确“回放”；不假造实时流；未走过的节点不标完成；同诉求不同 fixture 产生至少三种实际路径；既有验证能力回归；比较只允许当前身份有权读的 Run。**不做**：重写 Agent 执行机制、显示隐藏思维链。**分支建议**：`feat/execution-demo-replay`。
 
 - [ ] T093 [US7] 接入真实演示结果与报告证据。**层/链路**：Web + Eval；已生成报告/Run → 场景结果列表 → 原始证据入口。**依赖**：T092；如需触发 reset，必须先完成 T071 的隔离库 fail-fast guard。**交付**：复用 T077 的报告展示范围，展示 dataset/config/环境/时间/实际结果，待运行与预期单独表示；无报告时正确空态。**验收**：每个数字可定位原报告与指标定义；无测量不填零；不将少量场景称为完整冻结集；客户端不可执行 reset，演示环境不可触及普通业务库。**不做**：独立 Eval 平台、顺带勾选 T071/T077。**分支建议**：`feat/demo-evidence-report`。
 
@@ -269,12 +269,12 @@ US5、US6、独立 Trace 页面、Eval Dashboard、MCP、额外基础设施不�
 编号不等于施工顺序，依赖见ui/acceptance.md；以下均为未验收任务。
 
 - [ ] T097 [US7] 运营读取与指标契约设计。**层**：Agent API/Java只读权限。**依赖**：T084。**交付**：ui/data-contract.md各目标路由、角色、白名单、绑定、分页、指标和错误合同，复核既有改动避免重复接口。**验收**：七页字段/按钮都有现有来源或T098具体增量，无悬空项，无写权限扩大；设计不宣称已发布。**分支**：feat/operator-read-contract-design。
-- [ ] T098 [US7] 最小运营读取及本人Run列表。**层**：Agent/Java/Data。**依赖**：T097/T085/T086，Trace依赖T092投影。**交付**：operations Run列表/详情/trace/metrics、owner列表、Case与审批上下文；契约同批升版。**验收**：Customer跨owner拒绝、角色负例、稳定分页、绑定与白名单、生产查询证据；不扩大写端权限；Java改动clean verify BUILD SUCCESS。**不做**：接单写、终态解除、直接资金写。**分支**：feat/operator-read-models。
+- [ ] T098 [US7] 最小运营读取及本人Run列表。**层**：Agent/Java/Data。**依赖**：T097/T085/T086，Trace依赖T092投影。**交付**：operations Run列表/详情/trace/metrics、owner列表、Case与审批上下文；契约同批升版。**验收**：Customer跨owner拒绝、角色负例、稳定分页、绑定与白名单、生产查询证据；不扩大写端权限；Java改动clean verify BUILD SUCCESS。**指标口径**：N/T/V/A/H/R/S按pages.md；A 必须能分解为“未越界自主执行并核验成功”与“无需资金动作的自主完成”；若要在界面上显示审批阈值数值，须与 Java 决策同批发布 `approval_threshold` 并升版契约，不得前端填示例值。**不做**：接单写、终态解除、直接资金写。**分支**：feat/operator-read-models。
 - [ ] T099 [US7] Dashboard P01。**层**：Web。**依赖**：T087/T098。**交付**：生命周期、指标、近期Run、Attention及各状态。**验收**：对照dashboard.png及语义修订；Handoff不适用不标绿；统计可追溯，深链同Run；截图及Web门禁。**分支**：feat/agent-overview。
 - [ ] T100 [US7] Case Detail P04。**层**：Web对象读取。**依赖**：T085/T086/T090/T098。**交付**：请求/订单证据/结果三列，客户安全版，历史与当前分离。**验收**：对象一致、权限负例、部分失败、退款/退货/工单区分；不重复Trace，不提供资金写入。**分支**：feat/after-sales-case-detail。
 - [ ] T101 [US7] Recovery Center P06。**层**：Web结构化恢复。**依赖**：T085/T092/T098。**交付**：Failure/Recovery/Verification与未知/工单详情。**验收**：实际超时先查权威、未知不标零写、SAFE_STOP终态不恢复、刷新只读、真实工单、无重复逻辑写证据及截图。**分支**：feat/recovery-center。
 - [ ] T102 [US7] Analytics P07。**层**：Web指标/报告。**依赖**：T093/T098。**交付**：四指标、失败类型、样本钻取、来源。**验收**：N/T/V/A/H/R/S样本核对，零分母、时区/范围/asOf、Demo隔离；无复杂BI。**分支**：feat/runtime-analytics。
-- [ ] T103 [US7] 逐页视觉基准和组件复用。**层**：Web视觉/UX。**依赖**：T087–T092/T099–T102；逐页可累计。**交付**：规定场景/视口截图、并排差异、共享组件清单；P04–P07首截图经审阅建立基准。**验收**：Workspace结构不变，三张参考图语义修订落实，等待/未知/错误/移动齐全，不更新快照掩盖问题。**分支**：feat/ui-visual-baseline。
+- [ ] T103 [US7] 逐页视觉基准和组件复用。**层**：Web视觉/UX。**依赖**：T087–T092/T099–T102；逐页可累计。**交付**：规定场景/视口截图、并排差异、共享组件清单；P04–P07首截图经审阅建立基准。**验收**：Workspace结构不变，三张参考图语义修订落实，等待/未知/错误/移动齐全，不更新快照掩盖问题；**默认基准为未越界路径（V02）**，越界等待仅作对照，对外材料使用默认基准。**分支**：feat/ui-visual-baseline。
 
 ### T084 交接设计补充记录（非完成勾选）
 
