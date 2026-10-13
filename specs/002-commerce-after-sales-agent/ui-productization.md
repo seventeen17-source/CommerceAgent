@@ -1,6 +1,6 @@
 # US7 CommerceAgent 产品化设计入口
 
-UI-1.0（2026-10-13）权威设计包：[ui/README.md](ui/README.md)。
+UI-1.0（2026-10-13）权威设计包：[ui/README.md](ui/README.md)。**已弃用与归档的分支/文档清单**（含 UX 线、旧正文、第一次实现尝试、未提交的并行外壳）见该文件「已弃用与归档」一节。
 
 - [统一视觉系统与交互](ui/design-system.md)
 - [七页页面UX、组件与状态](ui/pages.md)

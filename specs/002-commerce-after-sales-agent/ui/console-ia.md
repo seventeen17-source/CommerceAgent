@@ -191,6 +191,7 @@ Hash 路由。**路由只存 ID 与筛选**，不放 token、请求原文、授�
 - T104–T109 为本次前端体验层的**续号**（T103 是既有最后一个编号），不覆盖、不重排既有 T084–T103。
 - 命名替换只发生在文档与界面文案层面：T099→Mission Center、T092→Run Replay、T100→Case Context、T091→Human Collaboration、T101→Safety Center、T102→Enterprise Dashboard；T087–T090 仍属 Customer Portal；T103/T094/T095 的验收范围不变。
 - `specs/003` 的 UX001–UX052 与 `.specify/templates/ui/DESIGN.md` 仅作为视觉方向参考（Linear / Vercel / Agent observability 风格；Sidebar + Header + Workspace 布局），**不作为路线图与验收依据**；其建议的 Ant Design / React Flow / ECharts **本轮不引入**。
+- **完整归档清单**（UX 线、旧 T084 正文、`feat/frontend-product-ui`、未提交的并行外壳、分支名处置）见 [README.md](README.md) 的「已弃用与归档」一节；遇到 UX 编号不要开工。
 
 ## 8. T104 自检
 
