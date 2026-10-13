@@ -269,7 +269,7 @@ US5、US6、独立 Trace 页面、Eval Dashboard、MCP、额外基础设施不�
 编号不等于施工顺序，依赖见ui/acceptance.md；以下均为未验收任务。
 
 - [ ] T097 [US7] 运营读取与指标契约设计。**层**：Agent API/Java只读权限。**依赖**：T084。**交付**：ui/data-contract.md各目标路由、角色、白名单、绑定、分页、指标和错误合同，复核既有改动避免重复接口。**验收**：七页字段/按钮都有现有来源或T098具体增量，无悬空项，无写权限扩大；设计不宣称已发布。**分支**：feat/operator-read-contract-design。
-- [ ] T098 [US7] 最小运营读取及本人Run列表。**层**：Agent/Java/Data。**依赖**：T097/T085/T086，Trace依赖T092投影。**交付**：operations Run列表/详情/trace/metrics、owner列表、Case与审批上下文；契约同批升版。**验收**：Customer跨owner拒绝、角色负例、稳定分页、绑定与白名单、生产查询证据；不扩大写端权限；Java改动clean verify BUILD SUCCESS。**指标口径**：N/T/V/A/H/R/S按pages.md；A 必须能分解为“未越界自主执行并核验成功”与“无需资金动作的自主完成”；若要在界面上显示审批阈值数值，须与 Java 决策同批发布 `approval_threshold` 并升版契约，不得前端填示例值。**不做**：接单写、终态解除、直接资金写。**分支**：feat/operator-read-models。
+- [ ] T098 [US7] 最小运营读取及本人Run列表。**层**：Agent/Java/Data。**依赖**：T097/T085/T086，Trace依赖T092投影。**交付**：operations Run列表/详情/trace/metrics、owner列表、Case与审批上下文；契约同批升版。**验收**：Customer跨owner拒绝、角色负例、稳定分页、绑定与白名单、生产查询证据；不扩大写端权限；Java改动clean verify BUILD SUCCESS。**指标口径**：N/T/V/A/H/R/S按pages.md；A 必须能分解为“未越界自主执行并核验成功”与“无需资金动作的自主完成”；若要在界面上显示审批阈值数值，须与 Java 决策同批发布 `approval_threshold` 并升版契约，不得前端填示例值。**不做**：接单写、终态解除、直接资金写。**工单上下文（Support Ticket Context API，不单列任务）**：`GET /api/v1/support-tickets/{id}`，后续可加 `/timeline`、`/evidence`；属 Case Context 的数据支撑，不是新业务能力。**分支**：feat/operator-read-models。
 - [ ] T099 [US7] Dashboard P01。**层**：Web。**依赖**：T087/T098。**交付**：生命周期、指标、近期Run、Attention及各状态。**验收**：对照dashboard.png及语义修订；Handoff不适用不标绿；统计可追溯，深链同Run；截图及Web门禁。**分支**：feat/agent-overview。
 - [ ] T100 [US7] Case Detail P04。**层**：Web对象读取。**依赖**：T085/T086/T090/T098。**交付**：请求/订单证据/结果三列，客户安全版，历史与当前分离。**验收**：对象一致、权限负例、部分失败、退款/退货/工单区分；不重复Trace，不提供资金写入。**分支**：feat/after-sales-case-detail。
 - [ ] T101 [US7] Recovery Center P06。**层**：Web结构化恢复。**依赖**：T085/T092/T098。**交付**：Failure/Recovery/Verification与未知/工单详情。**验收**：实际超时先查权威、未知不标零写、SAFE_STOP终态不恢复、刷新只读、真实工单、无重复逻辑写证据及截图。**分支**：feat/recovery-center。
@@ -278,11 +278,13 @@ US5、US6、独立 Trace 页面、Eval Dashboard、MCP、额外基础设施不�
 
 ### 前端体验层（Console IA，续号 T104–T109）
 
-命名与路由见 `ui/console-ia.md`；内容、字段与验收仍以 `ui/data-contract.md`、`ui/acceptance.md` 为准。T104 只产出文档，不写代码；T105–T109 每个 Task 完成后停下等用户确认再进入下一个。
+命名与路由见 `ui/console-ia.md`；内容、字段与验收仍以 `ui/data-contract.md`、`ui/acceptance.md` 为准。T104 只产出文档，不写代码；每个 Task 完成后停下等用户确认再进入下一个。
+
+**执行顺序（2026-10-13 裁决）**：T104 → **T106 Run Replay（提前）** → T105 Mission Center → T107 Case Context → T108 Human Collaboration → T109 Safety Center。Run Replay 先做，因为它是唯一当天就能产出 A 级真实数据的核心页（LangGraph 运行时、状态迁移、证据驱动决策、Tool Calling、HITL、Verification）；Mission Center 是聚合层，Run 体验的数据模型未冻结前会变成空壳 Dashboard。入口形态：`#/portal`（客户）+ `#/console`（企业 Console，六项导航）。
 
 - [ ] T104 [UI] Console IA 冻结（文档任务）。**依赖**：T084。**交付**：`ui/console-ia.md`（最终导航、路由设计、页面映射、API mapping、数据可得性分级、UX contract），并同步 `design-system.md` 导航段与 `pages.md` 命名表。**验收**：六个主导航项 + 两个独立入口各有规格页归属；每个可见值都能指到已发布接口或明确登记的任务；未扩大权限、未虚构端点；命名替换不改变既有安全与验收约束。**不做**：写任何实现代码。**分支**：`feat/console-ia-freeze`。
 - [ ] T105 [UI] Mission Center（P01）。**依赖**：T104；列表与指标依赖 T098。**交付**：`RunCard`/`StatusBadge`/`MetricCard`、近期 Run、Attention Required、系统健康（仅真实探测）。**验收**：无跨 owner 读取权限时显示可解释空态而非假数字；每个数字带口径/范围/分母；Demo 数字带 Demo 标识，Live 无样本用“— / 无样本”。**分支**：`feat/mission-center`。
-- [ ] T106 [UI] **Run Replay（P03，核心）**。**依赖**：T105；字段依赖 T085/T086。**交付**：RunHeader + 边界账、判断轨（7 组，未走过标“不适用/未执行”）、`EvidencePanel`、底部 Verification；默认基准为未越界路径（V02），越界等待（V05）作为对照。**验收**：`order-001`(¥199) 走未越界并显示 `VERIFIED_SUCCESS`；`order-004`(¥399) 停在 `WAITING_APPROVAL`；UNKNOWN 不标绿；无假进度、无模拟运行；阈值无来源时只写“业务规则要求人工审批”。**分支**：`feat/run-replay`。
+- [ ] T106 [UI] **Run Replay（P03，核心）**。**依赖**：T104（执行顺序排在 T105 之前）；字段依赖 T085/T086。**交付**：RunHeader + 边界账、判断轨（7 组，未走过标“不适用/未执行”）、`EvidencePanel`、底部 Verification；默认基准为未越界路径（V02），越界等待（V05）作为对照。**验收**：`order-001`(¥199) 走未越界并显示 `VERIFIED_SUCCESS`；`order-004`(¥399) 停在 `WAITING_APPROVAL`；UNKNOWN 不标绿；无假进度、无模拟运行；阈值无来源时只写“业务规则要求人工审批”。**分支**：`feat/run-replay`。
 - [ ] T107 [UI] Case Context（P04）。**依赖**：T106。**交付**：请求/订单证据/结果三列，客户安全版与运营版分离。**验收**：同 Run 跨页 ID 一致；历史证据与当前业务查询分开；不重画完整 Trace；运营视角读取需 T098 授权，缺失时分区降级而非伪造。**分支**：`feat/case-context`。
 - [ ] T108 [UI] Human Collaboration（P05）。**依赖**：T106。**交付**：待办列表、决策详情、二次确认、决策后查询实际状态。**验收**：批准只写“等待原任务继续”，不宣布退款完成；拒绝/过期/错绑定零越权写；重复或并发决策冲突可见；审批台不代客户发起退款。**分支**：`feat/human-collaboration`。
 - [ ] T109 [UI] **Safety Center（P06，核心）**。**依赖**：T107；列表依赖 T098，工单读取需新增端点。**交付**：Failure / Recovery / Verification 三段与 A/B/C 三分支、未知写入边界、工单摘要。**验收**：未知不标失败也不标零写；`SAFE_STOP` 终态不可 resume；`Recovered` 需恢复证据 + 权威确认；无工单不写“已转人工”。**分支**：`feat/safety-center`。
