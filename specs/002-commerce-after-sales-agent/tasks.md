@@ -167,6 +167,12 @@
 
 需求见 `spec.md` US7，页面/数据/场景矩阵见 `ui-productization.md`；实施技术约束见 `plan.md`。编号表示任务身份，不等于必须按数字先后施工。阶段导航只看根 `PROJECT_PROGRESS.md`。
 
+### UI-1.0 补充约束
+
+Web任务必须执行ui/pages.md、design-system.md、acceptance.md。T084对齐规格；T087客户/企业外壳；T088–T090客户页和共享证据；T091审批P05；T092冻结Workspace P03及真实Trace，Playground另行保留。旧条目中的欢迎区/消息/抽屉指组件责任，不授权聊天布局。T093仍负责版本化报告证据。
+
+T094新增依赖T099–T103；T095新增依赖T097–T103与T094。既有编号/勾选不变。T096被并行登录代码引用，本轮不复用，也不判定其完成。
+
 ### 每个 T 的共同交付规则
 
 - 开始前按 `docs/LEARNING_PROTOCOL.md` 给出八项定位卡；下列“链路”提供上游/下游与输入输出，仍须解释问题与失败模式。
@@ -257,3 +263,19 @@ US5、US6、独立 Trace 页面、Eval Dashboard、MCP、额外基础设施不�
 - 不存储/展示 hidden chain-of-thought。
 - 未有可复现 Eval 前，README/简历不得把 target 写成 achievement。
 - 按 task 或小逻辑组提交，保证可回退和 bisect。
+
+## UI-1.0 配套任务增量
+
+编号不等于施工顺序，依赖见ui/acceptance.md；以下均为未验收任务。
+
+- [ ] T097 [US7] 运营读取与指标契约设计。**层**：Agent API/Java只读权限。**依赖**：T084。**交付**：ui/data-contract.md各目标路由、角色、白名单、绑定、分页、指标和错误合同，复核既有改动避免重复接口。**验收**：七页字段/按钮都有现有来源或T098具体增量，无悬空项，无写权限扩大；设计不宣称已发布。**分支**：feat/operator-read-contract-design。
+- [ ] T098 [US7] 最小运营读取及本人Run列表。**层**：Agent/Java/Data。**依赖**：T097/T085/T086，Trace依赖T092投影。**交付**：operations Run列表/详情/trace/metrics、owner列表、Case与审批上下文；契约同批升版。**验收**：Customer跨owner拒绝、角色负例、稳定分页、绑定与白名单、生产查询证据；不扩大写端权限；Java改动clean verify BUILD SUCCESS。**不做**：接单写、终态解除、直接资金写。**分支**：feat/operator-read-models。
+- [ ] T099 [US7] Dashboard P01。**层**：Web。**依赖**：T087/T098。**交付**：生命周期、指标、近期Run、Attention及各状态。**验收**：对照dashboard.png及语义修订；Handoff不适用不标绿；统计可追溯，深链同Run；截图及Web门禁。**分支**：feat/agent-overview。
+- [ ] T100 [US7] Case Detail P04。**层**：Web对象读取。**依赖**：T085/T086/T090/T098。**交付**：请求/订单证据/结果三列，客户安全版，历史与当前分离。**验收**：对象一致、权限负例、部分失败、退款/退货/工单区分；不重复Trace，不提供资金写入。**分支**：feat/after-sales-case-detail。
+- [ ] T101 [US7] Recovery Center P06。**层**：Web结构化恢复。**依赖**：T085/T092/T098。**交付**：Failure/Recovery/Verification与未知/工单详情。**验收**：实际超时先查权威、未知不标零写、SAFE_STOP终态不恢复、刷新只读、真实工单、无重复逻辑写证据及截图。**分支**：feat/recovery-center。
+- [ ] T102 [US7] Analytics P07。**层**：Web指标/报告。**依赖**：T093/T098。**交付**：四指标、失败类型、样本钻取、来源。**验收**：N/T/V/A/H/R/S样本核对，零分母、时区/范围/asOf、Demo隔离；无复杂BI。**分支**：feat/runtime-analytics。
+- [ ] T103 [US7] 逐页视觉基准和组件复用。**层**：Web视觉/UX。**依赖**：T087–T092/T099–T102；逐页可累计。**交付**：规定场景/视口截图、并排差异、共享组件清单；P04–P07首截图经审阅建立基准。**验收**：Workspace结构不变，三张参考图语义修订落实，等待/未知/错误/移动齐全，不更新快照掩盖问题。**分支**：feat/ui-visual-baseline。
+
+### T084 交接设计补充记录（非完成勾选）
+
+2026-10-13：ui/设计系统、七页UX、数据权限、验收及三张参考图落库；同步spec/plan/入口。本轮无应用实现或Live Gate，不认定并行代码完成。全量来源/权限审阅仍按T084验收，新运营合同归T097。
