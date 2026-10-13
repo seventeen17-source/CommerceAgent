@@ -42,8 +42,7 @@
 - 基准1600×1000；侧栏224px；内容宽=viewport-224-48；gap16；头部最小112px。1280–1439侧栏192、padding16、gap12。
 - 1024–1279侧栏72px图标轨，有tooltip/aria-label；Workspace右栏变上下文抽屉。小于1024导航抽屉，Workspace“任务/执行/依据”三tab；移动390×844单栏，不整体缩放桌面。
 - 页面自然纵向滚动；队列超过8条可局部滚动。Verification随内容，不固定遮挡操作。禁止为了首屏齐全缩小正文。
-- 企业导航：工作总览 / Agent Workspace / 人工审批 / 异常与恢复 / 运行分析。Case为上下文页。客户：发起售后 / 我的任务。会话入口放侧栏底部；调试入口仅开发环境。
-- 目标hash路由：#/overview、#/customer/request、#/customer/runs、#/customer/runs/:runId、#/runs/:runId?node=:id、#/cases/:runId、#/approvals?approvalId=:id、#/recovery?runId=:id、#/analytics、#/dev/playground。
+- **导航与路由见 [console-ia.md](console-ia.md)**（UI-1.1 Console IA 冻结，T104）。导航名固定为：Mission Center / Run Replay / Case Context / Human Collaboration / Safety Center / Enterprise Dashboard；Customer Portal 为独立入口（`#/portal`），Flow Playground 仅开发环境。会话入口放侧栏底部。
 - 路由只存ID/筛选，不能放token、请求原文、授权金额、幂等键。深链接先认证再授权读取。返回列表恢复筛选/滚动。账号切换立即清空任务/缓存，旧响应按identity generation丢弃。
 
 ## 组件合同

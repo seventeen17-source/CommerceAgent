@@ -276,6 +276,17 @@ US5、US6、独立 Trace 页面、Eval Dashboard、MCP、额外基础设施不�
 - [ ] T102 [US7] Analytics P07。**层**：Web指标/报告。**依赖**：T093/T098。**交付**：四指标、失败类型、样本钻取、来源。**验收**：N/T/V/A/H/R/S样本核对，零分母、时区/范围/asOf、Demo隔离；无复杂BI。**分支**：feat/runtime-analytics。
 - [ ] T103 [US7] 逐页视觉基准和组件复用。**层**：Web视觉/UX。**依赖**：T087–T092/T099–T102；逐页可累计。**交付**：规定场景/视口截图、并排差异、共享组件清单；P04–P07首截图经审阅建立基准。**验收**：Workspace结构不变，三张参考图语义修订落实，等待/未知/错误/移动齐全，不更新快照掩盖问题；**默认基准为未越界路径（V02）**，越界等待仅作对照，对外材料使用默认基准。**分支**：feat/ui-visual-baseline。
 
+### 前端体验层（Console IA，续号 T104–T109）
+
+命名与路由见 `ui/console-ia.md`；内容、字段与验收仍以 `ui/data-contract.md`、`ui/acceptance.md` 为准。T104 只产出文档，不写代码；T105–T109 每个 Task 完成后停下等用户确认再进入下一个。
+
+- [ ] T104 [UI] Console IA 冻结（文档任务）。**依赖**：T084。**交付**：`ui/console-ia.md`（最终导航、路由设计、页面映射、API mapping、数据可得性分级、UX contract），并同步 `design-system.md` 导航段与 `pages.md` 命名表。**验收**：六个主导航项 + 两个独立入口各有规格页归属；每个可见值都能指到已发布接口或明确登记的任务；未扩大权限、未虚构端点；命名替换不改变既有安全与验收约束。**不做**：写任何实现代码。**分支**：`feat/console-ia-freeze`。
+- [ ] T105 [UI] Mission Center（P01）。**依赖**：T104；列表与指标依赖 T098。**交付**：`RunCard`/`StatusBadge`/`MetricCard`、近期 Run、Attention Required、系统健康（仅真实探测）。**验收**：无跨 owner 读取权限时显示可解释空态而非假数字；每个数字带口径/范围/分母；Demo 数字带 Demo 标识，Live 无样本用“— / 无样本”。**分支**：`feat/mission-center`。
+- [ ] T106 [UI] **Run Replay（P03，核心）**。**依赖**：T105；字段依赖 T085/T086。**交付**：RunHeader + 边界账、判断轨（7 组，未走过标“不适用/未执行”）、`EvidencePanel`、底部 Verification；默认基准为未越界路径（V02），越界等待（V05）作为对照。**验收**：`order-001`(¥199) 走未越界并显示 `VERIFIED_SUCCESS`；`order-004`(¥399) 停在 `WAITING_APPROVAL`；UNKNOWN 不标绿；无假进度、无模拟运行；阈值无来源时只写“业务规则要求人工审批”。**分支**：`feat/run-replay`。
+- [ ] T107 [UI] Case Context（P04）。**依赖**：T106。**交付**：请求/订单证据/结果三列，客户安全版与运营版分离。**验收**：同 Run 跨页 ID 一致；历史证据与当前业务查询分开；不重画完整 Trace；运营视角读取需 T098 授权，缺失时分区降级而非伪造。**分支**：`feat/case-context`。
+- [ ] T108 [UI] Human Collaboration（P05）。**依赖**：T106。**交付**：待办列表、决策详情、二次确认、决策后查询实际状态。**验收**：批准只写“等待原任务继续”，不宣布退款完成；拒绝/过期/错绑定零越权写；重复或并发决策冲突可见；审批台不代客户发起退款。**分支**：`feat/human-collaboration`。
+- [ ] T109 [UI] **Safety Center（P06，核心）**。**依赖**：T107；列表依赖 T098，工单读取需新增端点。**交付**：Failure / Recovery / Verification 三段与 A/B/C 三分支、未知写入边界、工单摘要。**验收**：未知不标失败也不标零写；`SAFE_STOP` 终态不可 resume；`Recovered` 需恢复证据 + 权威确认；无工单不写“已转人工”。**分支**：`feat/safety-center`。
+
 ### T084 交接设计补充记录（非完成勾选）
 
 2026-10-13：ui/设计系统、七页UX、数据权限、验收及三张参考图落库；同步spec/plan/入口。本轮无应用实现或Live Gate，不认定并行代码完成。全量来源/权限审阅仍按T084验收，新运营合同归T097。

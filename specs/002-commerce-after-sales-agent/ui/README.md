@@ -2,7 +2,7 @@
 
 2026-10-13。本文定义目标规格，不证明实现完成；进度只见根 PROJECT_PROGRESS.md，任务与验收只见 tasks.md。
 
-阅读顺序：AGENTS / constitution / LEARNING_PROTOCOL / spec / plan → 本文 → [视觉系统](design-system.md) → [七页UX](pages.md) → [数据和权限](data-contract.md) → [验收](acceptance.md)。
+阅读顺序：AGENTS / constitution / LEARNING_PROTOCOL / spec / plan → 本文 → [Console IA](console-ia.md)（导航 / 路由 / 命名 / API 映射）→ [视觉系统](design-system.md) → [七页UX](pages.md) → [数据和权限](data-contract.md) → [验收](acceptance.md)。
 
 ## 冻结范围
 

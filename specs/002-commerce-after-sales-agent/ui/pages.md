@@ -2,6 +2,18 @@
 
 本文件所有尺寸使用 design-system.md。实现不自动代表视觉获得用户批准。每页先用固定场景截图验证，再接Live同一组件。
 
+产品命名以 [console-ia.md](console-ia.md) 为准（T104 冻结）；本文件章节标题保留 P0x 编号：
+
+| 章节 | Console 命名 |
+|---|---|
+| P01 | Mission Center |
+| P02 | Customer Portal（独立入口，不进主导航） |
+| P03 | **Run Replay**（核心） |
+| P04 | Case Context |
+| P05 | Human Collaboration |
+| P06 | **Safety Center**（核心） |
+| P07 | Enterprise Dashboard |
+
 ## P01 工作总览 Dashboard
 
 目的/用户：企业人员与比赛评审30秒内看懂正在执行的任务及人工边界。主操作：选择Run进入Workspace。
